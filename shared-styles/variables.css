@@ -1,0 +1,69 @@
+/* Mindustry Community - 统一设计系统变量 */
+/* Material Design + 温暖柔和风格 */
+
+:root {
+  /* ===== 品牌色 (Mindustry 橙色系) ===== */
+  --primary: #ff6b35;
+  --primary-dark: #e55a2b;
+  --primary-light: #ff8c5a;
+  --accent: #ffc107;
+
+  /* ===== 浅色主题 (默认) ===== */
+  --bg: #faf8f5;
+  --bg-card: #ffffff;
+  --bg-elevated: #f5f2ed;
+  --text: #2d2a26;
+  --text-secondary: #6b6660;
+  --text-muted: #a09890;
+  --border: #e8e5e0;
+
+  /* ===== 功能色 ===== */
+  --success: #22c55e;
+  --warning: #ffc107;
+  --error: #ef4444;
+
+  /* ===== 圆角 ===== */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --radius-card: 0px;
+
+  /* ===== 阴影 (浅色主题) ===== */
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-card-hover: 0 4px 16px rgba(0,0,0,0.12);
+  --shadow-modal: 0 8px 24px rgba(0,0,0,0.16);
+
+  /* ===== 尺寸 ===== */
+  --header-height: 56px;
+  --header-height-mobile: 48px;
+  --btn-height: 40px;
+  --btn-height-sm: 32px;
+  --btn-height-lg: 48px;
+  --input-height: 40px;
+  --card-padding: 16px;
+  --card-padding-lg: 24px;
+}
+
+/* ===== 深色主题 ===== */
+[data-theme="dark"],
+.dark {
+  --bg: #1a1816;
+  --bg-card: #262420;
+  --bg-elevated: #363230;
+  --text: #f5f2ed;
+  --text-secondary: #a09890;
+  --text-muted: #6b6b60;
+  --border: #3a3630;
+
+  /* 深色主题阴影更重 */
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.24);
+  --shadow-card-hover: 0 4px 16px rgba(0,0,0,0.32);
+  --shadow-modal: 0 8px 24px rgba(0,0,0,0.40);
+}
+
+/* ===== 字体 ===== */
+:root {
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', 'Consolas', monospace;
+}
