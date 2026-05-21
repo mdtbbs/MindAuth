@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 - MindAuth</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../shared-styles/variables.css">
+  <link rel="stylesheet" href="../../shared-styles/components.css">
+  <link rel="stylesheet" href="../../shared-styles/utilities.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-pattern"></div>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">
+    <span id="theme-icon">☾</span>
+  </button>
+  <div id="app">
+    <!-- 登录视图 -->
+    <div id="login-view" class="auth-container">
+      <div class="admin-container">
+        <div class="auth-header">
+          <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
+          <h1 class="auth-title">管理后台</h1>
+          <p class="auth-subtitle">管理员登录</p>
+        </div>
+        <form id="admin-login-form" class="auth-form">
+          <div class="form-group">
+            <label class="form-label">用户名</label>
+            <input class="form-input" type="text" id="username" name="username" required placeholder="请输入用户名">
+          </div>
+          <div class="form-group">
+            <label class="form-label">密码</label>
+            <input class="form-input" type="password" id="password" name="password" required minlength="6" placeholder="输入密码">
+          </div>
+          <button type="submit" class="btn-primary">登录</button>
+        </form>
+        <p class="toggle-view" onclick="toggleCreateView()">创建管理员账号</p>
+      </div>
+    </div>
+
+    <!-- 创建管理员视图 -->
+    <div id="create-view" class="auth-container" style="display: none;">
+      <div class="admin-container">
+        <div class="auth-header">
+          <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
+          <h1 class="auth-title">创建管理员</h1>
+          <p class="auth-subtitle" style="color: var(--warning);">需要管理员创建密钥</p>
+        </div>
+        <form id="admin-create-form" class="auth-form">
+          <div class="form-group">
+            <label class="form-label">创建密钥</label>
+            <input class="form-input" type="password" id="secret" name="secret" required placeholder="ADMIN_SECRET">
+          </div>
+          <div class="form-group">
+            <label class="form-label">用户名</label>
+            <input class="form-input" type="text" id="create-username" name="username" required minlength="2" maxlength="50" placeholder="2-50个字符">
+          </div>
+          <div class="form-group">
+            <label class="form-label">邮箱地址</label>
+            <input class="form-input" type="email" id="create-email" name="email" required placeholder="name@company.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">密码</label>
+            <input class="form-input" type="password" id="create-password" name="password" required minlength="6" placeholder="至少6位字符">
+          </div>
+          <button type="submit" class="btn-primary">创建</button>
+        </form>
+        <p class="toggle-view" onclick="toggleLoginView()">返回登录</p>
+      </div>
+    </div>
+
+    <!-- Dashboard视图 -->
+    <div id="dashboard-view" style="display: none;">
+      <header class="dashboard-header">
+        <h1><div class="header-logo-dot"></div>MindAuth Admin</h1>
+        <button id="logout-btn" class="btn-secondary">退出</button>
+      </header>
+      <main class="admin-main">
+        <h1 class="page-title">Overview</h1>
+
+        <!-- 统计数据 -->
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-num" id="stat-users-total">-</div><div class="stat-label">Users</div></div>
+          <div class="stat-card"><div class="stat-num" id="stat-users-today">-</div><div class="stat-label">Today</div></div>
+          <div class="stat-card"><div class="stat-num" id="stat-users-week">-</div><div class="stat-label">Week</div></div>
+          <div class="stat-card"><div class="stat-num" id="stat-users-active">-</div><div class="stat-label">Active</div></div>
+          <div class="stat-card"><div class="stat-num" id="stat-users-verified">-</div><div class="stat-label">Verified</div></div>
+          <div class="stat-card"><div class="stat-num" id="stat-logins-today">-</div><div class="stat-label">Logins</div></div>
+        </div>
+
+        <!-- 图表 -->
+        <div class="charts-row">
+          <div class="chart-card">
+            <div class="chart-title">USER GROWTH</div>
+            <div id="chart-user-growth" class="chart-container"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">LOGIN TREND</div>
+            <div id="chart-login-trend" class="chart-container"></div>
+          </div>
+        </div>
+
+        <!-- 邮件配置 -->
+        <div class="section-card">
+          <div class="section-head">
+            <div class="section-title">EMAIL CONFIG</div>
+          </div>
+          <form id="email-config-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">SMTP服务器</label>
+                <input class="form-input" type="text" id="smtp-host" name="host" placeholder="smtp.example.com">
+              </div>
+              <div class="form-group form-group-small">
+                <label class="form-label">端口</label>
+                <input class="form-input" type="number" id="smtp-port" name="port" value="587">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">用户名</label>
+                <input class="form-input" type="text" id="smtp-user" name="user" placeholder="your@email.com">
+              </div>
+              <div class="form-group">
+                <label class="form-label">密码</label>
+                <input class="form-input" type="password" id="smtp-password" name="password" placeholder="SMTP密码">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">发件人</label>
+                <input class="form-input" type="text" id="smtp-from" name="from" placeholder="noreply@example.com">
+              </div>
+              <div class="form-group form-group-small">
+                <label class="form-label">SSL</label>
+                <div style="display: flex; align-items: center; height: 40px;">
+                  <input type="checkbox" id="smtp-secure" name="secure" style="width: 16px; height: 16px;">
+                </div>
+              </div>
+            </div>
+            <div class="action-row">
+              <button type="submit" class="btn-sm primary">保存配置</button>
+              <button type="button" id="test-email-btn" class="btn-sm">发送测试邮件</button>
+            </div>
+          </form>
+          <div id="email-config-status" style="margin-top: 0.5rem; font-size: 0.6875rem; color: var(--text-muted);"></div>
+        </div>
+
+        <!-- Secret显示 -->
+        <div id="secret-display" class="secret-display" style="display: none;">
+          <p><strong>client_id:</strong> <code id="new-client-id"></code></p>
+          <p><strong>client_secret:</strong> <code id="new-client-secret"></code></p>
+          <p class="warning-text">请立即保存 client_secret，关闭后将无法再次查看</p>
+          <button id="close-secret-btn" class="btn-secondary">关闭</button>
+        </div>
+
+        <!-- OAuth应用 -->
+        <div class="section-card">
+          <div class="section-head">
+            <div class="section-title">OAUTH CLIENTS</div>
+            <button class="btn-sm primary" onclick="document.getElementById('create-client-form').style.display='flex'">新建</button>
+          </div>
+
+          <!-- 创建表单 -->
+          <form id="create-client-form" class="create-form-inline" style="display: none;">
+            <div class="form-group">
+              <label class="form-label">应用名称</label>
+              <input class="form-input" type="text" id="name" name="name" required placeholder="我的应用">
+            </div>
+            <div class="form-group">
+              <label class="form-label">回调地址</label>
+              <input class="form-input" type="url" id="redirect_uri" name="redirect_uri" required placeholder="https://example.com/callback">
+            </div>
+            <button type="submit" class="btn-sm primary">创建</button>
+          </form>
+
+          <div id="clients-container"></div>
+        </div>
+
+        <!-- 用户管理 -->
+        <div class="section-card">
+          <div class="section-head">
+            <div class="section-title">USERS</div>
+          </div>
+          <div class="form-row" style="margin-bottom: 0.75rem;">
+            <div class="form-group">
+              <input class="form-input" type="text" id="user-search" placeholder="搜索用户名或邮箱">
+            </div>
+            <div class="form-group form-group-small">
+              <select class="form-input" id="user-role-filter">
+                <option value="">全部</option>
+                <option value="user">用户</option>
+                <option value="admin">管理员</option>
+              </select>
+            </div>
+            <button id="user-search-btn" class="btn-sm">搜索</button>
+          </div>
+          <div id="users-container"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script src="../../shared-styles/theme-switch.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    // 使用共享主题切换逻辑
+    initTheme();
+    document.getElementById('theme-icon').textContent = getThemeIcon(getCurrentTheme());
+  </script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

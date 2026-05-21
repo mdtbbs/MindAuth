@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OAuth 2.0 接入文档 - MindAuth</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .docs-container { max-width: 800px; margin: 0 auto; padding: 3rem 1.5rem; }
+    .docs-header { margin-bottom: 2rem; }
+    .docs-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .docs-subtitle { color: var(--text-muted); font-size: 0.8125rem; }
+    .docs-section { margin-bottom: 2rem; }
+    .docs-section-title { font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); }
+    .docs-section-desc { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 1rem; }
+    .endpoint-card { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
+    .endpoint-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .endpoint-method { font-size: 0.6875rem; font-weight: 600; padding: 0.25rem 0.5rem; background: var(--success); color: #fff; border-radius: 4px; }
+    .endpoint-method.post { background: var(--warning); color: #18181b; }
+    .endpoint-url { font-family: 'Geist Mono', monospace; font-size: 0.8125rem; color: var(--text); }
+    .params-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
+    .params-table th { text-align: left; padding: 0.5rem; color: var(--text-muted); border-bottom: 1px solid var(--border); font-weight: 500; }
+    .params-table td { padding: 0.5rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+    .params-table td:first-child { font-family: 'Geist Mono', monospace; color: var(--text); }
+    .code-block { background: var(--bg-muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; overflow-x: auto; }
+    .code-block pre { font-family: 'Geist Mono', monospace; font-size: 0.75rem; color: var(--text-secondary); white-space: pre-wrap; margin: 0; }
+    .code-lang { font-size: 0.625rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+    .response-example { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; }
+    .highlight { color: var(--warning); }
+    .note { font-size: 0.75rem; color: var(--text-muted); padding: 0.75rem; background: var(--bg-muted); border-radius: var(--radius); }
+    .note p { margin: 0.25rem 0; }
+    .flow-step { padding: 0.5rem 0; font-size: 0.75rem; color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+  <div class="bg-pattern"></div>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">
+    <span id="theme-icon">☀</span>
+  </button>
+
+  <div class="docs-container">
+    <header class="docs-header">
+      <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
+      <h1 class="docs-title">OAuth 2.0 接入文档</h1>
+      <p class="docs-subtitle">第三方应用接入指南</p>
+    </header>
+
+    <!-- 流程概述 -->
+    <section class="docs-section">
+      <h2 class="docs-section-title">接入流程</h2>
+      <p class="docs-section-desc">MindAuth 使用标准 OAuth 2.0 授权码模式：</p>
+      <div class="endpoint-card">
+        <div class="flow-step">1. 用户点击第三方应用的「登录」按钮</div>
+        <div class="flow-step">2. 重定向到 <span class="highlight">/authorize</span> 端点</div>
+        <div class="flow-step">3. 用户登录并授权（已登录则自动授权）</div>
+        <div class="flow-step">4. 重定向回第三方应用，携带 <span class="highlight">code</span></div>
+        <div class="flow-step">5. 第三方后端用 code 换取 <span class="highlight">access_token</span></div>
+      </div>
+    </section>
+
+    <!-- 端点列表 -->
+    <section class="docs-section">
+      <h2 class="docs-section-title">API 端点</h2>
+
+      <!-- authorize -->
+      <div class="endpoint-card">
+        <div class="endpoint-header">
+          <span class="endpoint-method">GET</span>
+          <span class="endpoint-url">/authorize</span>
+        </div>
+        <p class="docs-section-desc">授权端点，用户浏览器重定向到此URL发起授权请求</p>
+        <table class="params-table">
+          <thead><tr><th>参数</th><th>必需</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>client_id</td><td>是</td><td>应用客户端ID</td></tr>
+            <tr><td>redirect_uri</td><td>是</td><td>回调地址，必须与管理后台配置一致</td></tr>
+            <tr><td>state</td><td>推荐</td><td>防CSRF攻击，原样返回</td></tr>
+            <tr><td>scope</td><td>可选</td><td>权限范围</td></tr>
+          </tbody>
+        </table>
+        <p class="response-example">成功：重定向到 redirect_uri?code=xxx&amp;state=xxx</p>
+        <p class="response-example">失败：重定向到错误页面</p>
+      </div>
+
+      <!-- token -->
+      <div class="endpoint-card">
+        <div class="endpoint-header">
+          <span class="endpoint-method post">POST</span>
+          <span class="endpoint-url">/token</span>
+        </div>
+        <p class="docs-section-desc">Token交换端点，后端用授权码换取访问令牌</p>
+        <table class="params-table">
+          <thead><tr><th>参数</th><th>必需</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>code</td><td>是</td><td>授权码，5分钟内有效</td></tr>
+            <tr><td>client_id</td><td>是</td><td>应用客户端ID</td></tr>
+            <tr><td>client_secret</td><td>是</td><td>应用密钥</td></tr>
+          </tbody>
+        </table>
+        <p class="response-example">返回：access_token, refresh_token, expires_in, user</p>
+      </div>
+
+      <!-- refresh -->
+      <div class="endpoint-card">
+        <div class="endpoint-header">
+          <span class="endpoint-method post">POST</span>
+          <span class="endpoint-url">/refresh</span>
+        </div>
+        <p class="docs-section-desc">刷新令牌端点，获取新的访问令牌</p>
+        <table class="params-table">
+          <thead><tr><th>参数</th><th>必需</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>refresh_token</td><td>是</td><td>刷新令牌</td></tr>
+            <tr><td>client_id</td><td>是</td><td>应用客户端ID</td></tr>
+            <tr><td>client_secret</td><td>是</td><td>应用密钥</td></tr>
+          </tbody>
+        </table>
+        <p class="response-example">返回：access_token, expires_in, user</p>
+      </div>
+
+      <!-- verify -->
+      <div class="endpoint-card">
+        <div class="endpoint-header">
+          <span class="endpoint-method post">POST</span>
+          <span class="endpoint-url">/verify</span>
+        </div>
+        <p class="docs-section-desc">Session验证端点（同域场景）</p>
+        <table class="params-table">
+          <thead><tr><th>参数</th><th>必需</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>session_token</td><td>是</td><td>用户会话Token</td></tr>
+          </tbody>
+        </table>
+        <p class="response-example">返回：user 信息</p>
+      </div>
+    </section>
+
+    <!-- 示例代码 -->
+    <section class="docs-section">
+      <h2 class="docs-section-title">示例代码</h2>
+
+      <div class="code-block">
+        <p class="code-lang">JavaScript (发起授权)</p>
+        <pre>// 构建授权URL并重定向
+const authUrl = `/authorize?client_id=${clientId}&amp;redirect_uri=${redirectUri}&amp;state=${state}`;
+window.location.href = authUrl;</pre>
+      </div>
+
+      <div class="code-block">
+        <p class="code-lang">JavaScript (Token交换)</p>
+        <pre>// 回调页面获取code后，后端交换token
+const response = await fetch('/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    code: authCode,
+    client_id: 'your_client_id',
+    client_secret: 'your_client_secret'
+  })
+});
+const data = await response.json();
+// data.access_token, data.refresh_token, data.user</pre>
+      </div>
+
+      <div class="code-block">
+        <p class="code-lang">Python (Token交换)</p>
+        <pre>import requests
+
+response = requests.post('/token', json={
+    'code': auth_code,
+    'client_id': 'your_client_id',
+    'client_secret': 'your_client_secret'
+})
+data = response.json()
+# data['access_token'], data['refresh_token'], data['user']</pre>
+      </div>
+    </section>
+
+    <!-- 返回数据 -->
+    <section class="docs-section">
+      <h2 class="docs-section-title">返回数据格式</h2>
+      <div class="code-block">
+        <p class="code-lang">Token响应</p>
+        <pre>{
+  "success": true,
+  "access_token": "xxx",
+  "refresh_token": "xxx",
+  "expires_in": 3600,
+  "user": {
+    "id": 1,
+    "username": "user_name",
+    "email": "user@example.com",
+    "created_at": "2024-01-01"
+  }
+}</pre>
+      </div>
+      <div class="code-block">
+        <p class="code-lang">错误响应</p>
+        <pre>{
+  "error": "invalid_grant",
+  "error_description": "授权码无效或已过期"
+}</pre>
+      </div>
+    </section>
+
+    <!-- 注意事项 -->
+    <section class="docs-section">
+      <h2 class="docs-section-title">注意事项</h2>
+      <div class="note">
+        <p>• 授权码有效期为 5 分钟，且只能使用一次</p>
+        <p>• access_token 有效期为 1 小时</p>
+        <p>• refresh_token 有效期为 30 天</p>
+        <p>• redirect_uri 必须与管理后台配置完全一致</p>
+        <p>• 建议始终传递 state 参数防止 CSRF 攻击</p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      document.getElementById('theme-icon').textContent = next === 'dark' ? '☀' : '☾';
+      localStorage.setItem('theme', next);
+    }
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+    document.getElementById('theme-icon').textContent = saved === 'dark' ? '☀' : '☾';
+  </script>
+</body>
+</html>

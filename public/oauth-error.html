@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>授权错误 - MindAuth</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .error-container { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+    .error-box { max-width: 400px; text-align: center; }
+    .error-icon { font-size: 3rem; margin-bottom: 1rem; color: var(--error); }
+    .error-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .error-desc { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 2rem; }
+    .error-code { font-family: 'Geist Mono', monospace; font-size: 0.6875rem; color: var(--text-muted); margin-bottom: 1.5rem; padding: 0.5rem; background: var(--bg-muted); border-radius: var(--radius); }
+  </style>
+</head>
+<body>
+  <div class="bg-pattern"></div>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">
+    <span id="theme-icon">☀</span>
+  </button>
+
+  <div class="error-container">
+    <div class="error-box">
+      <div class="error-icon">✗</div>
+      <h1 class="error-title" id="error-title">授权失败</h1>
+      <p class="error-desc" id="error-desc">发生错误，无法完成授权</p>
+      <p class="error-code" id="error-code"></p>
+      <button class="btn-primary" onclick="goBack()">返回</button>
+    </div>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      document.getElementById('theme-icon').textContent = next === 'dark' ? '☀' : '☾';
+      localStorage.setItem('theme', next);
+    }
+
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+    document.getElementById('theme-icon').textContent = saved === 'dark' ? '☀' : '☾';
+
+    // 解析URL参数显示错误信息
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error');
+    const description = params.get('description');
+
+    const errorMessages = {
+      'invalid_client': '应用不存在',
+      'invalid_redirect': '回调地址不匹配',
+      'invalid_request': '请求参数错误',
+      'server_error': '服务器错误'
+    };
+
+    if (error) {
+      document.getElementById('error-title').textContent = errorMessages[error] || '授权失败';
+      document.getElementById('error-desc').textContent = description || '发生错误，无法完成授权';
+      document.getElementById('error-code').textContent = '错误码: ' + error;
+    }
+
+    function goBack() {
+      if (document.referrer) {
+        window.history.back();
+      } else {
+        window.location.href = '/';
+      }
+    }
+  </script>
+</body>
+</html>
