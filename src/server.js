@@ -19,6 +19,10 @@ const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware
 const app = express();
 const PORT = process.env.PORT || 4001;
 
+// Trust proxy for CDN/reverse proxy scenarios
+// Enables proper handling of X-Forwarded-For, X-Real-IP headers
+app.set('trust proxy', true);
+
 // CDN and CORS configuration
 const CDN_URL = process.env.CDN_URL || '';
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
