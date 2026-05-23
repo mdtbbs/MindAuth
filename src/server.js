@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
+const cors = require('cors');
 const path = require('path');
 
 const { pool, closePool, initSchema } = require('./db');
@@ -18,16 +19,39 @@ const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware
 const app = express();
 const PORT = process.env.PORT || 4001;
 
-// Security headers
+// CDN and CORS configuration
+const CDN_URL = process.env.CDN_URL || '';
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4001'];
+
+// CORS middleware - allow cross-origin API requests
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl)
+    if (!origin) return callback(null, true);
+
+    if (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,  // Allow cookies
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+}));
+
+// Security headers with CDN support
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", CDN_URL ? CDN_URL : "'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", CDN_URL ? CDN_URL : "'self'", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", "data:", CDN_URL ? CDN_URL : "'self'"],
+      connectSrc: ["'self'", ...ALLOWED_ORIGINS.filter(o => o !== '*')],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", CDN_URL ? CDN_URL : "'self'"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
     }
