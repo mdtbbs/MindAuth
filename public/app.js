@@ -269,9 +269,14 @@ function router() {
   const state = urlQueryParams.get('state') || hashQueryParams.get('state');
 
   // Store redirect params for later use
-  if (redirectUri && clientId) {
+  // 支持两种模式：
+  // 1. OAuth模式：有 redirect_uri + client_id
+  // 2. 简单重定向模式：只有 redirect 参数
+  if (redirectUri) {
     sessionStorage.setItem('oauth_redirect_uri', redirectUri);
-    sessionStorage.setItem('oauth_client_id', clientId);
+    if (clientId) {
+      sessionStorage.setItem('oauth_client_id', clientId);
+    }
     if (state) sessionStorage.setItem('oauth_state', state);
   }
 
@@ -336,20 +341,26 @@ document.addEventListener('submit', async (e) => {
       if (result.success) {
         await checkAuth();
 
-        // Check if this is an OAuth redirect login
+        // Check redirect after login
         const redirectUri = sessionStorage.getItem('oauth_redirect_uri');
         const clientId = sessionStorage.getItem('oauth_client_id');
 
-        if (redirectUri && clientId) {
+        if (redirectUri) {
           // Clear stored params
           const state = sessionStorage.getItem('oauth_state');
           sessionStorage.removeItem('oauth_redirect_uri');
           sessionStorage.removeItem('oauth_client_id');
           sessionStorage.removeItem('oauth_state');
 
-          // Redirect to authorize endpoint with state
-          const authorizeUrl = `/api/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&client_id=${clientId}${state ? '&state=' + encodeURIComponent(state) : ''}`;
-          window.location.href = authorizeUrl;
+          if (clientId) {
+            // OAuth mode: redirect to authorize endpoint
+            const authorizeUrl = `/api/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&client_id=${clientId}${state ? '&state=' + encodeURIComponent(state) : ''}`;
+            window.location.href = authorizeUrl;
+          } else {
+            // Simple redirect mode: redirect directly
+            const finalRedirect = state ? `${redirectUri}?state=${encodeURIComponent(state)}` : redirectUri;
+            window.location.href = finalRedirect;
+          }
         } else {
           location.hash = 'dashboard';
         }
