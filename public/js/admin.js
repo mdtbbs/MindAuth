@@ -214,6 +214,21 @@ document.getElementById('close-secret-btn').addEventListener('click', () => {
   document.getElementById('secret-display').style.display = 'none';
 });
 
+// Theme toggle button
+document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+  const newTheme = toggleTheme();
+  document.getElementById('theme-icon').textContent = getThemeIcon(newTheme);
+});
+
+// Toggle between login and create views
+document.getElementById('toggle-create-view').addEventListener('click', toggleCreateView);
+document.getElementById('toggle-login-view').addEventListener('click', toggleLoginView);
+
+// Show create client form
+document.getElementById('show-create-client-btn').addEventListener('click', () => {
+  document.getElementById('create-client-form').style.display = 'flex';
+});
+
 // Handle client actions
 document.getElementById('clients-container').addEventListener('click', async (e) => {
   const id = e.target.dataset.id;
@@ -256,6 +271,7 @@ document.getElementById('clients-container').addEventListener('click', async (e)
         showToast('更新失败', 'error');
       }
     });
+  }
 });
 
 // Handle email config form
