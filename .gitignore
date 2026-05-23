@@ -1,0 +1,43 @@
+# Environment files (contains secrets)
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+
+# Test artifacts
+*.txt
+cookies*.txt
+*_cookies.txt
+*_cookie.txt
+
+# Old SQLite database (migrated to MySQL)
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# SSL/Certificates (if any)
+*.pem
+*.key
+*.crt

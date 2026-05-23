@@ -4,7 +4,8 @@ const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const path = require('path');
 
-const db = require('./db');
+const { pool, closePool, initSchema } = require('./db');
+const { client, connectRedis, closeRedis } = require('./redis');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const oauthRoutes = require('./routes/oauth');
@@ -12,9 +13,10 @@ const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
 const { startCleanupScheduler } = require('./utils/cleanup');
+const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4001;
 
 // Security headers
 app.use(helmet({
@@ -37,6 +39,13 @@ app.use(helmet({
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public')));
+// Serve shared-styles from monorepo root
+app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles')));
+
+// CSRF protection
+app.use(setCsrfCookie);  // Set CSRF cookie on all responses
+app.get('/api/csrf-token', csrfTokenEndpoint);  // Endpoint to get CSRF token
+app.use(validateCsrf);   // Validate CSRF on POST/PUT/DELETE
 
 // Mount routes
 app.use('/api', authRoutes);
@@ -47,7 +56,7 @@ app.use('/api/email-verification', emailVerificationRoutes);
 app.use('/api/account', accountRoutes);
 
 // Health check endpoint (public)
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const health = {
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -56,18 +65,28 @@ app.get('/api/health', (req, res) => {
     services: {}
   };
 
-  // Check database
+  // Check MySQL database
   try {
-    db.prepare('SELECT 1').get();
-    health.services.database = 'connected';
+    await pool.execute('SELECT 1');
+    health.services.database = 'connected (MySQL)';
   } catch (err) {
     health.status = 'degraded';
     health.services.database = 'error: ' + err.message;
   }
 
+  // Check Redis
+  try {
+    await client.ping();
+    health.services.redis = 'connected';
+  } catch (err) {
+    health.status = 'degraded';
+    health.services.redis = 'error: ' + err.message;
+  }
+
   // Check email config
   try {
-    const emailConfig = db.prepare('SELECT host, user FROM email_config WHERE id = 1').get();
+    const [rows] = await pool.execute('SELECT host, user FROM email_config WHERE id = 1');
+    const emailConfig = rows[0];
     if (emailConfig && emailConfig.host && emailConfig.user) {
       health.services.email = 'configured';
     } else {
@@ -92,27 +111,49 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: '服务器错误' });
 });
 
-// Start server
-const server = app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
+// Initialize and start server
+async function startServer() {
+  try {
+    // Connect to MySQL and initialize schema
+    await initSchema();
+    console.log('MySQL database initialized');
 
-// Start cleanup scheduler
-const cleanupInterval = startCleanupScheduler();
+    // Connect to Redis
+    await connectRedis();
+    console.log('Redis connected');
 
-// Graceful shutdown
-function gracefulShutdown(signal) {
-  console.log(`Received ${signal}, shutting down...`);
-  clearInterval(cleanupInterval);
-  server.close(() => {
-    try {
-      db.close();
-    } catch (err) {
-      console.error('Error closing database:', err);
+    // Start Express server
+    const server = app.listen(PORT, () => {
+      console.log(`Server running at http://localhost:${PORT}`);
+    });
+
+    // Start cleanup scheduler (for MySQL expired data)
+    const cleanupInterval = startCleanupScheduler();
+
+    // Graceful shutdown
+    function gracefulShutdown(signal) {
+      console.log(`Received ${signal}, shutting down...`);
+      clearInterval(cleanupInterval);
+      server.close(async () => {
+        try {
+          await closePool();
+          console.log('MySQL pool closed');
+          await closeRedis();
+          console.log('Redis closed');
+        } catch (err) {
+          console.error('Error closing connections:', err);
+        }
+        process.exit(0);
+      });
     }
-    process.exit(0);
-  });
+
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+  } catch (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  }
 }
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+startServer();

@@ -1,7 +1,7 @@
 {
-  "name": "user-center",
+  "name": "mindauth",
   "version": "1.0.0",
-  "description": "User authentication system with Express and SQLite",
+  "description": "MindAuth - OAuth 2.0 authentication service with MySQL and Redis",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -9,14 +9,18 @@
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
-    "better-sqlite3": "^11.3.0",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "helmet": "^8.1.0",
-    "nodemailer": "^8.0.7"
+    "mysql2": "^3.22.3",
+    "nodemailer": "^8.0.7",
+    "redis": "^5.12.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

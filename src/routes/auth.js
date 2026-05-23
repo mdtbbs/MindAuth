@@ -1,15 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const db = require('../db');
+const { pool, transaction, isDuplicateError, getDuplicateField } = require('../db');
+const { client } = require('../redis');
 const { generateToken } = require('../utils/token');
-const { isValidEmail, isValidPassword, isValidUsername } = require('../utils/validation');
+const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
+const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
 const { sendVerificationEmail } = require('../utils/email');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
-const TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour
+const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const loginRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5 * 60 * 1000 });
 const registerRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 60 * 60 * 1000 }); // 5 per hour
@@ -31,28 +33,27 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   }
 
   if (!isValidPassword(password)) {
-    return res.status(400).json({ success: false, message: '密码至少6位' });
+    return res.status(400).json({ success: false, message: getPasswordValidationError(password) || '密码不符合要求' });
   }
 
   try {
     const passwordHash = await bcrypt.hash(password, 10);
+    const verifyToken = generateToken();
 
     // Use transaction for atomicity
-    const insertUser = db.prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)');
-    const insertToken = db.prepare('INSERT INTO email_verification_tokens (user_id, email, token, expires_at) VALUES (?, ?, ?, ?)');
+    await transaction(async (conn) => {
+      const [userResult] = await conn.execute(
+        'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+        [username, email, passwordHash]
+      );
+      const userId = userResult.insertId;
 
-    const transaction = db.transaction(() => {
-      const result = insertUser.run(username, email, passwordHash);
-      const userId = result.lastInsertRowid;
-
-      const verifyToken = generateToken();
-      const expiresAt = new Date(Date.now() + TOKEN_EXPIRY).toISOString();
-      insertToken.run(userId, email, verifyToken, expiresAt);
-
-      return verifyToken;
+      // Store verification token in Redis
+      await client.setEx(`verify:${verifyToken}`, TOKEN_EXPIRY, JSON.stringify({
+        user_id: userId,
+        email: email
+      }));
     });
-
-    const verifyToken = transaction();
 
     const verifyLink = `${BASE_URL}/#/verify-email?token=${verifyToken}`;
     sendVerificationEmail(email, verifyLink).catch(err =>
@@ -61,13 +62,15 @@ router.post('/register', registerRateLimiter, async (req, res) => {
 
     res.status(201).json({ success: true, message: '注册成功，验证邮件已发送到您的邮箱' });
   } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      if (err.message.includes('username')) {
+    if (isDuplicateError(err)) {
+      const field = getDuplicateField(err);
+      if (field === 'username') {
         return res.status(409).json({ success: false, message: '用户名已存在' });
       }
-      if (err.message.includes('email')) {
+      if (field === 'email') {
         return res.status(409).json({ success: false, message: '邮箱已被注册' });
       }
+      return res.status(409).json({ success: false, message: '用户名或邮箱已存在' });
     }
     console.error('Register error:', err);
     res.status(500).json({ success: false, message: '注册失败' });
@@ -83,7 +86,8 @@ router.post('/login', loginRateLimiter, async (req, res) => {
   }
 
   try {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const [rows] = await pool.execute('SELECT * FROM users WHERE username = ?', [username]);
+    const user = rows[0];
 
     if (!user) {
       return res.status(401).json({ success: false, message: '用户名或密码错误' });
@@ -95,15 +99,28 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     }
 
     // Reset rate limit on successful login
-    const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    const ip = getClientIp(req);
     const userAgent = req.headers['user-agent'] || '';
-    resetRateLimit(ip);
+    await resetRateLimit(ip);
 
     const token = generateToken();
-    db.prepare('UPDATE users SET session_token = ? WHERE id = ?').run(token, user.id);
+    await pool.execute('UPDATE users SET session_token = ? WHERE id = ?', [token, user.id]);
+
+    // Cache session in Redis
+    await client.setEx(`session:${token}`, 300, JSON.stringify({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      email_verified: user.email_verified,
+      password_hash: user.password_hash,
+      created_at: user.created_at
+    }));
 
     // Record login log
-    db.prepare('INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)').run(user.id, ip, userAgent.slice(0, 200), 'web');
+    await pool.execute(
+      'INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)',
+      [user.id, ip, userAgent.slice(0, 200), 'web']
+    );
 
     res.cookie('session', token, {
       httpOnly: true,
@@ -121,15 +138,15 @@ router.post('/login', loginRateLimiter, async (req, res) => {
 });
 
 // GET /login-logs - Get login history
-router.get('/login-logs', requireAuth, (req, res) => {
+router.get('/login-logs', requireAuth, async (req, res) => {
   try {
-    const logs = db.prepare(`
+    const [logs] = await pool.execute(`
       SELECT id, ip, device, login_type, created_at
       FROM login_logs
       WHERE user_id = ?
       ORDER BY created_at DESC
       LIMIT 20
-    `).all(req.user.id);
+    `, [req.user.id]);
 
     res.json({ success: true, logs });
   } catch (err) {
@@ -145,9 +162,16 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 // Logout
-router.post('/logout', requireAuth, (req, res) => {
+router.post('/logout', requireAuth, async (req, res) => {
   try {
-    db.prepare('UPDATE users SET session_token = NULL WHERE id = ?').run(req.user.id);
+    const token = req.cookies.session;
+
+    // Clear session in MySQL
+    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [req.user.id]);
+
+    // Clear session cache in Redis
+    await client.del(`session:${token}`);
+
     res.clearCookie('session', { path: '/' });
     res.json({ success: true });
   } catch (err) {

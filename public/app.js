@@ -61,7 +61,8 @@ const views = {
           </div>
           <div class="form-group">
             <label class="form-label">密码</label>
-            <input class="form-input" type="password" id="password" name="password" required minlength="6" placeholder="至少6位字符">
+            <input class="form-input" type="password" id="password" name="password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
+            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
           </div>
           <button type="submit" class="btn-primary">创建账户</button>
         </form>
@@ -149,7 +150,8 @@ const views = {
             </div>
             <div class="form-group">
               <label class="form-label">新密码</label>
-              <input class="form-input" type="password" id="new_password" name="new_password" required minlength="6" placeholder="至少6位字符">
+              <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
+              <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
             </div>
             <button type="submit" class="btn-primary">确认修改</button>
           </form>
@@ -213,7 +215,8 @@ const views = {
         <form id="reset-password-form" class="auth-form">
           <div class="form-group">
             <label class="form-label">新密码</label>
-            <input class="form-input" type="password" id="new_password" name="new_password" required minlength="6" placeholder="至少6位字符">
+            <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
+            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
           </div>
           <button type="submit" class="btn-primary">确认修改</button>
         </form>
@@ -282,6 +285,9 @@ function router() {
   const app = document.getElementById('app');
   app.innerHTML = views[viewName] || views.login;
 
+  // Setup password visibility toggles for all password fields
+  setupAllPasswordToggles();
+
   // Populate dashboard data
   if (viewName === 'dashboard' && Store.user) {
     const username = Store.user.username || 'User';
@@ -312,135 +318,146 @@ function router() {
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
+  const submitBtn = form.querySelector('button[type="submit"]');
 
-  if (form.id === 'login-form') {
-    const formData = new FormData(form);
-    const data = {
-      username: formData.get('username'),
-      password: formData.get('password')
-    };
+  // Set loading state
+  setButtonLoading(submitBtn, true);
 
-    const result = await apiFetch('/api/login', { method: 'POST', body: data });
+  try {
+    if (form.id === 'login-form') {
+      const formData = new FormData(form);
+      const data = {
+        username: formData.get('username'),
+        password: formData.get('password')
+      };
 
-    if (result.success) {
-      await checkAuth();
+      const result = await apiFetch('/api/login', { method: 'POST', body: data });
 
-      // Check if this is an OAuth redirect login
-      const redirectUri = sessionStorage.getItem('oauth_redirect_uri');
-      const clientId = sessionStorage.getItem('oauth_client_id');
+      if (result.success) {
+        await checkAuth();
 
-      if (redirectUri && clientId) {
-        // Clear stored params
-        const state = sessionStorage.getItem('oauth_state');
-        sessionStorage.removeItem('oauth_redirect_uri');
-        sessionStorage.removeItem('oauth_client_id');
-        sessionStorage.removeItem('oauth_state');
+        // Check if this is an OAuth redirect login
+        const redirectUri = sessionStorage.getItem('oauth_redirect_uri');
+        const clientId = sessionStorage.getItem('oauth_client_id');
 
-        // Redirect to authorize endpoint with state
-        const authorizeUrl = `/api/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&client_id=${clientId}${state ? '&state=' + encodeURIComponent(state) : ''}`;
-        window.location.href = authorizeUrl;
+        if (redirectUri && clientId) {
+          // Clear stored params
+          const state = sessionStorage.getItem('oauth_state');
+          sessionStorage.removeItem('oauth_redirect_uri');
+          sessionStorage.removeItem('oauth_client_id');
+          sessionStorage.removeItem('oauth_state');
+
+          // Redirect to authorize endpoint with state
+          const authorizeUrl = `/api/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&client_id=${clientId}${state ? '&state=' + encodeURIComponent(state) : ''}`;
+          window.location.href = authorizeUrl;
+        } else {
+          location.hash = 'dashboard';
+        }
       } else {
-        location.hash = 'dashboard';
+        showToast(result.message, 'error');
       }
-    } else {
-      showToast(result.message, 'error');
     }
-  }
 
-  if (form.id === 'register-form') {
-    const formData = new FormData(form);
-    const data = {
-      username: formData.get('username'),
-      email: formData.get('email'),
-      password: formData.get('password')
-    };
+    if (form.id === 'register-form') {
+      const formData = new FormData(form);
+      const data = {
+        username: formData.get('username'),
+        email: formData.get('email'),
+        password: formData.get('password')
+      };
 
-    const result = await apiFetch('/api/register', { method: 'POST', body: data });
+      const result = await apiFetch('/api/register', { method: 'POST', body: data });
 
-    showToast(result.message || '注册失败', result.success ? 'success' : 'error');
-    if (result.success) {
-      setTimeout(() => location.hash = 'login', 2000);
+      showToast(result.message || '注册失败', result.success ? 'success' : 'error');
+      if (result.success) {
+        setTimeout(() => location.hash = 'login', 2000);
+      }
     }
-  }
 
-  if (form.id === 'reset-request-form') {
-    const formData = new FormData(form);
-    const result = await apiFetch('/api/password/reset-request', {
-      method: 'POST',
-      body: { email: formData.get('email') }
-    });
+    if (form.id === 'reset-request-form') {
+      const formData = new FormData(form);
+      const result = await apiFetch('/api/password/reset-request', {
+        method: 'POST',
+        body: { email: formData.get('email') }
+      });
 
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      setTimeout(() => location.hash = 'login', 2000);
+      showToast(result.message, result.success ? 'success' : 'error');
+      if (result.success) {
+        setTimeout(() => location.hash = 'login', 2000);
+      }
     }
-  }
 
-  if (form.id === 'reset-password-form') {
-    const token = new URLSearchParams(location.hash.split('?')[1]).get('token');
-    const formData = new FormData(form);
+    if (form.id === 'reset-password-form') {
+      const token = new URLSearchParams(location.hash.split('?')[1]).get('token');
+      const formData = new FormData(form);
 
-    const result = await apiFetch('/api/password/reset', {
-      method: 'POST',
-      body: { token, new_password: formData.get('new_password') }
-    });
+      const result = await apiFetch('/api/password/reset', {
+        method: 'POST',
+        body: { token, new_password: formData.get('new_password') }
+      });
 
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      setTimeout(() => location.hash = 'login', 2000);
+      showToast(result.message, result.success ? 'success' : 'error');
+      if (result.success) {
+        setTimeout(() => location.hash = 'login', 2000);
+      }
     }
-  }
 
-  if (form.id === 'change-password-form') {
-    const formData = new FormData(form);
-    const data = {
-      old_password: formData.get('old_password'),
-      new_password: formData.get('new_password')
-    };
+    if (form.id === 'change-password-form') {
+      const formData = new FormData(form);
+      const data = {
+        old_password: formData.get('old_password'),
+        new_password: formData.get('new_password')
+      };
 
-    const result = await apiFetch('/api/account/change-password', {
-      method: 'POST',
-      body: data
-    });
+      const result = await apiFetch('/api/account/change-password', {
+        method: 'POST',
+        body: data
+      });
 
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      Store.user = null;
-      setTimeout(() => location.hash = 'login', 2000);
+      showToast(result.message, result.success ? 'success' : 'error');
+      if (result.success) {
+        Store.user = null;
+        setTimeout(() => location.hash = 'login', 2000);
+      }
     }
-  }
 
-  if (form.id === 'change-email-form') {
-    const formData = new FormData(form);
-    const data = { new_email: formData.get('new_email') };
+    if (form.id === 'change-email-form') {
+      const formData = new FormData(form);
+      const data = { new_email: formData.get('new_email') };
 
-    const result = await apiFetch('/api/account/change-email', {
-      method: 'POST',
-      body: data
-    });
+      const result = await apiFetch('/api/account/change-email', {
+        method: 'POST',
+        body: data
+      });
 
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      form.reset();
+      showToast(result.message, result.success ? 'success' : 'error');
+      if (result.success) {
+        form.reset();
+      }
     }
-  }
 
-  if (form.id === 'delete-account-form') {
-    if (!confirm('确定要删除账号吗？此操作不可撤销！')) return;
+    if (form.id === 'delete-account-form') {
+      if (!confirm('确定要删除账号吗？此操作不可撤销！')) {
+        setButtonLoading(submitBtn, false);
+        return;
+      }
 
-    const formData = new FormData(form);
-    const data = { password: formData.get('password') };
+      const formData = new FormData(form);
+      const data = { password: formData.get('password') };
 
-    const result = await apiFetch('/api/account', {
-      method: 'DELETE',
-      body: data
-    });
+      const result = await apiFetch('/api/account', {
+        method: 'DELETE',
+        body: data
+      });
 
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      Store.user = null;
-      location.hash = 'login';
+      showToast(result.message, result.success ? 'success' : 'error');
+      if (result.success) {
+        Store.user = null;
+        location.hash = 'login';
+      }
     }
+  } finally {
+    setButtonLoading(submitBtn, false);
   }
 });
 

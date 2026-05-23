@@ -2,14 +2,17 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const db = require('../db');
+const { pool, transaction, isDuplicateError, getDuplicateField } = require('../db');
+const { client } = require('../redis');
 const { generateToken, generateShortToken } = require('../utils/token');
-const { isValidEmail, isValidPassword, isValidUsername } = require('../utils/validation');
-const requireAdmin = require('../middleware/requireAdmin');
+const { formatMySQLDateTime } = require('../utils/datetime');
+const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
+const { getClientIp } = require('../utils/request');
+const { requireAdmin, createAdminSession, deleteAdminSession, invalidateUserAdminSessions } = require('../middleware/requireAdmin');
 const { createRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
 
 const ADMIN_SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
-const adminLoginRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 15 * 60 * 1000 }); // 3 attempts per 15 min
+const adminLoginRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 15 * 60 * 1000, keyPrefix: 'admin' }); // 3 attempts per 15 min
 
 // Timing-safe string comparison
 function timingSafeCompare(a, b) {
@@ -53,21 +56,24 @@ router.post('/create', async (req, res) => {
     }
 
     if (!isValidPassword(password)) {
-      return res.status(400).json({ success: false, message: '密码至少6位' });
+      return res.status(400).json({ success: false, message: getPasswordValidationError(password) || '密码不符合要求' });
     }
 
     // Check if username/email already exists
-    const existingUser = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email);
-    if (existingUser) {
+    const [existingRows] = await pool.execute('SELECT id FROM users WHERE username = ? OR email = ?', [username, email]);
+    if (existingRows.length > 0) {
       return res.status(409).json({ success: false, message: '用户名或邮箱已存在' });
     }
 
     // Create admin account
     const passwordHash = await bcrypt.hash(password, 10);
-    db.prepare('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)').run(username, email, passwordHash, 'admin');
+    await pool.execute('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email, passwordHash, 'admin']);
 
     res.status(201).json({ success: true, message: '管理员账号创建成功' });
   } catch (err) {
+    if (isDuplicateError(err)) {
+      return res.status(409).json({ success: false, message: '用户名或邮箱已存在' });
+    }
     console.error('Admin create error:', err);
     res.status(500).json({ success: false, message: '创建管理员失败' });
   }
@@ -83,7 +89,8 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
     }
 
     // Find admin user
-    const user = db.prepare('SELECT * FROM users WHERE username = ? AND role = ?').get(username, 'admin');
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE username = ? AND role = ?', [username, 'admin']);
+    const user = userRows[0];
 
     if (!user) {
       return res.status(401).json({ success: false, message: '管理员账号不存在或密码错误' });
@@ -96,14 +103,11 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
     }
 
     // Reset rate limit on successful login
-    const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-    resetRateLimit(ip);
+    await resetRateLimit(getClientIp(req), 'admin');
 
-    // Create admin session
+    // Create admin session in Redis
     const token = generateToken();
-    const expiresAt = new Date(Date.now() + ADMIN_SESSION_MAX_AGE).toISOString();
-
-    db.prepare('INSERT INTO admin_sessions (session_token, expires_at) VALUES (?, ?)').run(token, expiresAt);
+    await createAdminSession(token, user.id);
 
     res.cookie('admin_session', token, {
       httpOnly: true,
@@ -121,11 +125,11 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
 });
 
 // POST /logout - Admin logout
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
   try {
     const token = req.cookies.admin_session;
     if (token) {
-      db.prepare('DELETE FROM admin_sessions WHERE session_token = ?').run(token);
+      await deleteAdminSession(token);
     }
     res.clearCookie('admin_session', { path: '/' });
     res.json({ success: true });
@@ -137,28 +141,13 @@ router.post('/logout', (req, res) => {
 
 // GET /me - Get current admin info
 router.get('/me', requireAdmin, (req, res) => {
-  try {
-    // Get admin info from admin_sessions
-    const token = req.cookies.admin_session;
-    const session = db.prepare('SELECT * FROM admin_sessions WHERE session_token = ? AND expires_at > ?').get(token, new Date().toISOString());
-
-    if (!session) {
-      return res.status(401).json({ success: false, message: '会话已失效' });
-    }
-
-    // We don't have user_id in admin_sessions, so we need to track it
-    // For now, return session info
-    res.json({ success: true, admin: { session_valid: true } });
-  } catch (err) {
-    console.error('Get admin me error:', err);
-    res.status(500).json({ success: false, message: '获取管理员信息失败' });
-  }
+  res.json({ success: true, admin: { session_valid: true } });
 });
 
 // GET /clients - Get all clients
-router.get('/clients', requireAdmin, (req, res) => {
+router.get('/clients', requireAdmin, async (req, res) => {
   try {
-    const clients = db.prepare('SELECT id, name, client_id, redirect_uri, created_at FROM clients').all();
+    const [clients] = await pool.execute('SELECT id, name, client_id, redirect_uri, created_at FROM clients');
     res.json({ success: true, clients });
   } catch (err) {
     console.error('Get clients error:', err);
@@ -167,7 +156,7 @@ router.get('/clients', requireAdmin, (req, res) => {
 });
 
 // POST /clients - Create client
-router.post('/clients', requireAdmin, (req, res) => {
+router.post('/clients', requireAdmin, async (req, res) => {
   try {
     const { name, redirect_uri } = req.body;
 
@@ -178,7 +167,7 @@ router.post('/clients', requireAdmin, (req, res) => {
     const clientId = generateShortToken();
     const clientSecret = generateToken();
 
-    db.prepare('INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)').run(name, clientId, clientSecret, redirect_uri);
+    await pool.execute('INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)', [name, clientId, clientSecret, redirect_uri]);
     res.status(201).json({ success: true, client_id: clientId, client_secret: clientSecret });
   } catch (err) {
     console.error('Create client error:', err);
@@ -187,10 +176,10 @@ router.post('/clients', requireAdmin, (req, res) => {
 });
 
 // DELETE /clients/:id - Delete client
-router.delete('/clients/:id', requireAdmin, (req, res) => {
+router.delete('/clients/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    db.prepare('DELETE FROM clients WHERE id = ?').run(id);
+    await pool.execute('DELETE FROM clients WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (err) {
     console.error('Delete client error:', err);
@@ -199,7 +188,7 @@ router.delete('/clients/:id', requireAdmin, (req, res) => {
 });
 
 // PUT /clients/:id - Update client
-router.put('/clients/:id', requireAdmin, (req, res) => {
+router.put('/clients/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, redirect_uri } = req.body;
@@ -208,7 +197,7 @@ router.put('/clients/:id', requireAdmin, (req, res) => {
       return res.status(400).json({ success: false, message: '名称和回调地址必填' });
     }
 
-    db.prepare('UPDATE clients SET name = ?, redirect_uri = ? WHERE id = ?').run(name, redirect_uri, id);
+    await pool.execute('UPDATE clients SET name = ?, redirect_uri = ? WHERE id = ?', [name, redirect_uri, id]);
     res.json({ success: true });
   } catch (err) {
     console.error('Update client error:', err);
@@ -217,9 +206,10 @@ router.put('/clients/:id', requireAdmin, (req, res) => {
 });
 
 // GET /email-config - Get email configuration
-router.get('/email-config', requireAdmin, (req, res) => {
+router.get('/email-config', requireAdmin, async (req, res) => {
   try {
-    const config = db.prepare('SELECT host, port, user, "from", secure, updated_at FROM email_config WHERE id = 1').get();
+    const [rows] = await pool.execute('SELECT host, port, user, `from`, secure, updated_at FROM email_config WHERE id = 1');
+    const config = rows[0];
     res.json({ success: true, config });
   } catch (err) {
     console.error('Get email config error:', err);
@@ -228,7 +218,7 @@ router.get('/email-config', requireAdmin, (req, res) => {
 });
 
 // PUT /email-config - Update email configuration
-router.put('/email-config', requireAdmin, (req, res) => {
+router.put('/email-config', requireAdmin, async (req, res) => {
   try {
     const { host, port, user, password, from, secure } = req.body;
 
@@ -236,10 +226,10 @@ router.put('/email-config', requireAdmin, (req, res) => {
       return res.status(400).json({ success: false, message: '主机、端口、用户名和发件人必填' });
     }
 
-    db.prepare(`
-      UPDATE email_config SET host = ?, port = ?, user = ?, password = ?, "from" = ?, secure = ?, updated_at = CURRENT_TIMESTAMP
+    await pool.execute(`
+      UPDATE email_config SET host = ?, port = ?, user = ?, password = ?, \`from\` = ?, secure = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = 1
-    `).run(host, port, user, password || '', from, secure ? 1 : 0);
+    `, [host, port, user, password || '', from, secure ? 1 : 0]);
 
     res.json({ success: true, message: '配置已保存' });
   } catch (err) {
@@ -258,7 +248,7 @@ router.post('/test-email', requireAdmin, async (req, res) => {
     }
 
     const { sendEmail } = require('../utils/email');
-    const result = await sendEmail(email, '测试邮件', `
+    await sendEmail(email, '测试邮件', `
       <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #3b82f6;">测试邮件</h2>
         <p>这是一封测试邮件，用于验证您的SMTP配置是否正确。</p>
@@ -274,7 +264,7 @@ router.post('/test-email', requireAdmin, async (req, res) => {
 });
 
 // GET /users - Get all users
-router.get('/users', requireAdmin, (req, res) => {
+router.get('/users', requireAdmin, async (req, res) => {
   try {
     const { search, role, page, limit } = req.query;
 
@@ -304,7 +294,7 @@ router.get('/users', requireAdmin, (req, res) => {
       params.push(parseInt(limit), offset);
     }
 
-    const users = db.prepare(query).all(...params);
+    const [users] = await pool.execute(query, params);
 
     // Get total count for pagination
     let totalQuery = 'SELECT COUNT(*) as count FROM users';
@@ -321,7 +311,8 @@ router.get('/users', requireAdmin, (req, res) => {
       }
       totalParams.push(role);
     }
-    const total = db.prepare(totalQuery).get(...totalParams).count;
+    const [totalRows] = await pool.execute(totalQuery, totalParams);
+    const total = totalRows[0].count;
 
     res.json({
       success: true,
@@ -335,24 +326,25 @@ router.get('/users', requireAdmin, (req, res) => {
 });
 
 // GET /users/:id - Get user details with authorizations
-router.get('/users/:id', requireAdmin, (req, res) => {
+router.get('/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = db.prepare('SELECT id, username, email, email_verified, role, created_at FROM users WHERE id = ?').get(id);
+    const [userRows] = await pool.execute('SELECT id, username, email, email_verified, role, created_at FROM users WHERE id = ?', [id]);
+    const user = userRows[0];
 
     if (!user) {
       return res.status(404).json({ success: false, message: '用户不存在' });
     }
 
     // Get authorization records
-    const authorizations = db.prepare(`
+    const [authorizations] = await pool.execute(`
       SELECT a.client_id, c.name as client_name, a.last_used_at, a.created_at
       FROM authorizations a
       LEFT JOIN clients c ON a.client_id = c.id
       WHERE a.user_id = ?
       ORDER BY a.last_used_at DESC
-    `).all(id);
+    `, [id]);
 
     res.json({ success: true, user, authorizations });
   } catch (err) {
@@ -366,7 +358,8 @@ router.post('/users/:id/reset-password', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ?', [id]);
+    const user = userRows[0];
 
     if (!user) {
       return res.status(404).json({ success: false, message: '用户不存在' });
@@ -376,11 +369,11 @@ router.post('/users/:id/reset-password', requireAdmin, async (req, res) => {
     const tempPassword = crypto.randomBytes(8).toString('hex');
     const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashedPassword, id);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashedPassword, id]);
 
-    // Invalidate all sessions for this user
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
-    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(id);
+    // Invalidate all sessions and refresh tokens for this user
+    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [id]);
+    await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [id]);
 
     res.json({
       success: true,
@@ -394,17 +387,18 @@ router.post('/users/:id/reset-password', requireAdmin, async (req, res) => {
 });
 
 // PUT /users/:id - Update user
-router.put('/users/:id', requireAdmin, (req, res) => {
+router.put('/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { role, email_verified, username } = req.body;
 
-    // Prevent modifying own admin role (prevent self-lockout)
-    // Note: We'd need user_id in admin_sessions to implement this properly
-
     if (role && !['user', 'moderator', 'admin'].includes(role)) {
       return res.status(400).json({ success: false, message: '无效的角色' });
     }
+
+    // Get current user role before update
+    const [currentRows] = await pool.execute('SELECT role FROM users WHERE id = ?', [id]);
+    const currentRole = currentRows[0]?.role;
 
     const updates = [];
     const params = [];
@@ -432,7 +426,12 @@ router.put('/users/:id', requireAdmin, (req, res) => {
     }
 
     params.push(id);
-    db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    // If role changed from admin to non-admin, invalidate admin sessions
+    if (role && currentRole === 'admin' && role !== 'admin') {
+      await invalidateUserAdminSessions(parseInt(id));
+    }
 
     res.json({ success: true, message: '用户信息已更新' });
   } catch (err) {
@@ -441,108 +440,131 @@ router.put('/users/:id', requireAdmin, (req, res) => {
   }
 });
 
-// DELETE /users/:id - Delete user
-router.delete('/users/:id', requireAdmin, (req, res) => {
+// DELETE /users/:id - Delete user (with transaction)
+router.delete('/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Delete user's related data first
-    db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(id);
-    db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(id);
-    db.prepare('DELETE FROM auth_codes WHERE user_id = ?').run(id);
+    await transaction(async (conn) => {
+      // Delete user's related data first
+      await conn.execute('DELETE FROM authorizations WHERE user_id = ?', [id]);
+      await conn.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [id]);
+      await conn.execute('DELETE FROM login_logs WHERE user_id = ?', [id]);
 
-    // Delete user
-    const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      // Delete user
+      const [result] = await conn.execute('DELETE FROM users WHERE id = ?', [id]);
 
-    if (result.changes === 0) {
-      return res.status(404).json({ success: false, message: '用户不存在' });
-    }
+      if (result.affectedRows === 0) {
+        throw new Error('USER_NOT_FOUND');
+      }
+    });
 
     res.json({ success: true, message: '用户已删除' });
   } catch (err) {
+    if (err.message === 'USER_NOT_FOUND') {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
     console.error('Delete user error:', err);
     res.status(500).json({ success: false, message: '删除用户失败' });
   }
 });
 
-// GET /stats - Dashboard statistics
-router.get('/stats', requireAdmin, (req, res) => {
+// GET /stats - Dashboard statistics (optimized)
+router.get('/stats', requireAdmin, async (req, res) => {
   try {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const monthStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const todayStart = formatMySQLDateTime(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+    const weekStart = formatMySQLDateTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+    const monthStart = formatMySQLDateTime(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
+    const trendStart = formatMySQLDateTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
 
-    // User statistics
-    const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-    const usersToday = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at >= ?').get(todayStart).count;
-    const usersThisWeek = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at >= ?').get(weekStart).count;
-    const usersThisMonth = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at >= ?').get(monthStart).count;
-    const verifiedUsers = db.prepare('SELECT COUNT(*) as count FROM users WHERE email_verified = 1').get().count;
+    // Combined user statistics query (single query)
+    const [userStats] = await pool.execute(`
+      SELECT
+        COUNT(*) as total,
+        SUM(created_at >= ?) as today,
+        SUM(created_at >= ?) as week,
+        SUM(created_at >= ?) as month,
+        SUM(email_verified = 1) as verified
+      FROM users
+    `, [todayStart, weekStart, monthStart]);
 
-    // Login statistics
-    const loginsToday = db.prepare('SELECT COUNT(*) as count FROM login_logs WHERE created_at >= ?').get(todayStart).count;
-    const loginsThisWeek = db.prepare('SELECT COUNT(*) as count FROM login_logs WHERE created_at >= ?').get(weekStart).count;
+    // Combined login statistics query (single query)
+    const [loginStats] = await pool.execute(`
+      SELECT
+        COUNT(*) as total,
+        SUM(created_at >= ?) as today,
+        SUM(created_at >= ?) as week,
+        SUM(login_type = 'web') as web,
+        SUM(login_type = 'oauth') as oauth,
+        COUNT(DISTINCT user_id) as active_users
+      FROM login_logs
+      WHERE created_at >= ?
+    `, [todayStart, weekStart, weekStart]);
 
-    // Login type breakdown
-    const webLogins = db.prepare('SELECT COUNT(*) as count FROM login_logs WHERE login_type = ?').get('web').count;
-    const oauthLogins = db.prepare('SELECT COUNT(*) as count FROM login_logs WHERE login_type = ?').get('oauth').count;
+    // OAuth statistics (single query)
+    const [oauthStats] = await pool.execute(`
+      SELECT
+        (SELECT COUNT(*) FROM clients) as clients,
+        (SELECT COUNT(*) FROM authorizations) as authorizations
+    `);
 
-    // Active users (logged in within last 7 days)
-    const activeUsers = db.prepare(`
-      SELECT COUNT(DISTINCT user_id) as count FROM login_logs WHERE created_at >= ?
-    `).get(weekStart).count;
+    // User growth trend - single GROUP BY query
+    const [userGrowthRows] = await pool.execute(`
+      SELECT
+        DATE(created_at) as date,
+        COUNT(*) as count
+      FROM users
+      WHERE created_at >= ?
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `, [trendStart]);
 
-    // OAuth statistics
-    const totalClients = db.prepare('SELECT COUNT(*) as count FROM clients').get().count;
-    const totalAuthorizations = db.prepare('SELECT COUNT(*) as count FROM authorizations').get().count;
+    // Login trend - single GROUP BY query
+    const [loginTrendRows] = await pool.execute(`
+      SELECT
+        DATE(created_at) as date,
+        COUNT(*) as count
+      FROM login_logs
+      WHERE created_at >= ?
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `, [trendStart]);
 
-    // User growth trend (last 7 days, daily)
+    // Fill in missing dates for trends (last 7 days)
     const userGrowth = [];
-    for (let i = 6; i >= 0; i--) {
-      const dayStart = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      const dayStartISO = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate()).toISOString();
-      const dayEndISO = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1).toISOString();
-      const count = db.prepare('SELECT COUNT(*) as count FROM users WHERE created_at >= ? AND created_at < ?').get(dayStartISO, dayEndISO).count;
-      userGrowth.push({
-        date: dayStart.toISOString().split('T')[0],
-        count
-      });
-    }
-
-    // Login trend (last 7 days, daily)
     const loginTrend = [];
     for (let i = 6; i >= 0; i--) {
-      const dayStart = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      const dayStartISO = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate()).toISOString();
-      const dayEndISO = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1).toISOString();
-      const count = db.prepare('SELECT COUNT(*) as count FROM login_logs WHERE created_at >= ? AND created_at < ?').get(dayStartISO, dayEndISO).count;
-      loginTrend.push({
-        date: dayStart.toISOString().split('T')[0],
-        count
-      });
+      const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dateStr = date.toISOString().split('T')[0];
+
+      const userCount = userGrowthRows.find(r => r.date.toISOString().split('T')[0] === dateStr)?.count || 0;
+      const loginCount = loginTrendRows.find(r => r.date.toISOString().split('T')[0] === dateStr)?.count || 0;
+
+      userGrowth.push({ date: dateStr, count: userCount });
+      loginTrend.push({ date: dateStr, count: loginCount });
     }
 
     res.json({
       success: true,
       stats: {
         users: {
-          total: totalUsers,
-          today: usersToday,
-          week: usersThisWeek,
-          month: usersThisMonth,
-          verified: verifiedUsers,
-          active: activeUsers
+          total: userStats[0].total,
+          today: userStats[0].today || 0,
+          week: userStats[0].week || 0,
+          month: userStats[0].month || 0,
+          verified: userStats[0].verified || 0,
+          active: loginStats[0].active_users || 0
         },
         logins: {
-          today: loginsToday,
-          week: loginsThisWeek,
-          web: webLogins,
-          oauth: oauthLogins
+          today: loginStats[0].today || 0,
+          week: loginStats[0].week || 0,
+          web: loginStats[0].web || 0,
+          oauth: loginStats[0].oauth || 0
         },
         oauth: {
-          clients: totalClients,
-          authorizations: totalAuthorizations
+          clients: oauthStats[0].clients,
+          authorizations: oauthStats[0].authorizations
         },
         trends: {
           userGrowth,
@@ -557,10 +579,12 @@ router.get('/stats', requireAdmin, (req, res) => {
 });
 
 // GET /authorizations - Get all authorization records
-router.get('/authorizations', requireAdmin, (req, res) => {
+router.get('/authorizations', requireAdmin, async (req, res) => {
   try {
     const { page, limit, user_id } = req.query;
-    const offset = (parseInt(page) || 1 - 1) * (parseInt(limit) || 50);
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 50;
+    const offset = (pageNum - 1) * limitNum;
 
     let query = `
       SELECT a.id, a.user_id, u.username, a.client_id, c.name as client_name, a.last_used_at, a.created_at
@@ -576,9 +600,9 @@ router.get('/authorizations', requireAdmin, (req, res) => {
     }
 
     query += ' ORDER BY a.last_used_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit) || 50, offset);
+    params.push(limitNum, offset);
 
-    const authorizations = db.prepare(query).all(...params);
+    const [authorizations] = await pool.execute(query, params);
 
     res.json({ success: true, authorizations });
   } catch (err) {
@@ -588,10 +612,10 @@ router.get('/authorizations', requireAdmin, (req, res) => {
 });
 
 // DELETE /authorizations/:id - Revoke authorization
-router.delete('/authorizations/:id', requireAdmin, (req, res) => {
+router.delete('/authorizations/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    db.prepare('DELETE FROM authorizations WHERE id = ?').run(id);
+    await pool.execute('DELETE FROM authorizations WHERE id = ?', [id]);
     res.json({ success: true, message: '授权已撤销' });
   } catch (err) {
     console.error('Delete authorization error:', err);
@@ -600,10 +624,12 @@ router.delete('/authorizations/:id', requireAdmin, (req, res) => {
 });
 
 // GET /login-logs - Get login history
-router.get('/login-logs', requireAdmin, (req, res) => {
+router.get('/login-logs', requireAdmin, async (req, res) => {
   try {
     const { page, limit, user_id, login_type } = req.query;
-    const offset = (parseInt(page) || 1 - 1) * (parseInt(limit) || 100);
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 100;
+    const offset = (pageNum - 1) * limitNum;
 
     let query = `
       SELECT l.id, l.user_id, u.username, l.ip, l.device, l.login_type, l.created_at
@@ -627,9 +653,9 @@ router.get('/login-logs', requireAdmin, (req, res) => {
     }
 
     query += ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit) || 100, offset);
+    params.push(limitNum, offset);
 
-    const logs = db.prepare(query).all(...params);
+    const [logs] = await pool.execute(query, params);
 
     res.json({ success: true, logs });
   } catch (err) {
@@ -639,12 +665,13 @@ router.get('/login-logs', requireAdmin, (req, res) => {
 });
 
 // GET /config - Get system configuration
-router.get('/config', requireAdmin, (req, res) => {
+router.get('/config', requireAdmin, async (req, res) => {
   try {
-    const configs = db.prepare('SELECT key, value, description FROM system_config').all();
-    const emailConfig = db.prepare('SELECT host, port, user, "from", secure FROM email_config WHERE id = 1').get();
+    const [configs] = await pool.execute('SELECT key, value, description FROM system_config');
+    const [emailRows] = await pool.execute('SELECT host, port, user, `from`, secure FROM email_config WHERE id = 1');
+    const emailConfig = emailRows[0] || {};
 
-    res.json({ success: true, system: configs, email: emailConfig || {} });
+    res.json({ success: true, system: configs, email: emailConfig });
   } catch (err) {
     console.error('Get config error:', err);
     res.status(500).json({ success: false, message: '获取配置失败' });
@@ -652,12 +679,12 @@ router.get('/config', requireAdmin, (req, res) => {
 });
 
 // PUT /config/:key - Update system configuration
-router.put('/config/:key', requireAdmin, (req, res) => {
+router.put('/config/:key', requireAdmin, async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
 
-    db.prepare('UPDATE system_config SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?').run(value, key);
+    await pool.execute('UPDATE system_config SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?', [value, key]);
 
     res.json({ success: true, message: '配置已更新' });
   } catch (err) {

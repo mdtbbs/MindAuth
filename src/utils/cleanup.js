@@ -1,34 +1,30 @@
 /**
  * Cleanup module for expired data
- * Removes expired auth_codes and admin_sessions from the database
+ * With Redis integration, most ephemeral data (auth_codes, admin_sessions,
+ * reset_tokens, verification_tokens) is cleaned automatically via Redis TTL.
+ * This module only cleans MySQL tables that need explicit cleanup.
  */
 
-const db = require('../db');
+const { pool } = require('../db');
 
 /**
- * Clean up expired auth_codes and admin_sessions
+ * Clean up expired refresh_tokens from MySQL
+ * Other ephemeral data is handled by Redis TTL automatically
  * @returns {boolean} true if cleanup succeeded, false otherwise
  */
-function cleanupExpiredData() {
-  const now = new Date().toISOString();
+async function cleanupExpiredData() {
+  // MySQL datetime format: YYYY-MM-DD HH:MM:SS (no 'Z' suffix)
+  const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 
   try {
-    // Clean expired auth_codes
-    const authCodesResult = db.prepare('DELETE FROM auth_codes WHERE expires_at < ?').run(now);
+    // Clean expired refresh_tokens (MySQL table)
+    const [result] = await pool.execute('DELETE FROM refresh_tokens WHERE expires_at < ?', [now]);
 
-    // Clean expired admin_sessions
-    const adminSessionsResult = db.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').run(now);
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens from MySQL`);
 
-    // Clean expired password reset tokens
-    const resetTokensResult = db.prepare('DELETE FROM password_reset_tokens WHERE expires_at < ?').run(now);
+    // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
+    // are stored in Redis and cleaned automatically via TTL
 
-    // Clean expired email verification tokens
-    const verificationTokensResult = db.prepare('DELETE FROM email_verification_tokens WHERE expires_at < ?').run(now);
-
-    // Clean expired refresh tokens
-    const refreshTokensResult = db.prepare('DELETE FROM refresh_tokens WHERE expires_at < ?').run(now);
-
-    console.log(`Cleanup completed: removed ${authCodesResult.changes} auth_codes, ${adminSessionsResult.changes} admin_sessions, ${resetTokensResult.changes} reset_tokens, ${verificationTokensResult.changes} verification_tokens, ${refreshTokensResult.changes} refresh_tokens`);
     return true;
   } catch (err) {
     console.error('Cleanup error:', err);

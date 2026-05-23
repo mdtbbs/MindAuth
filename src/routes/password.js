@@ -1,15 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const db = require('../db');
+const { pool } = require('../db');
+const { client } = require('../redis');
 const { generateToken } = require('../utils/token');
-const { isValidPassword, isValidEmail } = require('../utils/validation');
+const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/email');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
-const RESET_TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour
-const resetRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 60 * 60 * 1000 }); // 3 per hour
+const RESET_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
+const resetRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 60 * 60 * 1000, keyPrefix: 'reset' }); // 3 per hour
 
 // Request password reset
 router.post('/reset-request', resetRateLimiter, async (req, res) => {
@@ -20,7 +21,8 @@ router.post('/reset-request', resetRateLimiter, async (req, res) => {
   }
 
   try {
-    const user = db.prepare('SELECT id, email, email_verified FROM users WHERE email = ?').get(email);
+    const [userRows] = await pool.execute('SELECT id, email, email_verified FROM users WHERE email = ?', [email]);
+    const user = userRows[0];
 
     // Don't reveal whether user exists (security)
     // If user doesn't exist or email not verified, still return success message
@@ -30,11 +32,11 @@ router.post('/reset-request', resetRateLimiter, async (req, res) => {
 
     // Generate reset token
     const token = generateToken();
-    const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY).toISOString();
 
-    db.prepare(`
-      INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)
-    `).run(user.id, token, expiresAt);
+    // Store reset token in Redis
+    await client.setEx(`reset:${token}`, RESET_TOKEN_TTL, JSON.stringify({
+      user_id: user.id
+    }));
 
     // Send email
     const resetLink = `${BASE_URL}/#/reset-password?token=${token}`;
@@ -56,28 +58,28 @@ router.post('/reset', async (req, res) => {
   }
 
   if (!new_password || !isValidPassword(new_password)) {
-    return res.status(400).json({ success: false, message: '密码至少6位' });
+    return res.status(400).json({ success: false, message: getPasswordValidationError(new_password) || '密码不符合要求' });
   }
 
   try {
-    const record = db.prepare(`
-      SELECT user_id FROM password_reset_tokens
-      WHERE token = ? AND used = 0 AND expires_at > ?
-    `).get(token, new Date().toISOString());
+    // Get token from Redis
+    const tokenData = await client.get(`reset:${token}`);
 
-    if (!record) {
+    if (!tokenData) {
       return res.status(400).json({ success: false, message: '链接无效或已过期' });
     }
 
+    const parsed = JSON.parse(tokenData);
+
     // Update password
     const passwordHash = await bcrypt.hash(new_password, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, record.user_id);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, parsed.user_id]);
 
-    // Mark token as used
-    db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE token = ?').run(token);
+    // Delete token (single-use)
+    await client.del(`reset:${token}`);
 
     // Clear all sessions (force re-login)
-    db.prepare('UPDATE users SET session_token = NULL WHERE id = ?').run(record.user_id);
+    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [parsed.user_id]);
 
     res.json({ success: true, message: '密码已更新，请重新登录' });
   } catch (err) {

@@ -112,51 +112,65 @@ async function loadEmailConfig() {
 // Handle admin login
 document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const formData = new FormData(e.target);
-  const data = {
-    username: formData.get('username'),
-    password: formData.get('password')
-  };
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  setButtonLoading(submitBtn, true);
 
-  const result = await apiFetch('/api/admin/login', {
-    method: 'POST',
-    body: data
-  });
+  try {
+    const formData = new FormData(e.target);
+    const data = {
+      username: formData.get('username'),
+      password: formData.get('password')
+    };
 
-  if (result.success) {
-    showDashboardView();
-    loadStats();
-    loadClients();
-    loadEmailConfig();
-    loadUsers();
-    showToast('登录成功', 'success');
-  } else {
-    showToast(result.message, 'error');
+    const result = await apiFetch('/api/admin/login', {
+      method: 'POST',
+      body: data
+    });
+
+    if (result.success) {
+      showDashboardView();
+      loadStats();
+      loadClients();
+      loadEmailConfig();
+      loadUsers();
+      showToast('登录成功', 'success');
+    } else {
+      showToast(result.message, 'error');
+    }
+  } finally {
+    setButtonLoading(submitBtn, false);
   }
 });
 
 // Handle admin create
 document.getElementById('admin-create-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const formData = new FormData(e.target);
-  const data = {
-    secret: formData.get('secret'),
-    username: formData.get('username'),
-    email: formData.get('email'),
-    password: formData.get('password')
-  };
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  setButtonLoading(submitBtn, true);
 
-  const result = await apiFetch('/api/admin/create', {
-    method: 'POST',
-    body: data
-  });
+  try {
+    const formData = new FormData(e.target);
+    const data = {
+      secret: formData.get('secret'),
+      username: formData.get('username'),
+      email: formData.get('email'),
+      password: formData.get('password')
+    };
 
-  if (result.success) {
-    showToast('创建成功，请登录', 'success');
-    toggleLoginView();
-    e.target.reset();
-  } else {
-    showToast(result.message, 'error');
+    const result = await apiFetch('/api/admin/create', {
+      method: 'POST',
+      body: data
+    });
+
+    if (result.success) {
+      showToast('创建成功，请登录', 'success');
+      toggleLoginView();
+      e.target.reset();
+    } else {
+      showToast(result.message, 'error');
+    }
+  } finally {
+    setButtonLoading(submitBtn, false);
   }
 });
 
@@ -221,24 +235,27 @@ document.getElementById('clients-container').addEventListener('click', async (e)
     const currentName = card.querySelector('.client-name').textContent;
     const currentUri = card.querySelector('.client-info p:nth-child(2)').textContent.replace('回调: ', '');
 
-    const name = prompt('应用名称:', currentName);
-    if (!name) return;
+    showEditModal('编辑应用', [
+      { id: 'name', label: '应用名称', value: currentName },
+      { id: 'redirect_uri', label: '回调地址', value: currentUri, type: 'url' }
+    ], async (values) => {
+      if (!values.name || !values.redirect_uri) {
+        showToast('名称和回调地址必填', 'error');
+        return;
+      }
 
-    const redirect_uri = prompt('回调地址:', currentUri);
-    if (!redirect_uri) return;
+      const result = await apiFetch(`/api/admin/clients/${id}`, {
+        method: 'PUT',
+        body: { name: values.name, redirect_uri: values.redirect_uri }
+      });
 
-    const result = await apiFetch(`/api/admin/clients/${id}`, {
-      method: 'PUT',
-      body: { name, redirect_uri }
+      if (result.success) {
+        loadClients();
+        showToast('已更新', 'success');
+      } else {
+        showToast('更新失败', 'error');
+      }
     });
-
-    if (result.success) {
-      loadClients();
-      showToast('已更新', 'success');
-    } else {
-      showToast('更新失败', 'error');
-    }
-  }
 });
 
 // Handle email config form
@@ -267,31 +284,41 @@ document.getElementById('email-config-form').addEventListener('submit', async (e
 
 // Handle test email
 document.getElementById('test-email-btn').addEventListener('click', async () => {
-  const email = prompt('请输入测试邮箱地址:');
-  if (!email) return;
+  showModal('发送测试邮件', `
+    <div class="form-group">
+      <label class="form-label">测试邮箱地址</label>
+      <input class="form-input" type="email" id="modal-test-email" placeholder="test@example.com">
+    </div>
+  `, async (overlay) => {
+    const email = overlay.querySelector('#modal-test-email').value;
+    if (!email) {
+      showToast('请输入邮箱地址', 'error');
+      return;
+    }
 
-  const form = document.getElementById('email-config-form');
-  const formData = new FormData(form);
-  const data = {
-    host: formData.get('host'),
-    port: parseInt(formData.get('port')) || 587,
-    user: formData.get('user'),
-    password: formData.get('password'),
-    from: formData.get('from'),
-    secure: formData.get('secure') === 'on'
-  };
+    const form = document.getElementById('email-config-form');
+    const formData = new FormData(form);
+    const data = {
+      host: formData.get('host'),
+      port: parseInt(formData.get('port')) || 587,
+      user: formData.get('user'),
+      password: formData.get('password'),
+      from: formData.get('from'),
+      secure: formData.get('secure') === 'on'
+    };
 
-  await apiFetch('/api/admin/email-config', {
-    method: 'PUT',
-    body: data
-  });
+    await apiFetch('/api/admin/email-config', {
+      method: 'PUT',
+      body: data
+    });
 
-  const result = await apiFetch('/api/admin/test-email', {
-    method: 'POST',
-    body: { email }
-  });
+    const result = await apiFetch('/api/admin/test-email', {
+      method: 'POST',
+      body: { email }
+    });
 
-  showToast(result.message, result.success ? 'success' : 'error');
+    showToast(result.message, result.success ? 'success' : 'error');
+  }, '发送', '取消');
 });
 
 // Load users
@@ -370,24 +397,39 @@ document.getElementById('users-container').addEventListener('click', async (e) =
   if (e.target.classList.contains('edit-user-btn')) {
     const card = e.target.closest('.user-row');
     const isVerified = card.querySelector('.status-dot').classList.contains('warn') === false;
+    const currentRole = card.querySelector('.tag').classList.contains('admin') ? 'admin' : 'user';
 
-    const newRole = prompt('角色 (user/admin):');
-    if (!newRole || !['user', 'admin'].includes(newRole)) return;
+    showModal('编辑用户', `
+      <div class="form-group">
+        <label class="form-label">角色</label>
+        <select class="form-input" id="modal-role">
+          <option value="user" ${currentRole === 'user' ? 'selected' : ''}>用户</option>
+          <option value="admin" ${currentRole === 'admin' ? 'selected' : ''}>管理员</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">邮箱验证</label>
+        <select class="form-input" id="modal-verified">
+          <option value="yes" ${isVerified ? 'selected' : ''}>已验证</option>
+          <option value="no" ${!isVerified ? 'selected' : ''}>未验证</option>
+        </select>
+      </div>
+    `, async (overlay) => {
+      const newRole = overlay.querySelector('#modal-role').value;
+      const emailVerified = overlay.querySelector('#modal-verified').value === 'yes';
 
-    const verifyChoice = prompt('邮箱验证 (yes/no):');
-    const emailVerified = verifyChoice === 'yes';
+      const result = await apiFetch(`/api/admin/users/${id}`, {
+        method: 'PUT',
+        body: { role: newRole, email_verified: emailVerified }
+      });
 
-    const result = await apiFetch(`/api/admin/users/${id}`, {
-      method: 'PUT',
-      body: { role: newRole, email_verified: emailVerified }
-    });
-
-    if (result.success) {
-      loadUsers();
-      showToast('已更新', 'success');
-    } else {
-      showToast(result.message || '更新失败', 'error');
-    }
+      if (result.success) {
+        loadUsers();
+        showToast('已更新', 'success');
+      } else {
+        showToast(result.message || '更新失败', 'error');
+      }
+    }, '保存', '取消');
   }
 });
 
@@ -403,6 +445,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     showLoginView();
   }
+
+  // Setup password visibility toggles
+  setupAllPasswordToggles();
 });
 
 // Load statistics

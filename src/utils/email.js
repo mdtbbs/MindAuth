@@ -4,14 +4,14 @@
  */
 
 const nodemailer = require('nodemailer');
-const db = require('../db');
+const { pool } = require('../db');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
-function getEmailConfig() {
+async function getEmailConfig() {
   try {
-    const config = db.prepare('SELECT host, port, user, password, "from", secure FROM email_config WHERE id = 1').get();
-    return config;
+    const [rows] = await pool.execute('SELECT host, port, user, password, `from`, secure FROM email_config WHERE id = 1');
+    return rows[0];
   } catch (err) {
     console.error('Failed to get email config:', err);
     return null;
@@ -35,7 +35,7 @@ function createTransporter(config) {
 }
 
 async function sendEmail(to, subject, htmlContent) {
-  const config = getEmailConfig();
+  const config = await getEmailConfig();
 
   // Development mode or no SMTP config: log to console
   if (isDevelopment || !config || !config.host) {

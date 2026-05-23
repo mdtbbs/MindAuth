@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const db = require('../db');
-const { isValidPassword, isValidEmail } = require('../utils/validation');
+const { pool } = require('../db');
+const { client } = require('../redis');
+const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
 const { generateToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
-const TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour
+const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
 
 // POST /change-password - Change password
 router.post('/change-password', requireAuth, async (req, res) => {
@@ -21,7 +22,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     }
 
     if (!isValidPassword(new_password)) {
-      return res.status(400).json({ success: false, message: '新密码至少6位' });
+      return res.status(400).json({ success: false, message: getPasswordValidationError(new_password) || '密码不符合要求' });
     }
 
     // Verify old password
@@ -32,10 +33,17 @@ router.post('/change-password', requireAuth, async (req, res) => {
 
     // Update password
     const passwordHash = await bcrypt.hash(new_password, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, user.id]);
 
     // Clear all sessions (force re-login)
-    db.prepare('UPDATE users SET session_token = NULL WHERE id = ?').run(user.id);
+    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [user.id]);
+
+    // Clear session cache in Redis
+    const token = req.cookies.session;
+    if (token) {
+      await client.del(`session:${token}`);
+    }
+
     res.clearCookie('session', { path: '/' });
 
     res.json({ success: true, message: '密码已更新，请重新登录' });
@@ -56,21 +64,19 @@ router.post('/change-email', requireAuth, async (req, res) => {
     }
 
     // Check if email already used by another user
-    const existingUser = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(new_email, user.id);
-    if (existingUser) {
+    const [existingRows] = await pool.execute('SELECT id FROM users WHERE email = ? AND id != ?', [new_email, user.id]);
+    if (existingRows.length > 0) {
       return res.status(409).json({ success: false, message: '该邮箱已被其他用户使用' });
     }
 
     // Generate verification token
     const token = generateToken();
-    const expiresAt = new Date(Date.now() + TOKEN_EXPIRY).toISOString();
 
-    // Upsert token (replace existing)
-    db.prepare(`
-      INSERT INTO email_verification_tokens (user_id, email, token, expires_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET email=?, token=?, expires_at=?, used=0
-    `).run(user.id, new_email, token, expiresAt, new_email, token, expiresAt);
+    // Store verification token in Redis (replaces any existing)
+    await client.setEx(`verify:${token}`, TOKEN_TTL, JSON.stringify({
+      user_id: user.id,
+      email: new_email
+    }));
 
     // Send verification email to new address
     const verifyLink = `${BASE_URL}/#/verify-email?token=${token}`;
@@ -99,13 +105,19 @@ router.delete('/', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, message: '密码错误' });
     }
 
-    // Delete user's related data
-    db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(user.id);
-    db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
-    db.prepare('DELETE FROM auth_codes WHERE user_id = ?').run(user.id);
+    // Delete user's related data from MySQL
+    await pool.execute('DELETE FROM authorizations WHERE user_id = ?', [user.id]);
+    await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
+    await pool.execute('DELETE FROM login_logs WHERE user_id = ?', [user.id]);
 
     // Delete user
-    db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    await pool.execute('DELETE FROM users WHERE id = ?', [user.id]);
+
+    // Clear session cache in Redis
+    const token = req.cookies.session;
+    if (token) {
+      await client.del(`session:${token}`);
+    }
 
     res.clearCookie('session', { path: '/' });
     res.json({ success: true, message: '账号已删除' });

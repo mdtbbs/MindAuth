@@ -1,8 +1,10 @@
-const loginAttempts = new Map();
+const { client } = require('../redis');
+const { getClientIp } = require('../utils/request');
 
 function createRateLimiter(options = {}) {
   const maxAttempts = options.maxAttempts || 5;
   const windowMs = options.windowMs || 5 * 60 * 1000; // 5 minutes
+  const keyPrefix = options.keyPrefix || 'ratelimit';
 
   if (!Number.isFinite(maxAttempts) || maxAttempts <= 0) {
     throw new Error('maxAttempts must be a positive number');
@@ -11,51 +13,49 @@ function createRateLimiter(options = {}) {
     throw new Error('windowMs must be a positive number');
   }
 
-  return function rateLimit(req, res, next) {
-    let ip = req.ip || req.connection.remoteAddress;
-    if (req.headers['x-forwarded-for']) {
-      ip = req.headers['x-forwarded-for'].split(',')[0].trim();
-    }
+  return async function rateLimit(req, res, next) {
+    const ip = getClientIp(req);
+    const key = `${keyPrefix}:${ip}`;
 
-    const now = Date.now();
-    const record = loginAttempts.get(ip);
+    try {
+      const count = await client.incr(key);
 
-    // Clean up old records periodically
-    if (loginAttempts.size > 1000) {
-      for (const [key, value] of loginAttempts.entries()) {
-        if (now - value.firstAttempt > windowMs) {
-          loginAttempts.delete(key);
-        }
+      if (count === 1) {
+        // First attempt, set expiry
+        await client.pExpire(key, windowMs);
       }
-    }
 
-    if (!record) {
-      loginAttempts.set(ip, { count: 1, firstAttempt: now });
-      return next();
-    }
+      if (count > maxAttempts) {
+        const ttl = await client.ttl(key);
+        const waitTime = ttl + 1; // TTL is in seconds
+        return res.status(429).json({
+          success: false,
+          message: `尝试次数过多，请${waitTime}秒后重试`
+        });
+      }
 
-    // Reset if window has passed
-    if (now - record.firstAttempt >= windowMs) {
-      loginAttempts.set(ip, { count: 1, firstAttempt: now });
-      return next();
+      next();
+    } catch (err) {
+      console.error('Rate limit error:', err);
+      // Allow request on Redis error (fail open)
+      next();
     }
-
-    // Check if limit exceeded
-    if (record.count >= maxAttempts) {
-      const waitTime = Math.ceil((windowMs - (now - record.firstAttempt)) / 1000);
-      return res.status(429).json({
-        success: false,
-        message: `尝试次数过多，请${waitTime}秒后重试`
-      });
-    }
-
-    record.count++;
-    return next();
   };
 }
 
-function resetRateLimit(ip) {
-  loginAttempts.delete(ip);
+async function resetRateLimit(ip, keyPrefix = 'ratelimit') {
+  const key = `${keyPrefix}:${ip}`;
+  await client.del(key);
 }
 
-module.exports = { createRateLimiter, resetRateLimit };
+async function getRateLimitStatus(ip, keyPrefix = 'ratelimit') {
+  const key = `${keyPrefix}:${ip}`;
+  const count = await client.get(key);
+  const ttl = await client.ttl(key);
+  return {
+    count: parseInt(count) || 0,
+    ttl: ttl
+  };
+}
+
+module.exports = { createRateLimiter, resetRateLimit, getRateLimitStatus };
