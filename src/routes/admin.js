@@ -208,9 +208,26 @@ router.put('/clients/:id', requireAdmin, async (req, res) => {
 // GET /email-config - Get email configuration
 router.get('/email-config', requireAdmin, async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT host, port, user, `from`, secure, updated_at FROM email_config WHERE id = 1');
+    const [rows] = await pool.execute('SELECT host, port, user, password, `from`, secure, updated_at FROM email_config WHERE id = 1');
     const config = rows[0];
-    res.json({ success: true, config });
+
+    if (!config) {
+      return res.json({ success: true, config: null });
+    }
+
+    res.json({
+      success: true,
+      config: {
+        host: config.host,
+        port: config.port,
+        user: config.user,
+        from: config.from,
+        secure: config.secure,
+        updated_at: config.updated_at,
+        hasPassword: !!config.password  // 前端可显示"密码已设置"
+        // password 不返回（安全）
+      }
+    });
   } catch (err) {
     console.error('Get email config error:', err);
     res.status(500).json({ success: false, message: '获取邮件配置失败' });
@@ -226,10 +243,17 @@ router.put('/email-config', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: '主机、端口、用户名和发件人必填' });
     }
 
+    // 如果密码为空，保留原密码
+    let finalPassword = password;
+    if (!password) {
+      const [rows] = await pool.execute('SELECT password FROM email_config WHERE id = 1');
+      finalPassword = rows[0]?.password || '';
+    }
+
     await pool.execute(`
       UPDATE email_config SET host = ?, port = ?, user = ?, password = ?, \`from\` = ?, secure = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = 1
-    `, [host, port, user, password || '', from, secure ? 1 : 0]);
+    `, [host, port, user, finalPassword, from, secure ? 1 : 0]);
 
     res.json({ success: true, message: '配置已保存' });
   } catch (err) {

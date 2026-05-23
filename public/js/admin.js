@@ -92,6 +92,12 @@ async function loadEmailConfig() {
       form.port.value = result.config.port || 587;
       form.user.value = result.config.user || '';
       form.password.value = '';
+      // 显示密码状态提示
+      if (result.config.hasPassword) {
+        form.password.placeholder = '密码已设置，留空则保留原密码';
+      } else {
+        form.password.placeholder = '请输入SMTP密码';
+      }
       form.from.value = result.config.from || '';
       form.secure.checked = result.config.secure === 1;
 

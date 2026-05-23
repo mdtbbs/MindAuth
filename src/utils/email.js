@@ -10,16 +10,61 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
 
 async function getEmailConfig() {
   try {
+    // 先尝试数据库配置
     const [rows] = await pool.execute('SELECT host, port, user, password, `from`, secure FROM email_config WHERE id = 1');
-    return rows[0];
+    const dbConfig = rows[0];
+
+    // 如果数据库有完整配置（包括密码），使用数据库
+    if (dbConfig && dbConfig.host && dbConfig.user && dbConfig.password) {
+      return dbConfig;
+    }
+
+    // 回退到环境变量
+    const envConfig = {
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      user: process.env.SMTP_USER,
+      password: process.env.SMTP_PASS,
+      from: process.env.SMTP_FROM,
+      secure: process.env.SMTP_SECURE === 'true'
+    };
+
+    if (envConfig.host && envConfig.user && envConfig.password) {
+      console.log('Using SMTP config from environment variables');
+      return envConfig;
+    }
+
+    // 返回数据库配置（可能不完整）
+    return dbConfig;
   } catch (err) {
     console.error('Failed to get email config:', err);
+
+    // 尝试环境变量作为最终回退
+    const envConfig = {
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      user: process.env.SMTP_USER,
+      password: process.env.SMTP_PASS,
+      from: process.env.SMTP_FROM,
+      secure: process.env.SMTP_SECURE === 'true'
+    };
+
+    if (envConfig.host && envConfig.user && envConfig.password) {
+      return envConfig;
+    }
+
     return null;
   }
 }
 
 function createTransporter(config) {
   if (!config || !config.host) {
+    return null;
+  }
+
+  // 验证凭据是否有效
+  if (!config.user || !config.password) {
+    console.error('SMTP config missing user or password');
     return null;
   }
 
