@@ -264,7 +264,7 @@ function router() {
   const urlQueryParams = new URLSearchParams(window.location.search);
 
   // Merge: URL query params take precedence for redirect_uri/client_id
-  const redirectUri = urlQueryParams.get('redirect') || urlQueryParams.get('redirect_uri') || hashQueryParams.get('redirect_uri') || 'http://localhost:4000/api/auth/callback';
+  const redirectUri = urlQueryParams.get('redirect') || urlQueryParams.get('redirect_uri') || hashQueryParams.get('redirect_uri');
   const clientId = urlQueryParams.get('client_id') || hashQueryParams.get('client_id');
   const state = urlQueryParams.get('state') || hashQueryParams.get('state');
 
