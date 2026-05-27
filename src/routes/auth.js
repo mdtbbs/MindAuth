@@ -106,13 +106,12 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     const token = generateToken();
     await pool.execute('UPDATE users SET session_token = ? WHERE id = ?', [token, user.id]);
 
-    // Cache session in Redis
+    // Cache session in Redis (exclude password_hash for security)
     await client.setEx(`session:${token}`, 300, JSON.stringify({
       id: user.id,
       username: user.username,
       email: user.email,
       email_verified: user.email_verified,
-      password_hash: user.password_hash,
       created_at: user.created_at
     }));
 

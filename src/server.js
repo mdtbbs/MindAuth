@@ -85,8 +85,24 @@ app.use('/api/password', passwordRoutes);
 app.use('/api/email-verification', emailVerificationRoutes);
 app.use('/api/account', accountRoutes);
 
-// Health check endpoint (public)
+// Health check endpoint (public) - simplified for production security
 app.get('/api/health', async (req, res) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // In production, return minimal health info
+  if (isProduction) {
+    let status = 'ok';
+    try {
+      await pool.execute('SELECT 1');
+      await client.ping();
+    } catch (err) {
+      status = 'degraded';
+      console.error('Health check error:', err.message);
+    }
+    return res.status(status === 'ok' ? 200 : 503).json({ status });
+  }
+
+  // In development, return detailed health info but hide error details
   const health = {
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -101,7 +117,8 @@ app.get('/api/health', async (req, res) => {
     health.services.database = 'connected (MySQL)';
   } catch (err) {
     health.status = 'degraded';
-    health.services.database = 'error: ' + err.message;
+    health.services.database = 'error';
+    console.error('Health check database error:', err.message);
   }
 
   // Check Redis
@@ -110,7 +127,8 @@ app.get('/api/health', async (req, res) => {
     health.services.redis = 'connected';
   } catch (err) {
     health.status = 'degraded';
-    health.services.redis = 'error: ' + err.message;
+    health.services.redis = 'error';
+    console.error('Health check redis error:', err.message);
   }
 
   // Check email config
@@ -124,6 +142,7 @@ app.get('/api/health', async (req, res) => {
     }
   } catch (err) {
     health.services.email = 'error';
+    console.error('Health check email config error:', err.message);
   }
 
   const statusCode = health.status === 'ok' ? 200 : 503;
@@ -148,9 +167,11 @@ async function startServer() {
     await initSchema();
     console.log('MySQL database initialized');
 
-    // Seed test data for development/testing
-    await seedTestAdmin();
-    await seedTestOAuthClient();
+    // Seed test data only in development/testing environment
+    if (process.env.NODE_ENV !== 'production') {
+      await seedTestAdmin();
+      await seedTestOAuthClient();
+    }
 
     // Connect to Redis
     await connectRedis();

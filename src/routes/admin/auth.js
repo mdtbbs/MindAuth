@@ -6,7 +6,7 @@ const { generateToken } = require('../../utils/token');
 const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../../utils/validation');
 const { timingSafeCompare } = require('../../utils/crypto');
 const { getClientIp } = require('../../utils/request');
-const { createAdminSession, deleteAdminSession } = require('../../middleware/requireAdmin');
+const { createAdminSession, deleteAdminSession, requireAdmin } = require('../../middleware/requireAdmin');
 const { createRateLimiter, resetRateLimit } = require('../../middleware/rateLimit');
 const config = require('../../config');
 
@@ -18,7 +18,22 @@ router.post('/create', async (req, res) => {
     const { secret, username, email, password } = req.body;
 
     const adminSecret = config.admin.secret;
+
+    // Security: Always check if ADMIN_SECRET is configured
     if (!adminSecret) {
+      console.error('ADMIN_SECRET not configured - admin creation rejected');
+      return res.status(500).json({ success: false, message: '管理员创建功能未配置' });
+    }
+
+    // Security: In production, enforce minimum secret length
+    if (config.server.isProduction && adminSecret.length < config.adminSecurity.minSecretLength) {
+      console.error('ADMIN_SECRET too short in production - admin creation rejected');
+      return res.status(500).json({ success: false, message: '管理员创建密钥配置不符合安全要求' });
+    }
+
+    // Security: Validate secret is not empty string
+    if (adminSecret.length === 0) {
+      console.error('ADMIN_SECRET is empty - admin creation rejected');
       return res.status(500).json({ success: false, message: '管理员创建功能未配置' });
     }
 
@@ -113,9 +128,9 @@ router.post('/logout', async (req, res) => {
   }
 });
 
-// GET /me - Get current admin info
-router.get('/me', (req, res) => {
-  res.json({ success: true, admin: { session_valid: true } });
+// GET /me - Get current admin info (requires authentication)
+router.get('/me', requireAdmin, (req, res) => {
+  res.json({ success: true, admin: req.admin });
 });
 
 module.exports = router;

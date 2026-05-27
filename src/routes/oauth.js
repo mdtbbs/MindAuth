@@ -77,7 +77,10 @@ router.get('/authorize', async (req, res) => {
 
     if (!user) {
       // Not logged in - redirect to login page with parameters
-      return res.redirect(`/#/login?redirect_uri=${encodeURIComponent(redirect_uri)}&client_id=${client_id}${state ? '&state=' + encodeURIComponent(state) : ''}${scope ? '&scope=' + encodeURIComponent(scope) : ''}`);
+      // Security: redirect_uri is already validated against registered client
+      // Include client name for user awareness of which app they're logging into
+      const encodedClientName = encodeURIComponent(clientData.name);
+      return res.redirect(`/#/login?redirect_uri=${encodeURIComponent(redirect_uri)}&client_id=${client_id}&client_name=${encodedClientName}${state ? '&state=' + encodeURIComponent(state) : ''}${scope ? '&scope=' + encodeURIComponent(scope) : ''}`);
     }
 
     // User is logged in - generate code and store in Redis

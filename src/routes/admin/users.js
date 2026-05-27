@@ -3,19 +3,43 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { pool, transaction } = require('../../db');
-const { isValidUsername } = require('../../utils/validation');
+const { isValidUsername, getUsernameValidationError, escapeHtml } = require('../../utils/validation');
 const { requireAdmin } = require('../../middleware/requireAdmin');
 const { invalidateUserAdminSessions } = require('../../middleware/requireAdmin');
+const { createRateLimiter } = require('../../middleware/rateLimit');
+const { getClientIp } = require('../../utils/request');
+const config = require('../../config');
+
+// Rate limiters for sensitive admin operations
+const passwordResetLimiter = createRateLimiter(config.adminSecurity.passwordReset);
+const userDeleteLimiter = createRateLimiter(config.adminSecurity.userDelete);
 
 // GET /users - Get all users
 router.get('/', requireAdmin, async (req, res) => {
   try {
     const { search, role, page, limit } = req.query;
 
-    // 默认分页限制
+    // Security: Validate pagination parameters are positive integers
     const defaultLimit = 50;
-    const effectiveLimit = limit ? parseInt(limit) : defaultLimit;
-    const effectivePage = page ? parseInt(page) : 1;
+    const maxLimit = 100;
+
+    let effectiveLimit = defaultLimit;
+    if (limit) {
+      const parsedLimit = parseInt(limit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
+        return res.status(400).json({ success: false, message: '分页参数无效' });
+      }
+      effectiveLimit = parsedLimit;
+    }
+
+    let effectivePage = 1;
+    if (page) {
+      const parsedPage = parseInt(page);
+      if (!Number.isInteger(parsedPage) || parsedPage < 1) {
+        return res.status(400).json({ success: false, message: '分页参数无效' });
+      }
+      effectivePage = parsedPage;
+    }
 
     let query = 'SELECT id, username, email, email_verified, role, created_at FROM users';
     let params = [];
@@ -38,6 +62,7 @@ router.get('/', requireAdmin, async (req, res) => {
 
     // 添加默认分页 - use query() instead of execute() for LIMIT/OFFSET
     // MySQL prepared statements have issues with LIMIT/OFFSET parameters
+    // Values are validated above to be positive integers within bounds
     const offset = (effectivePage - 1) * effectiveLimit;
     query += ` LIMIT ${effectiveLimit} OFFSET ${offset}`;
 
@@ -64,7 +89,7 @@ router.get('/', requireAdmin, async (req, res) => {
     res.json({
       success: true,
       users,
-      pagination: page && limit ? { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) } : undefined
+      pagination: page && limit ? { page: effectivePage, limit: effectiveLimit, total, totalPages: Math.ceil(total / effectiveLimit) } : undefined
     });
   } catch (err) {
     console.error('Get users error:', err);
@@ -99,8 +124,8 @@ router.get('/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /users/:id/reset-password - Reset user password
-router.post('/:id/reset-password', requireAdmin, async (req, res) => {
+// POST /users/:id/reset-password - Reset user password (rate limited)
+router.post('/:id/reset-password', requireAdmin, passwordResetLimiter, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -118,11 +143,51 @@ router.post('/:id/reset-password', requireAdmin, async (req, res) => {
     await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [id]);
     await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [id]);
 
-    res.json({
-      success: true,
-      message: '密码已重置，用户需使用临时密码重新登录',
-      tempPassword
-    });
+    // Try to send temporary password via email
+    // Security: Escape all dynamic content in HTML email
+    const { sendEmail } = require('../../utils/email');
+    const escapedUsername = escapeHtml(user.username);
+    const escapedEmail = escapeHtml(user.email);
+    const emailSent = await sendEmail(
+      user.email,
+      '密码已重置',
+      `<div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #3b82f6;">密码已重置</h2>
+        <p>您好 ${escapedUsername}，您的密码已被管理员重置。</p>
+        <p>临时密码：<strong style="font-size: 18px; background: #f3f4f6; padding: 8px 12px; border-radius: 4px;">${tempPassword}</strong></p>
+        <p>请使用此临时密码登录，并尽快修改密码。</p>
+        <p style="color: #666; font-size: 12px;">如果您没有请求重置密码，请联系管理员。</p>
+      </div>`
+    );
+
+    // Security: In production, NEVER return temporary password in API response
+    // In development mode without email config, log to console instead
+    if (config.server.isProduction) {
+      // Production: Never expose password, even if email failed
+      if (emailSent.mode === 'console') {
+        console.warn(`[SECURITY] Password reset for user ${user.username} (${id}) - email failed. Temp password logged separately.`);
+        console.warn(`[SECURITY] Temp password for ${user.username}: ${tempPassword}`);
+      }
+      res.json({
+        success: true,
+        message: '密码已重置，临时密码已发送到用户邮箱'
+      });
+    } else {
+      // Development: Allow returning password only when email not configured
+      if (emailSent.mode === 'console') {
+        res.json({
+          success: true,
+          message: '密码已重置（邮件未配置，临时密码仅在开发环境显示）',
+          tempPassword,
+          emailMode: 'development'
+        });
+      } else {
+        res.json({
+          success: true,
+          message: '密码已重置，临时密码已发送到用户邮箱'
+        });
+      }
+    }
   } catch (err) {
     console.error('Reset password error:', err);
     res.status(500).json({ success: false, message: '重置密码失败' });
@@ -156,8 +221,9 @@ router.put('/:id', requireAdmin, async (req, res) => {
     }
 
     if (username) {
-      if (!isValidUsername(username)) {
-        return res.status(400).json({ success: false, message: '用户名需2-50字符' });
+      const usernameError = getUsernameValidationError(username);
+      if (usernameError) {
+        return res.status(400).json({ success: false, message: usernameError });
       }
       updates.push('username = ?');
       params.push(username.trim());
@@ -181,8 +247,8 @@ router.put('/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /users/:id - Delete user
-router.delete('/:id', requireAdmin, async (req, res) => {
+// DELETE /users/:id - Delete user (rate limited for security)
+router.delete('/:id', requireAdmin, userDeleteLimiter, async (req, res) => {
   try {
     const { id } = req.params;
 

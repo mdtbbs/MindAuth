@@ -70,6 +70,32 @@ const config = {
     login: { maxAttempts: 5, windowMs: 5 * 60 * 1000 },      // 5 per 5 min
     register: { maxAttempts: 5, windowMs: 60 * 60 * 1000 },  // 5 per hour
     adminLogin: { maxAttempts: 3, windowMs: 15 * 60 * 1000 } // 3 per 15 min
+  },
+
+  // Trusted proxy configuration for IP extraction
+  // When behind a trusted proxy/CDN, specify which IPs are trusted
+  // This prevents IP spoofing attacks that bypass rate limits
+  trustedProxy: {
+    // Enable proxy header trust (set to true when behind CDN/reverse proxy)
+    enabled: process.env.TRUSTED_PROXY_ENABLED === 'true' || false,
+    // Whitelist of trusted proxy IPs (comma-separated)
+    // Only accept proxy headers from these IPs
+    ips: process.env.TRUSTED_PROXY_IPS
+      ? process.env.TRUSTED_PROXY_IPS.split(',').map(ip => ip.trim())
+      : [],
+    // Cloudflare IP ranges (auto-trust if using Cloudflare)
+    // See: https://www.cloudflare.com/ips/
+    trustCloudflare: process.env.TRUST_CLOUDFLARE === 'true' || false
+  },
+
+  // Admin security settings
+  adminSecurity: {
+    // Minimum length for ADMIN_SECRET in production
+    minSecretLength: parseInt(process.env.ADMIN_SECRET_MIN_LENGTH) || 32,
+    // Rate limits for admin operations (per IP)
+    userDelete: { maxAttempts: 10, windowMs: 60 * 60 * 1000 },    // 10 per hour
+    passwordReset: { maxAttempts: 20, windowMs: 60 * 60 * 1000 }, // 20 per hour
+    clientCreate: { maxAttempts: 20, windowMs: 60 * 60 * 1000 }   // 20 per hour
   }
 };
 
