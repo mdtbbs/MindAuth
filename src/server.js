@@ -3,9 +3,11 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const cors = require('cors');
+const compression = require('compression');
 const path = require('path');
 
-const { pool, closePool, initSchema } = require('./db');
+const config = require('./config');
+const { pool, closePool, initSchema, seedTestAdmin, seedTestOAuthClient } = require('./db');
 const { client, connectRedis, closeRedis } = require('./redis');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
@@ -17,17 +19,14 @@ const { startCleanupScheduler } = require('./utils/cleanup');
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
 
 const app = express();
-const PORT = process.env.PORT || 4001;
+const PORT = config.server.port;
 
 // Trust proxy for CDN/reverse proxy scenarios
-// Enables proper handling of X-Forwarded-For, X-Real-IP headers
 app.set('trust proxy', true);
 
 // CDN and CORS configuration
-const CDN_URL = process.env.CDN_URL || '';
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:3000', 'http://localhost:4000', 'http://localhost:4001'];
+const CDN_URL = config.server.cdnUrl;
+const ALLOWED_ORIGINS = config.server.allowedOrigins;
 
 // CORS middleware - allow cross-origin API requests
 app.use(cors({
@@ -64,11 +63,14 @@ app.use(helmet({
 }));
 
 // Middleware
+app.use(compression()); // 响应压缩
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public'), { maxAge: '1d' })); // 静态资源缓存1天
 // Serve shared-styles from monorepo root
-app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles')));
+app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles'), { maxAge: '1d' }));
+// Serve shared templates from monorepo
+app.use('/templates', express.static(path.join(__dirname, '../../shared/dist/templates'), { maxAge: '1d' }));
 
 // CSRF protection
 app.use(setCsrfCookie);  // Set CSRF cookie on all responses
@@ -89,7 +91,7 @@ app.get('/api/health', async (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    version: process.env.npm_package_version || '1.0.0',
+    version: config.server.version,
     services: {}
   };
 
@@ -145,6 +147,10 @@ async function startServer() {
     // Connect to MySQL and initialize schema
     await initSchema();
     console.log('MySQL database initialized');
+
+    // Seed test data for development/testing
+    await seedTestAdmin();
+    await seedTestOAuthClient();
 
     // Connect to Redis
     await connectRedis();
