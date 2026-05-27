@@ -1,6 +1,9 @@
 const { client } = require('../redis');
 const { getClientIp } = require('../utils/request');
 
+// Local memory fallback for rate limiting when Redis unavailable
+const localRateLimitStore = new Map();
+
 function createRateLimiter(options = {}) {
   const maxAttempts = options.maxAttempts || 5;
   const windowMs = options.windowMs || 5 * 60 * 1000; // 5 minutes
@@ -18,16 +21,16 @@ function createRateLimiter(options = {}) {
     const key = `${keyPrefix}:${ip}`;
 
     try {
+      // Try Redis first
       const count = await client.incr(key);
 
       if (count === 1) {
-        // First attempt, set expiry
         await client.pExpire(key, windowMs);
       }
 
       if (count > maxAttempts) {
         const ttl = await client.ttl(key);
-        const waitTime = ttl + 1; // TTL is in seconds
+        const waitTime = ttl + 1;
         return res.status(429).json({
           success: false,
           message: `尝试次数过多，请${waitTime}秒后重试`
@@ -36,8 +39,27 @@ function createRateLimiter(options = {}) {
 
       next();
     } catch (err) {
-      console.error('Rate limit error:', err);
-      // Allow request on Redis error (fail open)
+      console.error('Rate limit Redis error, using memory fallback:', err.message);
+
+      // Memory fallback when Redis unavailable
+      const now = Date.now();
+      const entry = localRateLimitStore.get(key);
+
+      if (!entry || now > entry.expiresAt) {
+        // New window
+        localRateLimitStore.set(key, { count: 1, expiresAt: now + windowMs });
+        return next();
+      }
+
+      if (entry.count >= maxAttempts) {
+        const waitTime = Math.ceil((entry.expiresAt - now) / 1000);
+        return res.status(429).json({
+          success: false,
+          message: `尝试次数过多，请${waitTime}秒后重试`
+        });
+      }
+
+      entry.count++;
       next();
     }
   };

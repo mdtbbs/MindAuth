@@ -83,17 +83,22 @@ async function deleteAdminSession(token) {
  */
 async function invalidateUserAdminSessions(userId) {
   try {
-    // Scan for all admin sessions belonging to this user
-    const keys = await client.keys('admin_session:*');
-    for (const key of keys) {
-      const sessionData = await client.get(key);
-      if (sessionData) {
-        const session = JSON.parse(sessionData);
-        if (session.user_id === userId) {
-          await client.del(key);
+    // Use SCAN instead of KEYS to avoid blocking Redis
+    let cursor = '0';
+    do {
+      const result = await client.scan(cursor, 'MATCH', 'admin_session:*', 'COUNT', 100);
+      cursor = result.cursor;
+
+      for (const key of result.keys) {
+        const sessionData = await client.get(key);
+        if (sessionData) {
+          const session = JSON.parse(sessionData);
+          if (session.user_id === userId) {
+            await client.del(key);
+          }
         }
       }
-    }
+    } while (cursor !== '0');
   } catch (err) {
     console.error('Error invalidating admin sessions:', err);
   }

@@ -67,6 +67,96 @@ body {
 }
 
 /* ========== 登录/注册页面 ========== */
+/* 新的分栏布局 */
+.auth-split-container {
+  display: flex;
+  min-height: 100vh;
+}
+
+.auth-brand-section {
+  flex: 1;
+  background: #333;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 3rem;
+}
+
+.auth-brand-content {
+  max-width: 360px;
+  text-align: center;
+}
+
+.auth-brand-content .auth-logo {
+  justify-content: center;
+  color: #fff;
+  margin-bottom: 1.5rem;
+}
+
+.auth-brand-content .auth-logo-dot {
+  background: var(--primary);
+}
+
+.auth-brand-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.02em;
+}
+
+.auth-brand-desc {
+  font-size: 0.875rem;
+  color: #888;
+  line-height: 1.6;
+  margin-bottom: 2rem;
+}
+
+.auth-brand-services {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.auth-service-item {
+  font-size: 0.75rem;
+  color: #666;
+  padding: 0.5rem 1rem;
+  background: #444;
+  border-radius: var(--radius);
+}
+
+.auth-form-section {
+  flex: 1;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3rem;
+}
+
+.auth-form-wrapper {
+  max-width: 400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.auth-form-title {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.25rem;
+  color: var(--text);
+}
+
+.auth-form-subtitle {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+}
+
+/* 原有的居中卡片布局 (备用) */
 .auth-container {
   min-height: 100vh;
   display: flex;
@@ -978,6 +1068,51 @@ select.form-input {
     font-size: 15px;
   }
 
+  /* Split layout on mobile - show brand as small header */
+  .auth-split-container {
+    flex-direction: column;
+  }
+
+  .auth-brand-section {
+    padding: 1.5rem;
+    flex: 0 0 auto;
+  }
+
+  .auth-brand-content {
+    max-width: 100%;
+  }
+
+  .auth-brand-content .auth-logo {
+    margin-bottom: 0.75rem;
+  }
+
+  .auth-brand-title {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .auth-brand-desc {
+    font-size: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .auth-brand-services {
+    display: none;
+  }
+
+  .auth-form-section {
+    padding: 1.5rem 1rem;
+    flex: 1;
+  }
+
+  .auth-form-title {
+    font-size: 1.25rem;
+  }
+
+  .auth-form-subtitle {
+    margin-bottom: 1.5rem;
+  }
+
   .auth-container {
     padding: 1rem;
   }
@@ -1129,6 +1264,23 @@ select.form-input {
 
 /* ========== 平板适配 ========== */
 @media (min-width: 481px) and (max-width: 768px) {
+  /* Split layout on tablet */
+  .auth-split-container {
+    flex-direction: row;
+  }
+
+  .auth-brand-section {
+    padding: 2rem;
+  }
+
+  .auth-brand-title {
+    font-size: 1.25rem;
+  }
+
+  .auth-form-section {
+    padding: 2rem;
+  }
+
   .stats-grid {
     grid-template-columns: repeat(4, 1fr);
   }

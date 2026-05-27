@@ -1,4 +1,5 @@
 const { pool } = require('./pool');
+const bcrypt = require('bcrypt');
 
 async function initSchema() {
   const conn = await pool.getConnection();
@@ -139,10 +140,86 @@ async function initSchema() {
       );
     }
 
+    // Add composite indexes for stats queries (handle existing databases)
+    try {
+      await conn.execute('ALTER TABLE users ADD INDEX idx_users_stats (created_at, email_verified)');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add idx_users_stats:', alterErr.message);
+      }
+    }
+
+    try {
+      await conn.execute('ALTER TABLE login_logs ADD INDEX idx_logs_stats (created_at, login_type)');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add idx_logs_stats:', alterErr.message);
+      }
+    }
+
     console.log('MySQL schema initialized successfully');
   } finally {
     conn.release();
   }
 }
 
-module.exports = { initSchema };
+// Seed test admin account for development/testing
+async function seedTestAdmin() {
+  const testAdmins = [
+    { username: 'testadmin', email: 'testadmin@mindauth.local', password: 'AdminPass123' }
+  ];
+
+  for (const admin of testAdmins) {
+    try {
+      // Check if admin exists
+      const [existing] = await pool.execute(
+        'SELECT id FROM users WHERE username = ?',
+        [admin.username]
+      );
+
+      if (existing.length === 0) {
+        const passwordHash = await bcrypt.hash(admin.password, 10);
+        await pool.execute(
+          'INSERT INTO users (username, email, password_hash, role, email_verified) VALUES (?, ?, ?, ?, ?)',
+          [admin.username, admin.email, passwordHash, 'admin', 1]
+        );
+        console.log(`Test admin '${admin.username}' created with password '${admin.password}'`);
+      }
+    } catch (err) {
+      console.warn(`Could not seed admin '${admin.username}':`, err.message);
+    }
+  }
+}
+
+// Seed test OAuth client for OAuth flow tests
+async function seedTestOAuthClient() {
+  const testClients = [
+    {
+      name: 'MindFourm (Test)',
+      client_id: '6d875cc521f1c60ba17dd53c7b9edc5a',
+      client_secret: '35d820f46aa6a1b330258d3af5b60b3c0094719acebcb149fc03d96cdf8f99f1',
+      redirect_uri: 'http://localhost:4000/api/auth/callback'
+    }
+  ];
+
+  for (const client of testClients) {
+    try {
+      const [existing] = await pool.execute(
+        'SELECT id FROM clients WHERE client_id = ?',
+        [client.client_id]
+      );
+
+      if (existing.length === 0) {
+        await pool.execute(
+          'INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)',
+          [client.name, client.client_id, client.client_secret, client.redirect_uri]
+        );
+        console.log(`Test OAuth client '${client.name}' created`);
+      }
+    } catch (err) {
+      console.warn(`Could not seed OAuth client '${client.name}':`, err.message);
+    }
+  }
+}
+
+module.exports = { initSchema, seedTestAdmin, seedTestOAuthClient };

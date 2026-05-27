@@ -1,7 +1,7 @@
 const { pool } = require('../db');
 const { client } = require('../redis');
 
-const SESSION_CACHE_TTL = 300; // 5 minutes cache
+const SESSION_CACHE_TTL = 86400; // 24 hours cache (session valid for 30 days)
 
 async function requireAuth(req, res, next) {
   const token = req.cookies.session;

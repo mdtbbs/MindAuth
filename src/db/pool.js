@@ -1,13 +1,14 @@
 const mysql = require('mysql2/promise');
+const config = require('../config');
 
 const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || 'localhost',
-  port: parseInt(process.env.MYSQL_PORT) || 3306,
-  user: process.env.MYSQL_USER || 'mindauth',
-  password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'mindauth',
+  host: config.mysql.host,
+  port: config.mysql.port,
+  user: config.mysql.user,
+  password: config.mysql.password,
+  database: config.mysql.database,
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.MYSQL_POOL_SIZE) || 10,
+  connectionLimit: config.mysql.poolSize,
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000

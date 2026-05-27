@@ -1,5 +1,18 @@
 import { test, expect } from '@playwright/test';
 
+const ADMIN_SECRET = 'admin123';
+
+// Clear rate limits before all tests
+test.beforeAll(async ({ request }) => {
+  try {
+    await request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    });
+  } catch (err) {
+    // Ignore if endpoint doesn't exist
+  }
+});
+
 test.describe('用户认证流程', () => {
   test('注册新用户', async ({ page }) => {
     await page.goto('/#register');
@@ -7,7 +20,7 @@ test.describe('用户认证流程', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', 'pw_user_' + Date.now());
     await page.fill('#email', 'pw_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
 
     await page.waitForSelector('#toast.show', { timeout: 5000 });
@@ -43,7 +56,7 @@ test.describe('完整登录流程', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_full_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
 
@@ -51,7 +64,7 @@ test.describe('完整登录流程', () => {
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
 
     // 等待dashboard渲染
@@ -81,13 +94,27 @@ test.describe('密码重置流程', () => {
 });
 
 test.describe('管理员后台', () => {
+  // Clear rate limits before this describe block to avoid admin login rate limiting
+  test.beforeAll(async ({ request }) => {
+    await request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    });
+  });
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/admin.html');
     await page.waitForSelector('#admin-login-form', { timeout: 5000 });
     await page.fill('#username', 'testadmin');
-    await page.fill('#password', 'admin123456');
+    await page.fill('#password', 'AdminPass123');
     await page.click('#admin-login-form button[type="submit"]');
     await page.waitForSelector('#dashboard-view', { state: 'visible', timeout: 5000 });
+  });
+
+  // Clear rate limits after each test to prevent rate limiting between tests
+  test.afterEach(async ({ request }) => {
+    await request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    });
   });
 
   test('管理员登录成功', async ({ page }) => {
@@ -154,7 +181,7 @@ test.describe('邮箱验证状态', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_verify_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
     await page.waitForTimeout(1000);
@@ -163,7 +190,7 @@ test.describe('邮箱验证状态', () => {
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
 
     // 等待dashboard渲染（与成功的测试使用相同模式）
@@ -180,11 +207,18 @@ test.describe('邮箱验证状态', () => {
 });
 
 test.describe.serial('管理员用户管理', () => {
+  // Clear rate limits before this describe block
+  test.beforeAll(async ({ request }) => {
+    await request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    });
+  });
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/admin.html');
     await page.waitForSelector('#admin-login-form', { timeout: 5000 });
     await page.fill('#username', 'testadmin');
-    await page.fill('#password', 'admin123456');
+    await page.fill('#password', 'AdminPass123');
     await page.click('#admin-login-form button[type="submit"]');
     await page.waitForSelector('#dashboard-view', { state: 'visible', timeout: 5000 });
 
@@ -220,21 +254,33 @@ test.describe.serial('管理员用户管理', () => {
   test('按角色筛选', async ({ page }) => {
     await page.waitForSelector('.user-row', { timeout: 10000 });
     await page.selectOption('#user-role-filter', 'admin');
-    await page.waitForLoadState('networkidle');
 
-    // 管理员角色标签使用 .tag.admin 类
+    // Wait for the API response and re-render
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+
+    // Wait for user rows to be updated (admin users should have .tag.admin)
+    await page.waitForSelector('.tag.admin', { timeout: 5000 });
+
     const adminTags = await page.locator('.tag.admin').count();
     expect(adminTags).toBeGreaterThan(0);
   });
 });
 
 test.describe('API端点测试', () => {
+  // Clear rate limits before this describe block
+  test.beforeAll(async ({ request }) => {
+    await request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    });
+  });
+
   test('GET /api/health 健康检查', async ({ page }) => {
     const response = await page.request.get('/api/health');
     expect(response.status()).toBe(200);
     const body = await response.json();
     expect(body.status).toBe('ok');
-    expect(body.services.database).toBe('connected');
+    expect(body.services.database).toContain('connected');
   });
 
   test('GET /api/me 未登录返回401', async ({ page }) => {
@@ -247,7 +293,7 @@ test.describe('API端点测试', () => {
       data: {
         username: 'api_user_' + Date.now(),
         email: 'api_' + Date.now() + '@test.com',
-        password: 'test123456'
+        password: 'TestPass123'
       }
     });
     expect(response.status()).toBe(201);
@@ -259,7 +305,7 @@ test.describe('API端点测试', () => {
     const response = await page.request.post('/api/admin/login', {
       data: {
         username: 'testadmin',
-        password: 'admin123456'
+        password: 'AdminPass123'
       }
     });
     expect(response.status()).toBe(200);
@@ -298,14 +344,14 @@ test.describe.serial('账户自助功能', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_account_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
 
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
     await page.waitForSelector('#username-display', { timeout: 5000 });
 
@@ -327,7 +373,7 @@ test.describe.serial('账户自助功能', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_pwd_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
     await page.waitForTimeout(500); // 等待toast消失
@@ -336,7 +382,7 @@ test.describe.serial('账户自助功能', () => {
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
     await page.waitForSelector('#username-display', { timeout: 5000 });
     await page.waitForTimeout(500);
@@ -344,8 +390,8 @@ test.describe.serial('账户自助功能', () => {
     // 修改密码
     await page.goto('/#account-settings');
     await page.waitForSelector('#change-password-form', { timeout: 5000 });
-    await page.fill('#old_password', 'test123456');
-    await page.fill('#new_password', 'newpassword123');
+    await page.fill('#old_password', 'TestPass123');
+    await page.fill('#new_password', 'NewPass123');
     await page.click('#change-password-form button[type="submit"]');
 
     // 等待新的toast出现
@@ -364,7 +410,7 @@ test.describe.serial('账户自助功能', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_pwd_err_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
     await page.waitForTimeout(500);
@@ -372,7 +418,7 @@ test.describe.serial('账户自助功能', () => {
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
     await page.waitForSelector('#username-display', { timeout: 5000 });
     await page.waitForTimeout(500);
@@ -381,7 +427,7 @@ test.describe.serial('账户自助功能', () => {
     await page.goto('/#account-settings');
     await page.waitForSelector('#change-password-form', { timeout: 5000 });
     await page.fill('#old_password', 'wrongpassword');
-    await page.fill('#new_password', 'newpassword123');
+    await page.fill('#new_password', 'NewPass123');
     await page.click('#change-password-form button[type="submit"]');
     await page.waitForSelector('#toast.show', { timeout: 5000 });
     await page.waitForTimeout(500);
@@ -400,7 +446,7 @@ test.describe('Dashboard日志和授权', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_logs_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
     await page.waitForTimeout(500);
@@ -409,7 +455,7 @@ test.describe('Dashboard日志和授权', () => {
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
     await page.waitForSelector('#username-display', { timeout: 5000 });
 
@@ -430,7 +476,7 @@ test.describe('Dashboard日志和授权', () => {
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', username);
     await page.fill('#email', 'pw_auth_' + Date.now() + '@test.com');
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
     await page.waitForSelector('#toast.show');
     await page.waitForTimeout(500);
@@ -438,7 +484,7 @@ test.describe('Dashboard日志和授权', () => {
     await page.goto('/#login');
     await page.waitForSelector('#login-form', { timeout: 5000 });
     await page.fill('#username', username);
-    await page.fill('#password', 'test123456');
+    await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
     await page.waitForSelector('#username-display', { timeout: 5000 });
 

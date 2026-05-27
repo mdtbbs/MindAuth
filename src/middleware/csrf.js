@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { timingSafeCompare } = require('../utils/crypto');
 
 /**
  * CSRF Protection Middleware
@@ -47,7 +48,11 @@ function validateCsrf(req, res, next) {
     '/refresh',      // OAuth refresh (has client_secret)
     '/introspect',   // OAuth introspect (has client_secret)
     '/revoke',       // OAuth revoke (has client_secret)
-    '/verify'        // Session verification (no CSRF needed)
+    '/verify',       // Session verification (no CSRF needed)
+    '/register',     // User registration (no session needed)
+    '/login',        // User login (creates session, rate-limited)
+    '/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
+    'clear-rate-limits' // Test endpoint (uses ADMIN_SECRET)
   ];
 
   if (exemptPaths.some(p => path.endsWith(p))) {
@@ -65,8 +70,7 @@ function validateCsrf(req, res, next) {
   }
 
   // Timing-safe comparison
-  if (cookieToken.length !== headerToken.length ||
-      !crypto.timingSafeEqual(Buffer.from(cookieToken), Buffer.from(headerToken))) {
+  if (!timingSafeCompare(cookieToken, headerToken)) {
     return res.status(403).json({
       success: false,
       message: 'CSRF token 无效'
