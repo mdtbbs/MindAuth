@@ -9,6 +9,10 @@
  * @returns {Promise<string>} HTML内容
  */
 async function loadTemplate(name) {
+  // Validate template name (defense-in-depth)
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    throw new Error(`Invalid template name: ${name}`);
+  }
   const res = await fetch(`/templates/${name}.html`);
   if (!res.ok) {
     throw new Error(`Failed to load template: ${name} (status ${res.status})`);
@@ -39,6 +43,7 @@ async function renderTemplate(name, target) {
  * @param {string} html - HTML模板
  * @param {Object} data - 替换数据 { key: value }
  * @returns {string} 替换后的HTML
+ * @warning Data values are inserted as-is. Callers must sanitize user input.
  */
 function fillTemplate(html, data) {
   return html.replace(/\{\{(\w+)\}\}/g, (match, key) => {
