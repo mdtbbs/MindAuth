@@ -17,59 +17,8 @@ function escapeHtml(text) {
 
 // Views
 const views = {
-  login: `
-    <div class="auth-container">
-      <div class="auth-box">
-        <div class="auth-header">
-          <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
-          <h1 class="auth-title">登录</h1>
-          <p class="auth-subtitle">进入您的账户</p>
-        </div>
-        <form id="login-form" class="auth-form">
-          <div class="form-group">
-            <label class="form-label">用户名</label>
-            <input class="form-input" type="text" id="username" name="username" required placeholder="请输入用户名">
-          </div>
-          <div class="form-group">
-            <label class="form-label">密码</label>
-            <input class="form-input" type="password" id="password" name="password" required placeholder="输入密码">
-          </div>
-          <button type="submit" class="btn-primary">继续</button>
-        </form>
-        <p class="auth-link">没有账户? <a href="#register">创建一个</a></p>
-        <p class="auth-link"><a href="#reset-request">忘记密码?</a></p>
-      </div>
-    </div>
-  `,
-
-  register: `
-    <div class="auth-container">
-      <div class="auth-box">
-        <div class="auth-header">
-          <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
-          <h1 class="auth-title">注册</h1>
-          <p class="auth-subtitle">创建您的账户</p>
-        </div>
-        <form id="register-form" class="auth-form">
-          <div class="form-group">
-            <label class="form-label">用户名</label>
-            <input class="form-input" type="text" id="username" name="username" required placeholder="2-50个字符">
-          </div>
-          <div class="form-group">
-            <label class="form-label">邮箱地址</label>
-            <input class="form-input" type="email" id="email" name="email" required placeholder="name@company.com">
-          </div>
-          <div class="form-group">
-            <label class="form-label">密码</label>
-            <input class="form-input" type="password" id="password" name="password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
-            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
-          </div>
-          <button type="submit" class="btn-primary">创建账户</button>
-        </form>
-        <p class="auth-link">已有账户? <a href="#login">登录</a></p>
-      </div>
-    </div>
-  `,
+  login: null, // Dynamically loaded from LoginLayout template
+  register: null, // Dynamically loaded from LoginLayout template
 
   dashboard: `
     <div class="dashboard-container">
@@ -239,9 +188,68 @@ const views = {
   `
 };
 
+// Form content for login/register views (injected into LoginLayout template)
+const loginFormContent = `
+  <form id="login-form" class="auth-form">
+    <div class="form-group">
+      <label class="form-label">用户名</label>
+      <input class="form-input" type="text" id="username" name="username" required placeholder="请输入用户名">
+    </div>
+    <div class="form-group">
+      <label class="form-label">密码</label>
+      <input class="form-input" type="password" id="password" name="password" required placeholder="输入密码">
+    </div>
+    <button type="submit" class="btn-primary">继续</button>
+  </form>
+  <p class="auth-link">没有账户? <a href="#register">创建一个</a></p>
+  <p class="auth-link"><a href="#reset-request">忘记密码?</a></p>
+`;
+
+const registerFormContent = `
+  <form id="register-form" class="auth-form">
+    <div class="form-group">
+      <label class="form-label">用户名</label>
+      <input class="form-input" type="text" id="username" name="username" required placeholder="2-50个字符">
+    </div>
+    <div class="form-group">
+      <label class="form-label">邮箱地址</label>
+      <input class="form-input" type="email" id="email" name="email" required placeholder="name@company.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">密码</label>
+      <input class="form-input" type="password" id="password" name="password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
+      <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
+    </div>
+    <button type="submit" class="btn-primary">创建账户</button>
+  </form>
+  <p class="auth-link">已有账户? <a href="#login">登录</a></p>
+`;
+
+/**
+ * Inject form content into LoginLayout template HTML
+ * @param {string} templateHtml - The LoginLayout template HTML
+ * @param {string} formContent - The form HTML to inject
+ * @param {string} title - The form title (e.g., "登录", "注册")
+ * @returns {string} Complete HTML with injected content
+ */
+function injectLoginFormContent(templateHtml, formContent, title) {
+  // Replace the form title in data-form-title attribute
+  let html = templateHtml.replace(
+    /(<[^>]*\bdata-form-title=")([^"]*)("[^>]*>)([^<]*)(<\/h3>)/i,
+    `$1${title}$3${title}$5`
+  );
+  // Inject form content into data-form-content div
+  html = html.replace(
+    /(<div[^>]*\bdata-form-content="")[^"]*("[^>]*>)[^<]*(<\/div>)/i,
+    `$1$2${formContent}$3`
+  );
+  return html;
+}
+
 // Router
-function router() {
-  let hash = location.hash.slice(1) || 'login';
+async function router() {
+  // Get hash, remove # prefix and any leading /
+  let hash = (location.hash.slice(1) || 'login').replace(/^\/+/, '');
 
   // Extract query params from hash
   const hashParts = hash.split('?');
@@ -287,7 +295,40 @@ function router() {
     return;
   }
 
+  // Redirect logged-in users away from auth pages
+  if ((viewName === 'login' || viewName === 'register') && Store.user) {
+    // Check if there's a pending OAuth redirect
+    const pendingRedirectUri = sessionStorage.getItem('oauth_redirect_uri');
+    const pendingClientId = sessionStorage.getItem('oauth_client_id');
+
+    if (pendingRedirectUri && pendingClientId) {
+      // OAuth mode: redirect to authorize endpoint
+      const pendingState = sessionStorage.getItem('oauth_state');
+      const authorizeUrl = `/api/authorize?redirect_uri=${encodeURIComponent(pendingRedirectUri)}&client_id=${pendingClientId}${pendingState ? '&state=' + encodeURIComponent(pendingState) : ''}`;
+      window.location.href = authorizeUrl;
+    } else {
+      // No pending redirect: go to dashboard
+      location.hash = 'dashboard';
+    }
+    return;
+  }
+
   const app = document.getElementById('app');
+
+  // Dynamically load login/register templates
+  if ((viewName === 'login' || viewName === 'register') && !views[viewName]) {
+    try {
+      const templateHtml = await SharedLoader.loadTemplate('login-layout');
+      const formContent = viewName === 'login' ? loginFormContent : registerFormContent;
+      const title = viewName === 'login' ? '登录' : '注册';
+      views[viewName] = injectLoginFormContent(templateHtml, formContent, title);
+    } catch (err) {
+      console.error('Failed to load template:', err);
+      app.innerHTML = '<div class="empty-state">加载失败，请刷新页面</div>';
+      return;
+    }
+  }
+
   app.innerHTML = views[viewName] || views.login;
 
   // Setup password visibility toggles for all password fields
