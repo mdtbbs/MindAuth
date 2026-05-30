@@ -19,117 +19,125 @@ function escapeHtml(text) {
 const views = {
   login: null, // Dynamically loaded from LoginLayout template
   register: null, // Dynamically loaded from LoginLayout template
+  logout: `
+    <div class="auth-container">
+      <div class="auth-box">
+        <div class="auth-header">
+          <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
+          <h1 class="auth-title">退出登录</h1>
+          <p class="auth-subtitle">正在退出...</p>
+        </div>
+        <div id="logout-status">
+          <div class="empty-state">处理中...</div>
+        </div>
+      </div>
+    </div>
+  `,
 
   dashboard: `
-    <div class="dashboard-container">
-      <header class="dashboard-header">
-        <h1><div class="header-logo-dot"></div>MindAuth</h1>
-        <button id="logout-btn" class="btn-secondary">退出</button>
-      </header>
-      <main class="dashboard-main">
-        <h1 class="page-title">账户</h1>
+    <div class="admin-content">
+      <div class="admin-header">
+        <div class="admin-title">账户</div>
+        <button id="logout-btn" class="btn-secondary btn-sm">退出</button>
+      </div>
 
-        <div class="user-card">
-          <div class="card-header">PROFILE</div>
-          <div class="profile-row">
-            <div class="profile-avatar" id="avatar-display">U</div>
-            <div>
-              <div class="profile-name" id="username-display"></div>
-              <div class="profile-email" id="email-display"></div>
-            </div>
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0s">
+        <div class="card-header-title">PROFILE</div>
+        <div class="profile-section">
+          <div class="user-card-avatar" id="avatar-display">U</div>
+          <div>
+            <div class="user-card-name" id="username-display"></div>
+            <div class="user-card-title" id="email-display"></div>
           </div>
         </div>
+      </div>
 
-        <div class="user-card">
-          <div class="card-header">STATUS</div>
-          <div class="user-info">
-            <div class="user-info-item">
-              <span class="user-info-label">邮箱验证</span>
-              <span id="verified-badge"></span>
-            </div>
-            <div class="user-info-item">
-              <span class="user-info-label">注册时间</span>
-              <span class="user-info-value" id="created-display"></span>
-            </div>
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.1s">
+        <div class="card-header-title">STATUS</div>
+        <div class="status-section">
+          <div class="status-row">
+            <span class="status-label">邮箱验证</span>
+            <span id="verified-badge"></span>
           </div>
-          <div id="verification-actions" class="action-row" style="display: none;">
-            <button id="send-verify-btn" class="btn-outline">发送验证邮件</button>
+          <div class="status-row">
+            <span class="status-label">注册时间</span>
+            <span class="status-value" id="created-display"></span>
           </div>
         </div>
-
-        <div class="user-card">
-          <div class="card-header">LOGIN HISTORY</div>
-          <div id="login-logs-container">
-            <div class="empty-state">加载中...</div>
-          </div>
+        <div id="verification-actions" class="action-row" style="display: none;">
+          <button id="send-verify-btn" class="btn-outline">发送验证邮件</button>
         </div>
+      </div>
 
-        <div class="user-card">
-          <div class="card-header">AUTHORIZED APPS</div>
-          <div id="authorizations-container">
-            <div class="empty-state">加载中...</div>
-          </div>
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.2s">
+        <div class="card-header-title">LOGIN HISTORY</div>
+        <div id="login-logs-container">
+          <div class="empty-state">加载中...</div>
         </div>
+      </div>
 
-        <div class="user-card">
-          <div class="card-header">ACCOUNT</div>
-          <div class="action-row">
-            <a href="#account-settings" class="btn-outline">账户设置</a>
-          </div>
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.3s">
+        <div class="card-header-title">AUTHORIZED APPS</div>
+        <div id="authorizations-container">
+          <div class="empty-state">加载中...</div>
         </div>
-      </main>
+      </div>
+
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.4s">
+        <div class="card-header-title">ACCOUNT</div>
+        <div class="action-row">
+          <a href="#account-settings" class="btn-outline">账户设置</a>
+        </div>
+      </div>
     </div>
   `,
 
   accountSettings: `
-    <div class="dashboard-container">
-      <header class="dashboard-header">
-        <h1><div class="header-logo-dot"></div>MindAuth</h1>
-        <a href="#dashboard" class="btn-secondary" style="text-decoration: none;">返回</a>
-      </header>
-      <main class="dashboard-main">
-        <h1 class="page-title">设置</h1>
+    <div class="admin-content">
+      <div class="admin-header">
+        <div class="admin-title">设置</div>
+        <a href="#dashboard" class="btn-secondary btn-sm" style="text-decoration: none;">返回</a>
+      </div>
 
-        <div class="settings-card">
-          <div class="card-header">CHANGE PASSWORD</div>
-          <form id="change-password-form" class="auth-form">
-            <div class="form-group">
-              <label class="form-label">当前密码</label>
-              <input class="form-input" type="password" id="old_password" name="old_password" required placeholder="输入当前密码">
-            </div>
-            <div class="form-group">
-              <label class="form-label">新密码</label>
-              <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
-              <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
-            </div>
-            <button type="submit" class="btn-primary">确认修改</button>
-          </form>
-        </div>
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0s">
+        <div class="card-header-title">CHANGE PASSWORD</div>
+        <form id="change-password-form" class="auth-form">
+          <div class="form-group">
+            <label class="form-label">当前密码</label>
+            <input class="form-input" type="password" id="old_password" name="old_password" required placeholder="输入当前密码">
+          </div>
+          <div class="form-group">
+            <label class="form-label">新密码</label>
+            <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="至少8位，含大小写字母和数字">
+            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要: 大写+小写+数字，至少8位</p>
+          </div>
+          <button type="submit" class="btn-primary">确认修改</button>
+        </form>
+      </div>
 
-        <div class="settings-card">
-          <div class="card-header">CHANGE EMAIL</div>
-          <form id="change-email-form" class="auth-form">
-            <div class="form-group">
-              <label class="form-label">新邮箱地址</label>
-              <input class="form-input" type="email" id="new_email" name="new_email" required placeholder="name@company.com">
-            </div>
-            <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem;">更换邮箱需要验证新邮箱地址</p>
-            <button type="submit" class="btn-primary">发送验证邮件</button>
-          </form>
-        </div>
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.1s">
+        <div class="card-header-title">CHANGE EMAIL</div>
+        <form id="change-email-form" class="auth-form">
+          <div class="form-group">
+            <label class="form-label">新邮箱地址</label>
+            <input class="form-input" type="email" id="new_email" name="new_email" required placeholder="name@company.com">
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem;">更换邮箱需要验证新邮箱地址</p>
+          <button type="submit" class="btn-primary">发送验证邮件</button>
+        </form>
+      </div>
 
-        <div class="settings-card danger-zone">
-          <div class="card-header">DELETE ACCOUNT</div>
-          <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.8125rem;">删除账号将永久移除您的所有数据，此操作不可撤销。</p>
-          <form id="delete-account-form" class="auth-form">
-            <div class="form-group">
-              <label class="form-label">输入密码确认</label>
-              <input class="form-input" type="password" id="delete_password" name="password" required placeholder="输入密码确认删除">
-            </div>
-            <button type="submit" class="btn-outline btn-danger">确认删除账号</button>
-          </form>
-        </div>
-      </main>
+      <div class="card card-lg animate-fade-in-up danger-zone" style="animation-delay: 0.2s">
+        <div class="card-header-title">DELETE ACCOUNT</div>
+        <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.8125rem;">删除账号将永久移除您的所有数据，此操作不可撤销。</p>
+        <form id="delete-account-form" class="auth-form">
+          <div class="form-group">
+            <label class="form-label">输入密码确认</label>
+            <input class="form-input" type="password" id="delete_password" name="password" required placeholder="输入密码确认删除">
+          </div>
+          <button type="submit" class="btn-outline btn-danger">确认删除账号</button>
+        </form>
+      </div>
     </div>
   `,
 
@@ -239,9 +247,10 @@ function injectLoginFormContent(templateHtml, formContent, title) {
     `$1${title}$3${title}$5`
   );
   // Inject form content into data-form-content div
+  // Use .*? to match content including HTML entities like &lt;
   html = html.replace(
-    /(<div[^>]*\bdata-form-content="")[^"]*("[^>]*>)[^<]*(<\/div>)/i,
-    `$1$2${formContent}$3`
+    /(<div[^>]*\bdata-form-content[^>]*>).*?(<\/div>)/i,
+    `$1${formContent}$2`
   );
   return html;
 }
@@ -258,6 +267,69 @@ async function router() {
 
   // Convert kebab-case to camelCase for view lookup
   const viewName = rawViewName.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
+
+  // Handle logout view - call logout API and redirect
+  if (rawViewName === 'logout') {
+    const app = document.getElementById('app');
+    app.innerHTML = views.logout;
+
+    const statusDiv = document.getElementById('logout-status');
+    try {
+      const result = await apiFetch('/api/logout', { method: 'POST' });
+      Store.user = null;
+
+      if (result.success) {
+        statusDiv.innerHTML = `
+          <div class="verify-success">
+            <div class="verify-icon">✓</div>
+            <h2>已退出登录</h2>
+            <p style="color: var(--text-muted);">感谢使用 MindAuth</p>
+            <p id="logout-redirect-hint" style="color: var(--text-muted); margin-top: 0.5rem;">
+              <span id="logout-countdown">5</span> 秒后返回上一页
+            </p>
+          </div>
+          <p class="auth-link"><a href="#login">重新登录</a></p>
+        `;
+
+        // 5秒倒计时后返回上一页
+        let countdown = 5;
+        const countdownEl = document.getElementById('logout-countdown');
+        const timer = setInterval(() => {
+          countdown--;
+          if (countdownEl) countdownEl.textContent = countdown;
+          if (countdown <= 0) {
+            clearInterval(timer);
+            // 检查是否有上一页可以返回
+            const hasReferrer = document.referrer && document.referrer.includes(window.location.host);
+            if (hasReferrer) {
+              window.history.back();
+            } else {
+              window.location.hash = 'login';
+            }
+          }
+        }, 1000);
+      } else {
+        statusDiv.innerHTML = `
+          <div class="verify-error">
+            <div class="verify-icon error">✗</div>
+            <h2>退出失败</h2>
+            <p style="color: var(--text-muted);">${escapeHtml(result.message || '未知错误')}</p>
+          </div>
+          <p class="auth-link"><a href="#login">返回登录</a></p>
+        `;
+      }
+    } catch (err) {
+      statusDiv.innerHTML = `
+        <div class="verify-error">
+          <div class="verify-icon error">✗</div>
+          <h2>网络错误</h2>
+          <p style="color: var(--text-muted);">无法连接到服务器</p>
+        </div>
+        <p class="auth-link"><a href="#login">返回登录</a></p>
+      `;
+    }
+    return;
+  }
 
   // Handle verify-email view with token
   if (rawViewName === 'verify-email') {
@@ -366,6 +438,9 @@ document.addEventListener('submit', async (e) => {
   const form = e.target;
   const submitBtn = form.querySelector('button[type="submit"]');
 
+  // Clear previous errors
+  clearFormErrors(form);
+
   // Set loading state
   setButtonLoading(submitBtn, true);
 
@@ -377,9 +452,22 @@ document.addEventListener('submit', async (e) => {
         password: formData.get('password')
       };
 
+      // Validate fields
+      if (!data.username) {
+        showFieldError('username', '请输入用户名');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+      if (!data.password) {
+        showFieldError('password', '请输入密码');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+
       const result = await apiFetch('/api/login', { method: 'POST', body: data });
 
       if (result.success) {
+        showToast('登录成功', 'success');
         await checkAuth();
 
         // Check redirect after login
@@ -406,7 +494,14 @@ document.addEventListener('submit', async (e) => {
           location.hash = 'dashboard';
         }
       } else {
+        // Show toast for all login errors (for test compatibility)
         showToast(result.message, 'error');
+        // Also show field-specific error for better UX
+        if (result.message.includes('用户名') || result.message.includes('账户')) {
+          showFieldError('username', result.message);
+        } else if (result.message.includes('密码')) {
+          showFieldError('password', result.message);
+        }
       }
     }
 
@@ -418,39 +513,86 @@ document.addEventListener('submit', async (e) => {
         password: formData.get('password')
       };
 
+      // Validate fields
+      if (!data.username) {
+        showFieldError('username', '请输入用户名');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+      if (!data.email) {
+        showFieldError('email', '请输入邮箱地址');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+      if (!data.password) {
+        showFieldError('password', '请输入密码');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+
       const result = await apiFetch('/api/register', { method: 'POST', body: data });
 
-      showToast(result.message || '注册失败', result.success ? 'success' : 'error');
       if (result.success) {
+        showToast(result.message || '注册成功，请登录', 'success');
         setTimeout(() => location.hash = 'login', 2000);
+      } else {
+        // Show specific field errors
+        if (result.message.includes('用户名')) {
+          showFieldError('username', result.message);
+        } else if (result.message.includes('邮箱')) {
+          showFieldError('email', result.message);
+        } else if (result.message.includes('密码')) {
+          showFieldError('password', result.message);
+        } else {
+          showToast(result.message || '注册失败', 'error');
+        }
       }
     }
 
     if (form.id === 'reset-request-form') {
       const formData = new FormData(form);
+      const email = formData.get('email');
+
+      if (!email) {
+        showFieldError('email', '请输入邮箱地址');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+
       const result = await apiFetch('/api/password/reset-request', {
         method: 'POST',
-        body: { email: formData.get('email') }
+        body: { email }
       });
 
-      showToast(result.message, result.success ? 'success' : 'error');
       if (result.success) {
+        showToast(result.message, 'success');
         setTimeout(() => location.hash = 'login', 2000);
+      } else {
+        showFieldError('email', result.message);
       }
     }
 
     if (form.id === 'reset-password-form') {
       const token = new URLSearchParams(location.hash.split('?')[1]).get('token');
       const formData = new FormData(form);
+      const newPassword = formData.get('new_password');
+
+      if (!newPassword) {
+        showFieldError('new_password', '请输入新密码');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
 
       const result = await apiFetch('/api/password/reset', {
         method: 'POST',
-        body: { token, new_password: formData.get('new_password') }
+        body: { token, new_password: newPassword }
       });
 
-      showToast(result.message, result.success ? 'success' : 'error');
       if (result.success) {
+        showToast(result.message, 'success');
         setTimeout(() => location.hash = 'login', 2000);
+      } else {
+        showFieldError('new_password', result.message);
       }
     }
 
@@ -461,51 +603,85 @@ document.addEventListener('submit', async (e) => {
         new_password: formData.get('new_password')
       };
 
+      // Validate fields
+      if (!data.old_password) {
+        showFieldError('old_password', '请输入当前密码');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+      if (!data.new_password) {
+        showFieldError('new_password', '请输入新密码');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+
       const result = await apiFetch('/api/account/change-password', {
         method: 'POST',
         body: data
       });
 
-      showToast(result.message, result.success ? 'success' : 'error');
       if (result.success) {
+        showToast(result.message, 'success');
         Store.user = null;
         setTimeout(() => location.hash = 'login', 2000);
+      } else {
+        if (result.message.includes('当前密码') || result.message.includes('原密码')) {
+          showFieldError('old_password', result.message);
+        } else {
+          showToast(result.message, 'error');
+        }
       }
     }
 
     if (form.id === 'change-email-form') {
       const formData = new FormData(form);
-      const data = { new_email: formData.get('new_email') };
+      const newEmail = formData.get('new_email');
+
+      if (!newEmail) {
+        showFieldError('new_email', '请输入新邮箱地址');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
 
       const result = await apiFetch('/api/account/change-email', {
         method: 'POST',
-        body: data
+        body: { new_email: newEmail }
       });
 
-      showToast(result.message, result.success ? 'success' : 'error');
       if (result.success) {
+        showToast(result.message, 'success');
         form.reset();
+      } else {
+        showFieldError('new_email', result.message);
       }
     }
 
     if (form.id === 'delete-account-form') {
+      const formData = new FormData(form);
+      const password = formData.get('password');
+
+      if (!password) {
+        showFieldError('delete_password', '请输入密码确认');
+        setButtonLoading(submitBtn, false);
+        return;
+      }
+
       if (!confirm('确定要删除账号吗？此操作不可撤销！')) {
         setButtonLoading(submitBtn, false);
         return;
       }
 
-      const formData = new FormData(form);
-      const data = { password: formData.get('password') };
-
       const result = await apiFetch('/api/account', {
         method: 'DELETE',
-        body: data
+        body: { password }
       });
 
-      showToast(result.message, result.success ? 'success' : 'error');
       if (result.success) {
+        showToast(result.message, 'success');
         Store.user = null;
         location.hash = 'login';
+      } else {
+        showFieldError('delete_password', result.message);
       }
     }
   } finally {

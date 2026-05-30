@@ -140,7 +140,7 @@ test.describe('管理员后台', () => {
 
     // 填写表单
     await page.fill('#name', 'Playwright测试应用_' + Date.now());
-    await page.fill('#redirect_uri', 'http://localhost:3000/callback');
+    await page.fill('#redirect_uri', 'https://example.com/callback');
     await page.click('#create-client-form button[type="submit"]');
 
     await page.waitForSelector('#secret-display', { state: 'visible', timeout: 10000 });
@@ -357,7 +357,7 @@ test.describe.serial('账户自助功能', () => {
 
     // 访问账户设置
     await page.goto('/#account-settings');
-    await page.waitForSelector('.settings-card', { timeout: 5000 });
+    await page.waitForSelector('.card.card-lg', { timeout: 5000 });
 
     // 验证三个设置卡片存在
     await expect(page.locator('#change-password-form')).toBeVisible();

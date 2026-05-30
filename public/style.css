@@ -206,6 +206,7 @@ body {
 /* ========== 表单 ========== */
 .auth-form {
   width: 100%;
+  max-width: 400px;
 }
 
 .form-group {
@@ -223,6 +224,7 @@ body {
 
 .form-input {
   width: 100%;
+  max-width: 360px;
   height: 40px;
   padding: 0 0.875rem;
   background: var(--bg-subtle);
@@ -358,80 +360,17 @@ select.form-input {
   color: var(--text-secondary);
 }
 
-/* ========== 用户中心 ========== */
-.dashboard-container {
-  min-height: 100vh;
-}
-
-.dashboard-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  height: 52px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 1.25rem;
-}
-
-[data-theme="dark"] .dashboard-header {
-  background: rgba(9,9,11,0.85);
-  backdrop-filter: blur(12px);
-}
-
-[data-theme="light"] .dashboard-header {
-  background: rgba(255,255,255,0.85);
-  backdrop-filter: blur(12px);
-}
-
-.dashboard-header h1 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-}
-
-.header-logo-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--text);
-  border-radius: 1px;
-}
-
-.dashboard-main {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 2rem 1.25rem;
-}
-
-.page-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin-bottom: 1.5rem;
-}
-
 /* ========== 卡片 ========== */
-.user-card,
-.settings-card {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 1.25rem;
-  margin-bottom: 0.75rem;
-}
+/* Note: .card, .card-lg styles are from shared-styles/components.css */
 
-.card-header,
-.user-card h3,
-.settings-card h3 {
+.card-header-title {
   font-size: 0.6875rem;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
   letter-spacing: 0.05em;
-  margin-bottom: 0.875rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-light);
 }
 
 /* ========== 用户信息 ========== */
@@ -638,15 +577,15 @@ select.form-input {
 }
 
 /* ========== 危险区域 ========== */
-.settings-card.danger-zone {
+.card.danger-zone {
   border-color: rgba(239,68,68,0.15);
 }
 
-[data-theme="light"] .settings-card.danger-zone {
+[data-theme="light"] .card.danger-zone {
   border-color: rgba(239,68,68,0.25);
 }
 
-.settings-card.danger-zone h3 {
+.card.danger-zone .card-header-title {
   color: var(--error);
 }
 
@@ -1133,53 +1072,53 @@ select.form-input {
     height: 44px;
   }
 
-  .dashboard-header {
-    height: 48px;
-    padding: 0 1rem;
+  .admin-content {
+    padding: 1rem;
   }
 
-  .dashboard-header h1 {
-    font-size: 0.75rem;
-  }
-
-  .dashboard-main {
-    padding: 1.5rem 1rem;
-  }
-
-  .page-title {
-    font-size: 1rem;
+  .admin-header {
     margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
   }
 
-  .user-card,
-  .settings-card,
-  .section-card {
+  .admin-title {
+    font-size: 1rem;
+  }
+
+  .card.card-lg {
     padding: 1rem;
     margin-bottom: 0.5rem;
-    border-radius: var(--radius);
   }
 
-  .card-header {
+  .card-header-title {
     font-size: 0.625rem;
     margin-bottom: 0.75rem;
   }
 
-  .profile-avatar {
+  .profile-section {
+    gap: 0.75rem;
+  }
+
+  .user-card-avatar {
     width: 32px;
     height: 32px;
     font-size: 0.75rem;
   }
 
-  .profile-name {
+  .user-card-name {
     font-size: 0.875rem;
   }
 
-  .profile-email {
+  .user-card-title {
     font-size: 0.625rem;
   }
 
-  .user-info-item {
-    padding: 0.625rem 0;
+  .status-section {
+    gap: 0.5rem;
+  }
+
+  .status-row {
+    padding: 0.5rem 0;
   }
 
   .log-item {
@@ -1264,13 +1203,14 @@ select.form-input {
 
 /* ========== 平板适配 ========== */
 @media (min-width: 481px) and (max-width: 768px) {
-  /* Split layout on tablet */
+  /* 改为纵向布局，避免表单区域过窄 */
   .auth-split-container {
-    flex-direction: row;
+    flex-direction: column;
   }
 
   .auth-brand-section {
-    padding: 2rem;
+    padding: 1.5rem;
+    flex: 0 0 auto;
   }
 
   .auth-brand-title {
@@ -1278,7 +1218,14 @@ select.form-input {
   }
 
   .auth-form-section {
-    padding: 2rem;
+    padding: 1.5rem;
+    flex: 1;
+  }
+
+  /* 表单最大宽度约束 */
+  .auth-form {
+    max-width: 400px;
+    margin: 0 auto;
   }
 
   .stats-grid {
@@ -1496,4 +1443,425 @@ select.form-input {
   display: flex;
   gap: 0.75rem;
   justify-content: flex-end;
+}
+
+/* ========== MagicUI-Style Animations ========== */
+/* Shimmer Button Effect */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--text) 0%, rgba(255,107,53,0.1) 50%, var(--text) 100%);
+  background-size: 200% 200%;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,107,53,0.15) 50%,
+    transparent 100%
+  );
+  animation: shimmer-slide 2s ease-in-out infinite;
+}
+
+.btn-primary:hover {
+  animation: shimmer-pulse 1s ease-in-out infinite;
+}
+
+@keyframes shimmer-slide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+@keyframes shimmer-pulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.02); }
+}
+
+/* Animated Grid Background for Brand Section */
+.auth-brand-section {
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-brand-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,107,53,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,107,53,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: grid-drift 20s linear infinite;
+}
+
+.auth-brand-section::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 50%,
+    transparent 0%,
+    rgba(51,51,51,0.8) 70%
+  );
+}
+
+.auth-brand-content {
+  position: relative;
+  z-index: 1;
+}
+
+.auth-brand-services {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes grid-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 40px; }
+}
+
+/* Card Glow Effects - using .card from shared-styles */
+.card:hover {
+  border-color: rgba(255,107,53,0.3);
+  box-shadow:
+    0 4px 12px rgba(0,0,0,0.1),
+    0 0 20px rgba(255,107,53,0.08);
+  transform: translateY(-2px);
+}
+
+[data-theme="light"] .card:hover {
+  box-shadow:
+    0 4px 12px rgba(0,0,0,0.05),
+    0 0 20px rgba(255,107,53,0.1);
+}
+
+/* Entrance Animations */
+.auth-form-wrapper {
+  animation: fade-in-up 0.4s ease-out;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Logo Pulse */
+.auth-logo-dot {
+  animation: logo-pulse 2s ease-in-out infinite;
+}
+
+.header-logo-dot {
+  animation: logo-pulse 2s ease-in-out infinite;
+}
+
+@keyframes logo-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+/* Status Badge Animation */
+.status-dot::before {
+  animation: status-blink 2s ease-in-out infinite;
+}
+
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Theme Toggle Spin */
+.theme-toggle:hover {
+  animation: toggle-spin 0.3s ease;
+}
+
+@keyframes toggle-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(15deg); }
+}
+
+/* Input Focus Glow */
+.form-input:focus {
+  box-shadow: 0 0 0 3px rgba(255,107,53,0.1);
+}
+
+/* Verify Icon Pulse */
+.verify-icon {
+  animation: verify-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes verify-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(34,197,94,0);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(34,197,94,0.3);
+  }
+}
+
+.verify-icon.error {
+  animation: verify-error-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes verify-error-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(239,68,68,0);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(239,68,68,0.3);
+  }
+}
+
+/* Toast Slide Animation Enhancement */
+#toast.show {
+  animation: toast-slide-in 0.25s ease-out forwards;
+}
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateX(-50%) translateY(80px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Button Loading Spin Enhancement */
+.btn-loading::after {
+  animation: btn-spin 0.6s linear infinite, btn-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes btn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Chart Bar Animation */
+.chart-bar {
+  animation: bar-rise 0.5s ease-out forwards;
+  animation-delay: calc(var(--bar-index, 0) * 0.05s);
+}
+
+@keyframes bar-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+/* Danger Zone Warning Animation */
+.card.danger-zone {
+  animation: danger-border-pulse 3s ease-in-out infinite;
+}
+
+@keyframes danger-border-pulse {
+  0%, 100% { border-color: rgba(239,68,68,0.15); }
+  50% { border-color: rgba(239,68,68,0.25); }
+}
+
+[data-theme="light"] .card.danger-zone {
+  animation: danger-border-pulse-light 3s ease-in-out infinite;
+}
+
+@keyframes danger-border-pulse-light {
+  0%, 100% { border-color: rgba(239,68,68,0.25); }
+  50% { border-color: rgba(239,68,68,0.35); }
+}
+
+/* ========== Login Page Entrance Animations ========== */
+.login-split .login-brand {
+  animation: login-brand-enter 0.6s ease-out forwards;
+}
+
+.login-split .login-form {
+  animation: login-form-enter 0.6s ease-out forwards;
+  animation-delay: 0.1s;
+}
+
+.login-split .login-brand-logo {
+  animation: login-logo-enter 0.5s ease-out forwards;
+  animation-delay: 0.2s;
+}
+
+.login-split .login-brand-desc {
+  animation: login-desc-enter 0.5s ease-out forwards;
+  animation-delay: 0.3s;
+}
+
+.login-split .login-form-title {
+  animation: login-title-enter 0.4s ease-out forwards;
+  animation-delay: 0.2s;
+}
+
+.login-split [data-form-content] {
+  animation: login-content-enter 0.4s ease-out forwards;
+  animation-delay: 0.3s;
+}
+
+@keyframes login-brand-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes login-form-enter {
+  from {
+    opacity: 0;
+    transform: translateX(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes login-logo-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-desc-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-title-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-content-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ========== Dashboard Card Entrance Animations ========== */
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Dashboard specific styles */
+.admin-content {
+  padding: 1.5rem;
+  min-height: 100vh;
+  background: var(--bg);
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-title {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.card-header-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.profile-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.status-value {
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.action-row {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-light);
 }
