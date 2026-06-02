@@ -32,6 +32,9 @@ async function apiFetch(endpoint, options = {}) {
   try {
     const method = (options.method || 'GET').toUpperCase();
 
+    // Check if body is FormData (for file uploads)
+    const isFormData = options.body instanceof FormData;
+
     // Add CSRF token for POST/PUT/DELETE requests
     if (['POST', 'PUT', 'DELETE'].includes(method)) {
       const csrfToken = await ensureCsrfToken();
@@ -41,14 +44,16 @@ async function apiFetch(endpoint, options = {}) {
       };
     }
 
+    // Build headers - only set Content-Type for JSON requests, not FormData
+    const headers = isFormData
+      ? { ...options.headers } // Let browser set Content-Type for FormData
+      : { 'Content-Type': 'application/json', ...options.headers };
+
     const res = await fetch(endpoint, {
       ...options,
       credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined
+      headers,
+      body: isFormData ? options.body : (options.body ? JSON.stringify(options.body) : undefined)
     });
 
     if (!res.ok) {
@@ -134,6 +139,93 @@ function setButtonLoading(button, loading) {
   }
 }
 
+// ========== Form Error Display ==========
+/**
+ * 显示表单字段错误
+ * @param {string|HTMLElement} input - 输入元素或其ID
+ * @param {string} message - 错误消息
+ */
+function showFieldError(input, message) {
+  const inputEl = typeof input === 'string' ? document.getElementById(input) : input;
+  if (!inputEl) return;
+
+  // 添加错误样式
+  inputEl.classList.add('input-error');
+
+  // 查找或创建错误消息元素
+  let errorEl = inputEl.parentElement.querySelector('.input-error-message');
+  if (!errorEl) {
+    errorEl = document.createElement('div');
+    errorEl.className = 'input-error-message';
+    inputEl.parentElement.appendChild(errorEl);
+  }
+  errorEl.textContent = message;
+}
+
+/**
+ * 清除表单字段错误
+ * @param {string|HTMLElement} input - 输入元素或其ID
+ */
+function clearFieldError(input) {
+  const inputEl = typeof input === 'string' ? document.getElementById(input) : input;
+  if (!inputEl) return;
+
+  inputEl.classList.remove('input-error');
+  const errorEl = inputEl.parentElement.querySelector('.input-error-message');
+  if (errorEl) {
+    errorEl.remove();
+  }
+}
+
+/**
+ * 清除表单中的所有错误
+ * @param {HTMLFormElement} form - 表单元素
+ */
+function clearFormErrors(form) {
+  if (!form) return;
+  form.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
+  form.querySelectorAll('.input-error-message').forEach(el => el.remove());
+}
+
+/**
+ * 显示表单提交结果反馈
+ * @param {HTMLFormElement} form - 表单元素
+ * @param {boolean} success - 是否成功
+ * @param {string} message - 消息
+ */
+function showFormFeedback(form, success, message) {
+  if (!form) return;
+
+  // 在表单底部添加反馈消息
+  let feedbackEl = form.querySelector('.form-feedback');
+  if (!feedbackEl) {
+    feedbackEl = document.createElement('div');
+    feedbackEl.className = 'form-feedback';
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.parentElement.insertBefore(feedbackEl, submitBtn.nextSibling);
+    } else {
+      form.appendChild(feedbackEl);
+    }
+  }
+
+  feedbackEl.className = `form-feedback ${success ? 'form-success' : 'form-error'}`;
+  feedbackEl.textContent = message;
+  feedbackEl.style.cssText = `
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius);
+    font-size: 0.75rem;
+    background: ${success ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'};
+    color: ${success ? 'var(--success)' : 'var(--error)'};
+  `;
+
+  // 3秒后自动消失
+  setTimeout(() => {
+    if (feedbackEl) feedbackEl.remove();
+  }, 3000);
+}
+
 // ========== Modal Component ==========
 function showModal(title, bodyContent, onConfirm, confirmText = '确认', cancelText = '取消') {
   // Remove existing modal if any
@@ -206,5 +298,9 @@ window.showToast = showToast;
 window.setupPasswordToggle = setupPasswordToggle;
 window.setupAllPasswordToggles = setupAllPasswordToggles;
 window.setButtonLoading = setButtonLoading;
+window.showFieldError = showFieldError;
+window.clearFieldError = clearFieldError;
+window.clearFormErrors = clearFormErrors;
+window.showFormFeedback = showFormFeedback;
 window.showModal = showModal;
 window.showEditModal = showEditModal;

@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "message": "Detected 1 staged files, 0 doc updates needed.",
+  "stagedFiles": [
+    "src/routes/user-management.js"
+  ],
+  "suggestions": [],
+  "timestamp": "2026-05-31T09:35:22.887Z",
+  "commitInfo": {
+    "hash": "a1186a4bdb9e86a7881916a6f2c2a0582556e92d",
+    "message": "refactor: MindAuth UI重构 - 使用shared-styles组件系统和MagicUI动画风格",
+    "author": "huisway",
+    "date": "2026-05-30 19:50:19 +0800"
+  }
+}

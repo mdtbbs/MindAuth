@@ -7,6 +7,9 @@ const { isValidPassword, isValidEmail, getPasswordValidationError } = require('.
 const { generateToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
+const { avatarUpload, bannerUpload } = require('../middleware/upload');
+const path = require('path');
+const fs = require('fs');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -25,15 +28,25 @@ router.post('/change-password', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: getPasswordValidationError(new_password) || '密码不符合要求' });
     }
 
+    // Fetch password_hash separately (not included in req.user for security)
+    const [userRows] = await pool.execute(
+      'SELECT password_hash FROM users WHERE id = ?',
+      [user.id]
+    );
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
+    const passwordHash = userRows[0].password_hash;
+
     // Verify old password
-    const validPassword = await bcrypt.compare(old_password, user.password_hash);
+    const validPassword = await bcrypt.compare(old_password, passwordHash);
     if (!validPassword) {
       return res.status(401).json({ success: false, message: '旧密码错误' });
     }
 
     // Update password
-    const passwordHash = await bcrypt.hash(new_password, 10);
-    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, user.id]);
+    const newPasswordHash = await bcrypt.hash(new_password, 10);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newPasswordHash, user.id]);
 
     // Clear all sessions (force re-login)
     await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [user.id]);
@@ -99,8 +112,18 @@ router.delete('/', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: '请输入密码确认删除' });
     }
 
+    // Fetch password_hash separately (not included in req.user for security)
+    const [userRows] = await pool.execute(
+      'SELECT password_hash FROM users WHERE id = ?',
+      [user.id]
+    );
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
+    const passwordHash = userRows[0].password_hash;
+
     // Verify password
-    const validPassword = await bcrypt.compare(password, user.password_hash);
+    const validPassword = await bcrypt.compare(password, passwordHash);
     if (!validPassword) {
       return res.status(401).json({ success: false, message: '密码错误' });
     }
@@ -124,6 +147,118 @@ router.delete('/', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Delete account error:', err);
     res.status(500).json({ success: false, message: '删除账号失败' });
+  }
+});
+
+// POST /avatar - Upload avatar
+router.post('/avatar', requireAuth, avatarUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: '请选择图片文件' });
+    }
+
+    const user = req.user;
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+
+    // 删除旧头像文件（如果存在）
+    const [oldRows] = await pool.execute('SELECT avatar_url FROM users WHERE id = ?', [user.id]);
+    if (oldRows.length > 0 && oldRows[0].avatar_url) {
+      const oldPath = path.join(__dirname, '../../public', oldRows[0].avatar_url);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+      }
+    }
+
+    // 更新数据库
+    await pool.execute('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, user.id]);
+
+    res.json({ success: true, avatar_url: avatarUrl });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ success: false, message: '图片大小不能超过 2MB' });
+    }
+    res.status(500).json({ success: false, message: '上传头像失败' });
+  }
+});
+
+// DELETE /avatar - Delete avatar
+router.delete('/avatar', requireAuth, async (req, res) => {
+  try {
+    const user = req.user;
+
+    // 获取旧头像路径
+    const [rows] = await pool.execute('SELECT avatar_url FROM users WHERE id = ?', [user.id]);
+    if (rows.length > 0 && rows[0].avatar_url) {
+      const oldPath = path.join(__dirname, '../../public', rows[0].avatar_url);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+      }
+    }
+
+    // 更新数据库
+    await pool.execute('UPDATE users SET avatar_url = NULL WHERE id = ?', [user.id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Avatar delete error:', err);
+    res.status(500).json({ success: false, message: '删除头像失败' });
+  }
+});
+
+// POST /banner - Upload banner
+router.post('/banner', requireAuth, bannerUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: '请选择图片文件' });
+    }
+
+    const user = req.user;
+    const bannerUrl = `/uploads/banners/${req.file.filename}`;
+
+    // 删除旧背景文件（如果存在）
+    const [oldRows] = await pool.execute('SELECT banner_url FROM users WHERE id = ?', [user.id]);
+    if (oldRows.length > 0 && oldRows[0].banner_url) {
+      const oldPath = path.join(__dirname, '../../public', oldRows[0].banner_url);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+      }
+    }
+
+    // 更新数据库
+    await pool.execute('UPDATE users SET banner_url = ? WHERE id = ?', [bannerUrl, user.id]);
+
+    res.json({ success: true, banner_url: bannerUrl });
+  } catch (err) {
+    console.error('Banner upload error:', err);
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ success: false, message: '图片大小不能超过 5MB' });
+    }
+    res.status(500).json({ success: false, message: '上传背景图失败' });
+  }
+});
+
+// DELETE /banner - Delete banner
+router.delete('/banner', requireAuth, async (req, res) => {
+  try {
+    const user = req.user;
+
+    // 获取旧背景路径
+    const [rows] = await pool.execute('SELECT banner_url FROM users WHERE id = ?', [user.id]);
+    if (rows.length > 0 && rows[0].banner_url) {
+      const oldPath = path.join(__dirname, '../../public', rows[0].banner_url);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+      }
+    }
+
+    // 更新数据库
+    await pool.execute('UPDATE users SET banner_url = NULL WHERE id = ?', [user.id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Banner delete error:', err);
+    res.status(500).json({ success: false, message: '删除背景图失败' });
   }
 });
 

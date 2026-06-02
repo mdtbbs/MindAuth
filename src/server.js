@@ -154,8 +154,27 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Error handler
+// Error handler - handle multer errors specifically
 app.use((err, req, res, next) => {
+  // Handle multer file size errors
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    // Determine which upload limit based on route
+    const isAvatar = req.path.includes('/avatar');
+    const isBanner = req.path.includes('/banner');
+    const limit = isBanner ? '5MB' : '2MB';
+    return res.status(400).json({ success: false, message: `图片大小不能超过 ${limit}` });
+  }
+
+  // Handle multer file type errors
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({ success: false, message: '请选择有效的图片文件' });
+  }
+
+  // Handle multer general errors
+  if (err.message && err.message.includes('File too large')) {
+    return res.status(400).json({ success: false, message: '文件大小超出限制' });
+  }
+
   console.error('Server error:', err);
   res.status(500).json({ success: false, message: '服务器错误' });
 });

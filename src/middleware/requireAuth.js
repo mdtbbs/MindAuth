@@ -19,7 +19,7 @@ async function requireAuth(req, res, next) {
 
     // Fallback to MySQL (exclude password_hash for security)
     const [rows] = await pool.execute(
-      'SELECT id, username, email, email_verified, created_at FROM users WHERE session_token = ?',
+      'SELECT id, username, email, email_verified, role, avatar_url, banner_url, created_at FROM users WHERE session_token = ?',
       [token]
     );
 

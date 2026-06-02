@@ -14,6 +14,8 @@ async function initSchema() {
         session_token VARCHAR(255) DEFAULT NULL,
         email_verified TINYINT(1) DEFAULT 0,
         role VARCHAR(50) DEFAULT 'user',
+        avatar_url VARCHAR(500) DEFAULT NULL,
+        banner_url VARCHAR(500) DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_users_session (session_token),
         INDEX idx_users_role (role),
@@ -154,6 +156,23 @@ async function initSchema() {
     } catch (alterErr) {
       if (alterErr.code !== 'ER_DUP_FIELDNAME') {
         console.warn('Could not add idx_logs_stats:', alterErr.message);
+      }
+    }
+
+    // Add avatar_url and banner_url columns if they don't exist (for existing databases)
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500) DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add avatar_url:', alterErr.message);
+      }
+    }
+
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN banner_url VARCHAR(500) DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add banner_url:', alterErr.message);
       }
     }
 

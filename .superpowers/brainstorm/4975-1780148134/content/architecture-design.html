@@ -1,0 +1,131 @@
+<h2>MindAuth UI 升级 - 架构设计</h2>
+<p class="subtitle">头像上传功能 + 极简科技风 UI</p>
+
+<div class="mockup">
+  <div class="mockup-header">头像功能架构</div>
+  <div class="mockup-body" style="padding: 24px; background: #fafafa;">
+
+    <!-- Architecture diagram -->
+    <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+      <!-- MindAuth -->
+      <div style="background: #fff; border: 2px solid #ff6b35; border-radius: 12px; padding: 16px; width: 200px;">
+        <div style="font-size: 14px; font-weight: 600; color: #ff6b35; margin-bottom: 8px;">MindAuth</div>
+        <div style="font-size: 11px; color: #666;">
+          <div style="margin-bottom: 4px;">📁 /uploads/avatars/</div>
+          <div style="margin-bottom: 4px;">📁 /uploads/banners/</div>
+          <div>🔧 上传 API</div>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="display: flex; align-items: center; color: #999;">→</div>
+
+      <!-- Database -->
+      <div style="background: #fff; border: 2px solid #4caf50; border-radius: 12px; padding: 16px; width: 150px;">
+        <div style="font-size: 14px; font-weight: 600; color: #4caf50; margin-bottom: 8px;">Database</div>
+        <div style="font-size: 11px; color: #666;">
+          <div>avatar_url</div>
+          <div>banner_url</div>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="display: flex; align-items: center; color: #999;">→</div>
+
+      <!-- Other Projects -->
+      <div style="background: #fff; border: 2px solid #2196f3; border-radius: 12px; padding: 16px; width: 180px;">
+        <div style="font-size: 14px; font-weight: 600; color: #2196f3; margin-bottom: 8px;">其他项目</div>
+        <div style="font-size: 11px; color: #666;">
+          <div>MindFourm</div>
+          <div>EasyManager</div>
+          <div style="margin-top: 4px; font-style: italic;">通过 API 获取头像</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 24px; padding: 16px; background: #f5f5f5; border-radius: 8px;">
+      <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px;">数据流程</div>
+      <div style="font-size: 12px; color: #666; line-height: 1.8;">
+        1. 用户在 MindAuth 上传头像 → 存储到 /uploads/avatars/<br>
+        2. 文件 URL 存入 users 表 (avatar_url, banner_url)<br>
+        3. 其他项目调用 /api/user/:id 或 /api/me 获取用户信息<br>
+        4. 返回的数据包含 avatar_url，前端直接显示
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 24px;">UI 组件升级预览</h3>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">当前按钮（花里胡哨）</div>
+    <div class="mockup-body" style="padding: 20px; background: #fff;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button style="background: linear-gradient(135deg, #ff6b35, #ff8c5a); color: #fff; padding: 10px 20px; border-radius: 6px; border: none; box-shadow: 0 2px 8px rgba(255,107,53,0.3); font-size: 13px;">渐变按钮</button>
+        <button style="background: #fff; color: #ff6b35; padding: 10px 20px; border-radius: 6px; border: 2px solid #ff6b35; font-size: 13px;">边框按钮</button>
+        <button style="background: #f5f5f5; color: #666; padding: 10px 20px; border-radius: 6px; border: 1px solid #ddd; font-size: 13px;">次要按钮</button>
+      </div>
+      <div style="margin-top: 12px; font-size: 11px; color: #999;">问题：渐变、阴影、不一致</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">新按钮风格（轻量线框）</div>
+    <div class="mockup-body" style="padding: 20px; background: #0a0a0a;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <!-- Primary outline button -->
+        <button style="background: transparent; color: #fff; padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); font-size: 13px; transition: all 0.15s ease;">主要按钮</button>
+        <!-- Secondary button -->
+        <button style="background: transparent; color: rgba(255,255,255,0.6); padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); font-size: 13px;">次要按钮</button>
+        <!-- Danger button -->
+        <button style="background: transparent; color: #f44336; padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(244,67,54,0.3); font-size: 13px;">危险按钮</button>
+      </div>
+      <div style="margin-top: 12px; font-size: 11px; color: rgba(255,255,255,0.5);">
+        ✓ 无渐变、无阴影<br>
+        ✓ 细边框 (1px)<br>
+        ✓ hover 时边框加深/填充
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 24px;">头像上传组件预览</h3>
+
+<div class="mockup">
+  <div class="mockup-header">个人信息编辑页</div>
+  <div class="mockup-body" style="padding: 24px; background: #0a0a0a;">
+    <div style="max-width: 400px;">
+      <!-- Banner section -->
+      <div style="height: 120px; background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); position: relative; margin-bottom: -40px;">
+        <div style="position: absolute; right: 8px; bottom: 8px;">
+          <button style="background: rgba(0,0,0,0.5); color: #fff; padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); font-size: 11px;">更换背景</button>
+        </div>
+      </div>
+
+      <!-- Avatar and info -->
+      <div style="padding-left: 20px;">
+        <div style="width: 80px; height: 80px; background: #ff6b35; border-radius: 50%; border: 3px solid #0a0a0a; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px; font-weight: 600; position: relative;">
+          U
+          <div style="position: absolute; bottom: -4px; right: -4px; background: #333; border-radius: 50%; width: 24px; height: 24px; border: 2px solid #0a0a0a; display: flex; align-items: center; justify-content: center;">
+            <span style="font-size: 10px;">📷</span>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; color: #fff; font-size: 18px; font-weight: 500;">用户名</div>
+        <div style="color: rgba(255,255,255,0.5); font-size: 13px;">user@example.com</div>
+
+        <!-- Action buttons -->
+        <div style="display: flex; gap: 8px; margin-top: 16px;">
+          <button style="background: transparent; color: #ff6b35; padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(255,107,53,0.3); font-size: 13px;">更换头像</button>
+          <button style="background: transparent; color: rgba(255,255,255,0.6); padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); font-size: 13px;">编辑资料</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="label">设计确认</div>
+  <p style="font-size: 13px; color: #666;">以上设计是否符合您的预期？请回复 "可以" 继续，或提出修改建议。</p>
+</div>

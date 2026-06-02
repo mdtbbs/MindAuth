@@ -41,17 +41,29 @@ const views = {
         <button id="logout-btn" class="btn-secondary btn-sm">退出</button>
       </div>
 
-      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0s">
-        <div class="card-header-title">PROFILE</div>
-        <div class="profile-section">
-          <div class="user-card-avatar" id="avatar-display">U</div>
-          <div>
-            <div class="user-card-name" id="username-display"></div>
-            <div class="user-card-title" id="email-display"></div>
+      <!-- Profile Header with Banner and Avatar -->
+      <div class="profile-header animate-fade-in-up" style="animation-delay: 0s">
+        <div class="profile-banner" id="banner-display">
+          <button class="banner-upload-btn" id="banner-upload-btn" title="更换背景图">更换背景</button>
+        </div>
+        <div class="profile-avatar-container">
+          <div class="profile-avatar" id="avatar-display">
+            <span id="avatar-letter">U</span>
+            <img id="avatar-img" src="" alt="头像" style="display: none;">
           </div>
+          <button class="avatar-upload-btn" id="avatar-upload-btn" title="更换头像">
+            <span>📷</span>
+          </button>
+        </div>
+        <div class="profile-info">
+          <div class="profile-name" id="username-display"></div>
+          <div class="profile-email" id="email-display"></div>
         </div>
       </div>
+      <input type="file" id="avatar-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display: none;">
+      <input type="file" id="banner-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display: none;">
 
+      <!-- STATUS Card -->
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.1s">
         <div class="card-header-title">STATUS</div>
         <div class="status-section">
@@ -69,6 +81,7 @@ const views = {
         </div>
       </div>
 
+      <!-- LOGIN HISTORY Card -->
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.2s">
         <div class="card-header-title">LOGIN HISTORY</div>
         <div id="login-logs-container">
@@ -76,6 +89,7 @@ const views = {
         </div>
       </div>
 
+      <!-- AUTHORIZED APPS Card -->
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.3s">
         <div class="card-header-title">AUTHORIZED APPS</div>
         <div id="authorizations-container">
@@ -83,6 +97,7 @@ const views = {
         </div>
       </div>
 
+      <!-- ACCOUNT Card -->
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.4s">
         <div class="card-header-title">ACCOUNT</div>
         <div class="action-row">
@@ -273,6 +288,11 @@ async function router() {
     const app = document.getElementById('app');
     app.innerHTML = views.logout;
 
+    // 获取 redirect_uri 参数
+    const urlQueryParams = new URLSearchParams(window.location.search);
+    const hashQueryParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const redirectUri = urlQueryParams.get('redirect') || urlQueryParams.get('redirect_uri') || hashQueryParams.get('redirect_uri');
+
     const statusDiv = document.getElementById('logout-status');
     try {
       const result = await apiFetch('/api/logout', { method: 'POST' });
@@ -285,21 +305,39 @@ async function router() {
             <h2>已退出登录</h2>
             <p style="color: var(--text-muted);">感谢使用 MindAuth</p>
             <p id="logout-redirect-hint" style="color: var(--text-muted); margin-top: 0.5rem;">
-              <span id="logout-countdown">5</span> 秒后返回上一页
+              <span id="logout-countdown">3</span> 秒后跳转
             </p>
           </div>
           <p class="auth-link"><a href="#login">重新登录</a></p>
         `;
+      } else {
+        // 即使 API 返回失败（如未登录），也视为成功并跳转
+        statusDiv.innerHTML = `
+          <div class="verify-success">
+            <div class="verify-icon">✓</div>
+            <h2>已退出登录</h2>
+            <p style="color: var(--text-muted);">感谢使用 MindAuth</p>
+            <p id="logout-redirect-hint" style="color: var(--text-muted); margin-top: 0.5rem;">
+              <span id="logout-countdown">3</span> 秒后跳转
+            </p>
+          </div>
+          <p class="auth-link"><a href="#login">重新登录</a></p>
+        `;
+      }
 
-        // 5秒倒计时后返回上一页
-        let countdown = 5;
-        const countdownEl = document.getElementById('logout-countdown');
-        const timer = setInterval(() => {
-          countdown--;
-          if (countdownEl) countdownEl.textContent = countdown;
-          if (countdown <= 0) {
-            clearInterval(timer);
-            // 检查是否有上一页可以返回
+      // 3秒倒计时后跳转
+      let countdown = 3;
+      const countdownEl = document.getElementById('logout-countdown');
+      const timer = setInterval(() => {
+        countdown--;
+        if (countdownEl) countdownEl.textContent = countdown;
+        if (countdown <= 0) {
+          clearInterval(timer);
+          // 如果有 redirect_uri，跳转到指定页面
+          if (redirectUri) {
+            window.location.href = redirectUri;
+          } else {
+            // 否则返回上一页或登录页
             const hasReferrer = document.referrer && document.referrer.includes(window.location.host);
             if (hasReferrer) {
               window.history.back();
@@ -307,26 +345,16 @@ async function router() {
               window.location.hash = 'login';
             }
           }
-        }, 1000);
-      } else {
-        statusDiv.innerHTML = `
-          <div class="verify-error">
-            <div class="verify-icon error">✗</div>
-            <h2>退出失败</h2>
-            <p style="color: var(--text-muted);">${escapeHtml(result.message || '未知错误')}</p>
-          </div>
-          <p class="auth-link"><a href="#login">返回登录</a></p>
-        `;
-      }
+        }
+      }, 1000);
     } catch (err) {
-      statusDiv.innerHTML = `
-        <div class="verify-error">
-          <div class="verify-icon error">✗</div>
-          <h2>网络错误</h2>
-          <p style="color: var(--text-muted);">无法连接到服务器</p>
-        </div>
-        <p class="auth-link"><a href="#login">返回登录</a></p>
-      `;
+      // 网络错误也视为成功，直接跳转
+      Store.user = null;
+      if (redirectUri) {
+        window.location.href = redirectUri;
+      } else {
+        window.location.hash = 'login';
+      }
     }
     return;
   }
@@ -409,7 +437,27 @@ async function router() {
   // Populate dashboard data
   if (viewName === 'dashboard' && Store.user) {
     const username = Store.user.username || 'User';
-    document.getElementById('avatar-display').textContent = username.charAt(0).toUpperCase();
+
+    // 头像显示
+    const avatarLetter = document.getElementById('avatar-letter');
+    const avatarImg = document.getElementById('avatar-img');
+
+    if (Store.user.avatar_url) {
+      avatarLetter.style.display = 'none';
+      avatarImg.style.display = 'block';
+      avatarImg.src = Store.user.avatar_url;
+    } else {
+      avatarLetter.textContent = username.charAt(0).toUpperCase();
+      avatarLetter.style.display = 'block';
+      avatarImg.style.display = 'none';
+    }
+
+    // 背景图显示
+    const bannerDisplay = document.getElementById('banner-display');
+    if (Store.user.banner_url) {
+      bannerDisplay.innerHTML = `<img src="${Store.user.banner_url}" alt="背景图"><button class="banner-upload-btn" id="banner-upload-btn" title="更换背景图">更换背景</button>`;
+    }
+
     document.getElementById('username-display').textContent = username;
     document.getElementById('email-display').textContent = Store.user.email;
     document.getElementById('created-display').textContent = Store.user.created_at || '-';
@@ -714,6 +762,109 @@ document.addEventListener('click', async (e) => {
     if (result.success) {
       loadAuthorizations();
     }
+  }
+
+  // Avatar upload button
+  if (e.target.id === 'avatar-upload-btn' || e.target.closest('#avatar-upload-btn')) {
+    const input = document.getElementById('avatar-file-input');
+    input.click();
+  }
+
+  // Banner upload button
+  if (e.target.id === 'banner-upload-btn' || e.target.closest('#banner-upload-btn')) {
+    const input = document.getElementById('banner-file-input');
+    input.click();
+  }
+});
+
+// File input change handlers
+document.addEventListener('change', async (e) => {
+  if (e.target.id === 'avatar-file-input') {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // 验证文件大小
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('图片大小不能超过 2MB', 'error');
+      e.target.value = '';
+      return;
+    }
+
+    // 本地预览
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const avatarImg = document.getElementById('avatar-img');
+      const avatarLetter = document.getElementById('avatar-letter');
+      avatarImg.src = ev.target.result;
+      avatarImg.style.display = 'block';
+      avatarLetter.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+
+    // 上传
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const result = await apiFetch('/api/account/avatar', {
+        method: 'POST',
+        body: formData,
+        headers: {} // 不设置 Content-Type，让浏览器自动处理 multipart
+      });
+
+      if (result.success) {
+        showToast('头像已更新', 'success');
+        Store.user.avatar_url = result.avatar_url;
+      } else {
+        showToast(result.message || '上传失败', 'error');
+      }
+    } catch (err) {
+      showToast('上传失败', 'error');
+    }
+
+    e.target.value = ''; // 清空 input
+  }
+
+  if (e.target.id === 'banner-file-input') {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('图片大小不能超过 5MB', 'error');
+      e.target.value = '';
+      return;
+    }
+
+    // 本地预览
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const bannerDisplay = document.getElementById('banner-display');
+      bannerDisplay.innerHTML = `<img src="${ev.target.result}" alt="背景图"><button class="banner-upload-btn" id="banner-upload-btn" title="更换背景图">更换背景</button>`;
+    };
+    reader.readAsDataURL(file);
+
+    // 上传
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const result = await apiFetch('/api/account/banner', {
+        method: 'POST',
+        body: formData,
+        headers: {}
+      });
+
+      if (result.success) {
+        showToast('背景图已更新', 'success');
+        Store.user.banner_url = result.banner_url;
+      } else {
+        showToast(result.message || '上传失败', 'error');
+      }
+    } catch (err) {
+      showToast('上传失败', 'error');
+    }
+
+    e.target.value = '';
   }
 });
 

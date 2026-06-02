@@ -156,8 +156,8 @@ router.get('/login-logs', requireAuth, async (req, res) => {
 
 // Get current user
 router.get('/me', requireAuth, (req, res) => {
-  const { id, username, email, email_verified, created_at } = req.user;
-  res.json({ success: true, id, username, email, email_verified, created_at });
+  const { id, username, email, email_verified, role, avatar_url, banner_url, created_at } = req.user;
+  res.json({ success: true, id, username, email, email_verified, role, avatar_url, banner_url, created_at });
 });
 
 // Logout
