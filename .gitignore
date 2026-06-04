@@ -8,6 +8,7 @@ node_modules/
 
 # Test artifacts
 *.txt
+!public/robots.txt  # Allow robots.txt for SEO/security
 cookies*.txt
 *_cookies.txt
 *_cookie.txt
