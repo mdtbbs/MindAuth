@@ -153,12 +153,12 @@ app.get('/api/health', async (req, res) => {
 
 // SPA fallback - handle direct /login, /register, /logout URLs
 app.get('*', (req, res, next) => {
-  const path = req.path;
+  const reqPath = req.path;
 
   // Redirect /login, /register, /logout to hash format
-  if (path === '/login' || path === '/register' || path === '/logout') {
+  if (reqPath === '/login' || reqPath === '/register' || reqPath === '/logout') {
     const search = req.originalUrl.split('?')[1] || '';
-    const hashUrl = '/#' + path.slice(1) + (search ? '?' + search : '');
+    const hashUrl = '/#' + reqPath.slice(1) + (search ? '?' + search : '');
     return res.redirect(302, hashUrl);
   }
 

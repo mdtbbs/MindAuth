@@ -26,6 +26,7 @@ const path = require('path');
 function buildAuthorizationUrl(baseUrl, clientId, redirectUri, state, scopes = ['user:read']) {
   const scopeParam = scopes.join(' ');
   const url = new URL(baseUrl);
+  // XenForo 2.2+ uses /oauth2/authorize, some versions use /connected-account/authorize
   url.pathname = '/oauth2/authorize';
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
@@ -46,7 +47,8 @@ function buildAuthorizationUrl(baseUrl, clientId, redirectUri, state, scopes = [
  */
 async function exchangeCodeForToken(baseUrl, clientId, clientSecret, code, redirectUri) {
   const url = new URL(baseUrl);
-  url.pathname = '/oauth2/token';
+  // XenForo API token endpoint
+  url.pathname = '/api/oauth2/token';
 
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
