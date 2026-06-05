@@ -115,6 +115,46 @@ async function loadEmailConfig() {
   }
 }
 
+// Load XenForo configuration
+async function loadXenForoConfig() {
+  try {
+    const result = await apiFetch('/api/admin/xenforo-config');
+    const form = document.getElementById('xenforo-config-form');
+    const statusBadge = document.getElementById('xenforo-status-badge');
+
+    // Set callback URL hint
+    const baseUrl = window.location.origin;
+    document.getElementById('xf-callback-url').textContent = `${baseUrl}/api/xenforo/callback`;
+
+    if (result.success && result.config) {
+      form.base_url.value = result.config.base_url || '';
+      form.client_id.value = result.config.client_id || '';
+      form.client_secret.value = '';
+      form.enabled.checked = result.config.enabled === 1;
+      form.sync_avatar.checked = result.config.sync_avatar === 1;
+      form.sync_user_group.checked = result.config.sync_user_group === 1;
+
+      // 显示 client_secret 状态提示
+      if (result.config.has_client_secret) {
+        form.client_secret.placeholder = '密钥已设置，留空则保留原密钥';
+      } else {
+        form.client_secret.placeholder = '请输入 XenForo OAuth Client Secret';
+      }
+
+      // 显示启用状态
+      if (result.config.enabled) {
+        statusBadge.style.display = 'block';
+        statusBadge.innerHTML = '<span class="status-dot">已启用</span>';
+      } else {
+        statusBadge.style.display = 'block';
+        statusBadge.innerHTML = '<span class="status-dot warn">未启用</span>';
+      }
+    }
+  } catch {
+    console.error('Load XenForo config error');
+  }
+}
+
 // Handle admin login
 document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -138,6 +178,7 @@ document.getElementById('admin-login-form').addEventListener('submit', async (e)
       loadStats();
       loadClients();
       loadEmailConfig();
+      loadXenForoConfig();
       loadUsers();
       showToast('登录成功', 'success');
     } else {
@@ -304,6 +345,30 @@ document.getElementById('email-config-form').addEventListener('submit', async (e
   }
 });
 
+// Handle XenForo config form
+document.getElementById('xenforo-config-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const data = {
+    base_url: formData.get('base_url'),
+    client_id: formData.get('client_id'),
+    client_secret: formData.get('client_secret'),
+    enabled: formData.get('enabled') === 'on',
+    sync_avatar: formData.get('sync_avatar') === 'on',
+    sync_user_group: formData.get('sync_user_group') === 'on'
+  };
+
+  const result = await apiFetch('/api/admin/xenforo-config', {
+    method: 'PUT',
+    body: data
+  });
+
+  showToast(result.message, result.success ? 'success' : 'error');
+  if (result.success) {
+    loadXenForoConfig();
+  }
+});
+
 // Handle test email
 document.getElementById('test-email-btn').addEventListener('click', async () => {
   showModal('发送测试邮件', `
@@ -463,6 +528,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadStats();
     loadClients();
     loadEmailConfig();
+    loadXenForoConfig();
     loadUsers();
   } else {
     showLoginView();

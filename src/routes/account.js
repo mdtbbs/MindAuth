@@ -262,4 +262,34 @@ router.delete('/banner', requireAuth, async (req, res) => {
   }
 });
 
+// GET /linked-accounts - Get all linked external accounts
+router.get('/linked-accounts', requireAuth, async (req, res) => {
+  try {
+    const [linkedAccounts] = await pool.execute(`
+      SELECT provider, external_user_id, external_username, external_email,
+             external_avatar_url, external_user_group_id, external_is_admin,
+             external_is_moderator, linked_at
+      FROM external_identities WHERE user_id = ?
+    `, [req.user.id]);
+
+    res.json({
+      success: true,
+      linked_accounts: linkedAccounts.map(link => ({
+        provider: link.provider,
+        external_user_id: link.external_user_id,
+        external_username: link.external_username,
+        external_email: link.external_email,
+        external_avatar_url: link.external_avatar_url,
+        external_user_group_id: link.external_user_group_id,
+        external_is_admin: link.external_is_admin === 1,
+        external_is_moderator: link.external_is_moderator === 1,
+        linked_at: link.linked_at.toISOString()
+      }))
+    });
+  } catch (err) {
+    console.error('Get linked accounts error:', err);
+    res.status(500).json({ success: false, message: '获取关联账号失败' });
+  }
+});
+
 module.exports = router;

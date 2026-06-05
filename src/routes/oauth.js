@@ -371,6 +371,26 @@ router.get('/userinfo', async (req, res) => {
     if (scope.includes('profile')) {
       claims.name = user.username;
       claims.updated_at = Math.floor(new Date(user.created_at).getTime() / 1000);
+
+      // Include linked accounts in profile scope
+      const [linkedAccounts] = await pool.execute(`
+        SELECT provider, external_user_id, external_username, external_avatar_url,
+               external_user_group_id, external_is_admin, external_is_moderator, linked_at
+        FROM external_identities WHERE user_id = ?
+      `, [user.id]);
+
+      if (linkedAccounts.length > 0) {
+        claims.linked_accounts = linkedAccounts.map(link => ({
+          provider: link.provider,
+          external_user_id: link.external_user_id,
+          external_username: link.external_username,
+          external_avatar_url: link.external_avatar_url,
+          external_user_group_id: link.external_user_group_id,
+          external_is_admin: link.external_is_admin === 1,
+          external_is_moderator: link.external_is_moderator === 1,
+          linked_at: link.linked_at.toISOString()
+        }));
+      }
     }
 
     if (scope.includes('email')) {

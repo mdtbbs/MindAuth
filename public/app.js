@@ -7,6 +7,29 @@ const Store = new Proxy({ user: null }, {
   }
 });
 
+// Handle non-hash URLs: redirect /login to #/login, /register to #/register
+// This allows MindAuth to work with direct URL paths like /login?redirect=...
+(function handleDirectUrls() {
+  const path = window.location.pathname;
+  const search = window.location.search;
+
+  // Supported direct paths: /login, /register, /logout
+  const supportedPaths = ['login', 'register', 'logout'];
+
+  for (const supportedPath of supportedPaths) {
+    if (path === '/' + supportedPath || path === supportedPath) {
+      // Redirect to hash format after all scripts have loaded
+      // Use setTimeout to ensure this runs after DOMContentLoaded handlers
+      setTimeout(() => {
+        const newHash = '#' + supportedPath + (search || '');
+        // Use replace to avoid adding history entry
+        window.location.replace(newHash);
+      }, 0);
+      return; // Stop IIFE execution, don't run rest of the script yet
+    }
+  }
+})();
+
 // HTML escape function for XSS prevention
 function escapeHtml(text) {
   if (!text) return '';
@@ -93,6 +116,14 @@ const views = {
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.3s">
         <div class="card-header-title">AUTHORIZED APPS</div>
         <div id="authorizations-container">
+          <div class="empty-state">加载中...</div>
+        </div>
+      </div>
+
+      <!-- LINKED ACCOUNTS Card -->
+      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.35s">
+        <div class="card-header-title">LINKED ACCOUNTS</div>
+        <div id="linked-accounts-container">
           <div class="empty-state">加载中...</div>
         </div>
       </div>
@@ -473,10 +504,25 @@ async function router() {
       verificationActions.style.display = 'block';
     }
 
+    // Handle XenForo callback success/error
+    const xfSuccess = hashQueryParams.get('xf_success');
+    const xfError = hashQueryParams.get('xf_error');
+    if (xfSuccess) {
+      showToast(xfSuccess, 'success');
+      // Clear the URL params
+      window.location.hash = 'dashboard';
+    }
+    if (xfError) {
+      showToast(xfError, 'error');
+      window.location.hash = 'dashboard';
+    }
+
     // Load login logs
     loadLoginLogs();
     // Load authorizations
     loadAuthorizations();
+    // Load linked accounts
+    loadLinkedAccounts();
   }
 }
 
@@ -764,6 +810,40 @@ document.addEventListener('click', async (e) => {
     }
   }
 
+  // Link XenForo account
+  if (e.target.classList.contains('link-xenforo-btn')) {
+    window.location.href = '/api/xenforo/link';
+  }
+
+  // Unlink XenForo account
+  if (e.target.classList.contains('unlink-xenforo-btn')) {
+    const provider = e.target.dataset.provider;
+    if (!confirm('确定要取消关联吗？')) return;
+
+    const result = await apiFetch(`/api/xenforo/link`, { method: 'DELETE' });
+    showToast(result.message, result.success ? 'success' : 'error');
+    if (result.success) {
+      loadLinkedAccounts();
+    }
+  }
+
+  // Sync XenForo avatar
+  if (e.target.classList.contains('sync-xenforo-btn')) {
+    const result = await apiFetch('/api/xenforo/sync', { method: 'POST' });
+    showToast(result.message, result.success ? 'success' : 'error');
+    if (result.success && result.synced.avatar) {
+      // Update avatar display
+      await checkAuth();
+      const avatarImg = document.getElementById('avatar-img');
+      const avatarLetter = document.getElementById('avatar-letter');
+      if (Store.user.avatar_url) {
+        avatarImg.src = Store.user.avatar_url;
+        avatarImg.style.display = 'block';
+        avatarLetter.style.display = 'none';
+      }
+    }
+  }
+
   // Avatar upload button
   if (e.target.id === 'avatar-upload-btn' || e.target.closest('#avatar-upload-btn')) {
     const input = document.getElementById('avatar-file-input');
@@ -914,6 +994,53 @@ async function loadAuthorizations() {
   }
 }
 
+// Load linked accounts
+async function loadLinkedAccounts() {
+  const container = document.getElementById('linked-accounts-container');
+  try {
+    // Check if XenForo linking is enabled
+    const configResult = await apiFetch('/api/xenforo/config/status');
+    const xfEnabled = configResult.enabled;
+
+    // Get linked accounts
+    const result = await apiFetch('/api/account/linked-accounts');
+
+    if (result.success && result.linked_accounts.length > 0) {
+      const linkedHtml = result.linked_accounts.map(link => `
+        <div class="linked-account-item">
+          <div class="linked-account-info">
+            <div class="linked-account-provider">
+              <span class="provider-badge ${link.provider}">${link.provider.toUpperCase()}</span>
+              <span class="linked-account-name">${escapeHtml(link.external_username)}</span>
+            </div>
+            <div class="linked-account-meta">
+              ${link.external_is_admin ? '<span class="badge badge-admin">管理员</span>' : ''}
+              ${link.external_is_moderator ? '<span class="badge badge-mod">版主</span>' : ''}
+              <span class="linked-account-time">关联于 ${new Date(link.linked_at).toLocaleDateString()}</span>
+            </div>
+          </div>
+          <div class="linked-account-actions">
+            <button class="btn-ghost btn-sm sync-xenforo-btn" data-provider="${link.provider}" title="同步头像">同步</button>
+            <button class="btn-ghost btn-sm danger unlink-xenforo-btn" data-provider="${link.provider}" title="取消关联">取消关联</button>
+          </div>
+        </div>
+      `).join('');
+      container.innerHTML = linkedHtml;
+    } else if (xfEnabled) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <p>未关联外部账号</p>
+          <button class="btn-primary btn-sm link-xenforo-btn" style="margin-top: 0.5rem">关联 XenForo 论坛</button>
+        </div>
+      `;
+    } else {
+      container.innerHTML = '<div class="empty-state">外部账号关联功能未启用</div>';
+    }
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state">加载失败</div>';
+  }
+}
+
 // Check auth status on load
 async function checkAuth() {
   try {
@@ -958,7 +1085,17 @@ async function verifyEmailToken(token) {
 
 // Initialize
 window.addEventListener('hashchange', router);
-document.addEventListener('DOMContentLoaded', async () => {
-  await checkAuth();
-  router();
-});
+
+// Handle both cases: DOMContentLoaded already fired or not yet
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    await checkAuth();
+    router();
+  });
+} else {
+  // DOMContentLoaded already fired, run immediately
+  (async () => {
+    await checkAuth();
+    router();
+  })();
+}

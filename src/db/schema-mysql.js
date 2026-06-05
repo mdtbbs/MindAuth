@@ -124,8 +124,49 @@ async function initSchema() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // External identities table (for account linking)
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS external_identities (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        provider VARCHAR(50) NOT NULL,
+        external_user_id VARCHAR(255) NOT NULL,
+        external_username VARCHAR(255) DEFAULT NULL,
+        external_email VARCHAR(255) DEFAULT NULL,
+        external_avatar_url VARCHAR(500) DEFAULT NULL,
+        external_user_group_id INT DEFAULT NULL,
+        external_is_admin TINYINT(1) DEFAULT 0,
+        external_is_moderator TINYINT(1) DEFAULT 0,
+        provider_data JSON DEFAULT NULL,
+        linked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_provider (user_id, provider),
+        UNIQUE KEY unique_provider_external (provider, external_user_id),
+        INDEX idx_external_user (user_id),
+        INDEX idx_external_provider (provider),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // XenForo config table (single-row config)
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS xenforo_config (
+        id INT PRIMARY KEY,
+        base_url VARCHAR(255) NOT NULL DEFAULT '',
+        client_id VARCHAR(255) NOT NULL DEFAULT '',
+        client_secret VARCHAR(255) NOT NULL DEFAULT '',
+        enabled TINYINT(1) NOT NULL DEFAULT 0,
+        sync_avatar TINYINT(1) NOT NULL DEFAULT 1,
+        sync_user_group TINYINT(1) NOT NULL DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT chk_xenforo_single_row CHECK (id = 1)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // Ensure one row exists in email_config
     await conn.execute(`INSERT IGNORE INTO email_config (id) VALUES (1)`);
+
+    // Ensure one row exists in xenforo_config
+    await conn.execute(`INSERT IGNORE INTO xenforo_config (id) VALUES (1)`);
 
     // Insert default system configurations
     const defaultConfigs = [
@@ -146,7 +187,7 @@ async function initSchema() {
     try {
       await conn.execute('ALTER TABLE users ADD INDEX idx_users_stats (created_at, email_verified)');
     } catch (alterErr) {
-      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+      if (alterErr.code !== 'ER_DUP_KEYNAME') {
         console.warn('Could not add idx_users_stats:', alterErr.message);
       }
     }
@@ -154,7 +195,7 @@ async function initSchema() {
     try {
       await conn.execute('ALTER TABLE login_logs ADD INDEX idx_logs_stats (created_at, login_type)');
     } catch (alterErr) {
-      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+      if (alterErr.code !== 'ER_DUP_KEYNAME') {
         console.warn('Could not add idx_logs_stats:', alterErr.message);
       }
     }
@@ -218,6 +259,12 @@ async function seedTestOAuthClient() {
       client_id: '6d875cc521f1c60ba17dd53c7b9edc5a',
       client_secret: '35d820f46aa6a1b330258d3af5b60b3c0094719acebcb149fc03d96cdf8f99f1',
       redirect_uri: 'http://localhost:4000/api/auth/callback'
+    },
+    {
+      name: 'EasyManager',
+      client_id: 'easymanager',
+      client_secret: 'easymanager_secret_key_2024_dev_only',
+      redirect_uri: 'http://localhost:3001/api/auth/callback'
     }
   ];
 

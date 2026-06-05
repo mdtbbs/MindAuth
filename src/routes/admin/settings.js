@@ -198,4 +198,69 @@ router.put('/config/:key', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /xenforo-config - Get XenForo OAuth configuration
+router.get('/xenforo-config', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT base_url, client_id, client_secret, enabled, sync_avatar, sync_user_group, updated_at FROM xenforo_config WHERE id = 1');
+    const xfConfig = rows[0];
+
+    if (!xfConfig) {
+      return res.json({ success: true, config: null });
+    }
+
+    res.json({
+      success: true,
+      config: {
+        base_url: xfConfig.base_url,
+        client_id: xfConfig.client_id,
+        has_client_secret: !!xfConfig.client_secret,
+        enabled: xfConfig.enabled,
+        sync_avatar: xfConfig.sync_avatar,
+        sync_user_group: xfConfig.sync_user_group,
+        updated_at: xfConfig.updated_at
+      }
+    });
+  } catch (err) {
+    console.error('Get XenForo config error:', err);
+    res.status(500).json({ success: false, message: '获取 XenForo 配置失败' });
+  }
+});
+
+// PUT /xenforo-config - Update XenForo OAuth configuration
+router.put('/xenforo-config', requireAdmin, async (req, res) => {
+  try {
+    const { base_url, client_id, client_secret, enabled, sync_avatar, sync_user_group } = req.body;
+
+    // Validate base_url format if provided
+    if (base_url && !base_url.match(/^https?:\/\/.+/)) {
+      return res.status(400).json({ success: false, message: 'XenForo URL 必须以 http:// 或 https:// 开头' });
+    }
+
+    // Keep existing client_secret if not provided
+    let finalClientSecret = client_secret;
+    if (!client_secret) {
+      const [rows] = await pool.execute('SELECT client_secret FROM xenforo_config WHERE id = 1');
+      finalClientSecret = rows[0]?.client_secret || '';
+    }
+
+    await pool.execute(`
+      UPDATE xenforo_config
+      SET base_url = ?, client_id = ?, client_secret = ?, enabled = ?, sync_avatar = ?, sync_user_group = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+    `, [
+      base_url || '',
+      client_id || '',
+      finalClientSecret,
+      enabled ? 1 : 0,
+      sync_avatar ? 1 : 0,
+      sync_user_group ? 1 : 0
+    ]);
+
+    res.json({ success: true, message: 'XenForo 配置已保存' });
+  } catch (err) {
+    console.error('Update XenForo config error:', err);
+    res.status(500).json({ success: false, message: '保存 XenForo 配置失败' });
+  }
+});
+
 module.exports = router;

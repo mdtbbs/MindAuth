@@ -15,6 +15,7 @@ const oauthRoutes = require('./routes/oauth');
 const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
+const xenforoRoutes = require('./routes/xenforo');
 const { startCleanupScheduler } = require('./utils/cleanup');
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
 
@@ -84,6 +85,7 @@ app.use('/api', oauthRoutes);
 app.use('/api/password', passwordRoutes);
 app.use('/api/email-verification', emailVerificationRoutes);
 app.use('/api/account', accountRoutes);
+app.use('/api', xenforoRoutes);
 
 // Health check endpoint (public) - simplified for production security
 app.get('/api/health', async (req, res) => {
@@ -149,8 +151,18 @@ app.get('/api/health', async (req, res) => {
   res.status(statusCode).json(health);
 });
 
-// SPA fallback
-app.get('*', (req, res) => {
+// SPA fallback - handle direct /login, /register, /logout URLs
+app.get('*', (req, res, next) => {
+  const path = req.path;
+
+  // Redirect /login, /register, /logout to hash format
+  if (path === '/login' || path === '/register' || path === '/logout') {
+    const search = req.originalUrl.split('?')[1] || '';
+    const hashUrl = '/#' + path.slice(1) + (search ? '?' + search : '');
+    return res.redirect(302, hashUrl);
+  }
+
+  // For other routes, return index.html
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
