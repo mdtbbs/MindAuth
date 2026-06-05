@@ -11,6 +11,7 @@ MindAuth is an OAuth 2.0 authentication service providing centralized SSO for Mi
 - OAuth 2.0 Authorization Code Flow for third-party apps
 - Admin panel for user/client management
 - Session management with Redis caching
+- **XenForo 2 forum account linking** with avatar and user group sync
 
 ## Commands
 
@@ -75,7 +76,7 @@ npx playwright test  # Run E2E tests
 | `/token` | POST | Token exchange | RFC 6749 |
 | `/refresh` | POST | Token refresh | RFC 6749 |
 | `/introspect` | POST | Token validation | RFC 7662 |
-| `/userinfo` | GET | User info endpoint | OIDC Core |
+| `/userinfo` | GET | User info + linked_accounts | OIDC Core |
 | `/revoke` | POST | Token revocation | RFC 7009 |
 | `/verify` | POST | Session verification | Custom |
 
@@ -101,6 +102,17 @@ npx playwright test  # Run E2E tests
 | `/verify` | POST | Verify email token |
 | `/status` | GET | Check verification status |
 
+### XenForo Account Linking (`/api`)
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/xenforo/config/status` | GET | Check if linking is enabled | Public |
+| `/xenforo/link` | GET | Start OAuth flow, redirect to XenForo | Session |
+| `/xenforo/callback` | GET | Handle XenForo OAuth callback | State token |
+| `/xenforo/status` | GET | Get linking status | Session |
+| `/xenforo/link` | DELETE | Unlink XenForo account | Session |
+| `/xenforo/sync` | POST | Manually sync avatar/user group | Session |
+| `/account/linked-accounts` | GET | Get all linked external accounts | Session |
+
 ### Admin Panel (`/api/admin`)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -110,6 +122,7 @@ npx playwright test  # Run E2E tests
 | `/clients` | GET/POST/PUT/DELETE | OAuth client management |
 | `/stats` | GET | System statistics |
 | `/email-config` | GET/PUT | SMTP configuration |
+| `/xenforo-config` | GET/PUT | XenForo OAuth configuration |
 | `/login-logs` | GET | Login logs |
 
 ## Database Tables
@@ -125,6 +138,8 @@ npx playwright test  # Run E2E tests
 | `login_logs` | Login history | user_id, ip, device, login_type (web/oauth) |
 | `email_config` | SMTP settings | host, port, user, password, from (single row id=1) |
 | `system_config` | Runtime config | key, value (session_lifetime, password_rules, etc.) |
+| `external_identities` | External account links | user_id, provider, external_user_id, external_username, external_avatar_url, external_user_group_id, external_is_admin, external_is_moderator, provider_data (JSON) |
+| `xenforo_config` | XenForo OAuth config | base_url, client_id, client_secret, enabled, sync_avatar, sync_user_group (single row id=1) |
 
 ### Redis Keys
 
@@ -136,6 +151,7 @@ npx playwright test  # Run E2E tests
 | `accesstoken:${token}` | 1h | OAuth access token |
 | `verify:${token}` | 1h | Email verification token |
 | `reset:${token}` | 1h | Password reset token |
+| `xf_state:${state}` | 5min | XenForo OAuth state token |
 | `ratelimit:${ip}` | Variable | Rate limit counter |
 
 ## Middleware
@@ -207,6 +223,7 @@ npx playwright test  # Run E2E tests
 | `request.js` | `getClientIp` (Cloudflare/proxy support) |
 | `datetime.js` | `formatMySQLDateTime` |
 | `cleanup.js` | Scheduled cleanup of expired tokens |
+| `xenforo-client.js` | `buildAuthorizationUrl`, `exchangeCodeForToken`, `fetchUserInfo`, `downloadAvatar` |
 
 ## Configuration (`src/config/index.js`)
 
@@ -243,6 +260,23 @@ npx playwright test  # Run E2E tests
 6. Refresh: POST /refresh with refresh_token
 ```
 
+## XenForo Account Linking Flow
+
+```
+1. User clicks "Link XenForo" on dashboard
+2. MindAuth → Generate state token → Store in Redis (xf_state:${state}, 5min TTL)
+3. Redirect to XenForo: /oauth2/authorize?client_id=X&state=S
+4. User authorizes on XenForo
+5. XenForo → Redirect to /api/xenforo/callback?code=C&state=S
+6. MindAuth → Validate state → Exchange code for token → Fetch userinfo
+7. Store external_identities record + sync avatar/user group (if enabled)
+8. Redirect to dashboard with success message
+```
+
+**UserInfo Endpoint Enhancement:**
+- `/api/userinfo` returns `linked_accounts` array in `profile` scope
+- Each linked account includes: provider, external_user_id, external_username, external_avatar_url, external_user_group_id, external_is_admin, external_is_moderator, linked_at
+
 ## Tests (`tests/`)
 
 | File | Coverage |
@@ -263,4 +297,4 @@ npx playwright test  # Run E2E tests
 - SSRF protection (private IP redirect_uri blocked)
 
 ---
-*Last updated: 2026-05-31*
+*Last updated: 2026-06-06*
