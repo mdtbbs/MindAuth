@@ -98,8 +98,8 @@ async function fetchUserInfo(baseUrl, accessToken) {
   });
 
   // XenForo returns user data in a nested structure
-  // The actual user info is often in response.user or directly in response
-  const user = response.user || response;
+  // XenForo 2.2+ uses 'me' as the wrapper, some versions use 'user' or direct return
+  const user = response.me || response.user || response;
 
   if (!user || !user.user_id) {
     throw new Error('Invalid user info response: ' + JSON.stringify(response));
