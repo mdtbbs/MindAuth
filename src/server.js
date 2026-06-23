@@ -16,6 +16,8 @@ const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
 const xenforoRoutes = require('./routes/xenforo');
+const smsRoutes = require('./routes/sms');
+const internalRoutes = require('./routes/internal');
 const { startCleanupScheduler } = require('./utils/cleanup');
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
 
@@ -85,6 +87,8 @@ app.use('/api', oauthRoutes);
 app.use('/api/password', passwordRoutes);
 app.use('/api/email-verification', emailVerificationRoutes);
 app.use('/api/account', accountRoutes);
+app.use('/api/sms', smsRoutes);
+app.use('/api/internal', internalRoutes);
 app.use('/api', xenforoRoutes);
 
 // Health check endpoint (public) - simplified for production security
@@ -198,8 +202,9 @@ async function startServer() {
     await initSchema();
     console.log('MySQL database initialized');
 
-    // Seed test data only in development/testing environment
-    if (process.env.NODE_ENV !== 'production') {
+    // Seed test data only when the environment explicitly allows it.
+    const shouldSeedTestData = ['development', 'test'].includes(process.env.NODE_ENV) || process.env.ENABLE_TEST_SEEDS === 'true';
+    if (shouldSeedTestData) {
       await seedTestAdmin();
       await seedTestOAuthClient();
     }

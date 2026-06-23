@@ -13,13 +13,16 @@ async function requireAuth(req, res, next) {
     // Check Redis cache first
     const cachedUser = await client.get(`session:${token}`);
     if (cachedUser) {
-      req.user = JSON.parse(cachedUser);
-      return next();
+      const parsedUser = JSON.parse(cachedUser);
+      if (Object.prototype.hasOwnProperty.call(parsedUser, 'phone_verified')) {
+        req.user = parsedUser;
+        return next();
+      }
     }
 
     // Fallback to MySQL (exclude password_hash for security)
     const [rows] = await pool.execute(
-      'SELECT id, username, email, email_verified, role, avatar_url, banner_url, created_at FROM users WHERE session_token = ?',
+      'SELECT id, username, email, email_verified, role, avatar_url, banner_url, phone, phone_verified, phone_verified_at, created_at FROM users WHERE session_token = ?',
       [token]
     );
 

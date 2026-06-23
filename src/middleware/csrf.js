@@ -41,21 +41,24 @@ function validateCsrf(req, res, next) {
     return next();
   }
 
-  // Skip CSRF for OAuth token endpoint (uses client_secret for auth)
+  // Skip CSRF only for exact public/service endpoints that do not rely on a
+  // browser session cookie for authorization.
   const path = req.path;
-  const exemptPaths = [
-    '/token',        // OAuth token exchange (has client_secret)
-    '/refresh',      // OAuth refresh (has client_secret)
-    '/introspect',   // OAuth introspect (has client_secret)
-    '/revoke',       // OAuth revoke (has client_secret)
-    '/verify',       // Session verification (no CSRF needed)
-    '/register',     // User registration (no session needed)
-    '/login',        // User login (creates session, rate-limited)
-    '/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
-    'clear-rate-limits' // Test endpoint (uses ADMIN_SECRET)
-  ];
+  const exemptPaths = new Set([
+    '/api/token',        // OAuth token exchange (has client_secret)
+    '/api/refresh',      // OAuth refresh (has client_secret)
+    '/api/introspect',   // OAuth introspect (has client_secret)
+    '/api/revoke',       // OAuth revoke (has client_secret)
+    '/api/verify',       // Session verification (no CSRF needed)
+    '/api/sms/sync-status', // Phone verification status sync uses a one-time token
+    '/api/email-verification/verify', // Email verification uses a one-time token
+    '/api/register',     // User registration (no session needed)
+    '/api/login',        // User login (creates session, rate-limited)
+    '/api/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
+    '/api/admin/test/clear-rate-limits' // Test endpoint (non-production only)
+  ]);
 
-  if (exemptPaths.some(p => path.endsWith(p))) {
+  if (exemptPaths.has(path)) {
     return next();
   }
 

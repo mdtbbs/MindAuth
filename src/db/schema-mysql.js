@@ -16,10 +16,14 @@ async function initSchema() {
         role VARCHAR(50) DEFAULT 'user',
         avatar_url VARCHAR(500) DEFAULT NULL,
         banner_url VARCHAR(500) DEFAULT NULL,
+        phone VARCHAR(20) DEFAULT NULL,
+        phone_verified TINYINT(1) NOT NULL DEFAULT 0,
+        phone_verified_at DATETIME DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_users_session (session_token),
         INDEX idx_users_role (role),
         INDEX idx_users_email_verified (email_verified),
+        UNIQUE KEY unique_users_phone (phone),
         INDEX idx_users_username (username),
         INDEX idx_users_email (email),
         INDEX idx_users_created (created_at)
@@ -99,6 +103,24 @@ async function initSchema() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS sms_audit_logs (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT DEFAULT NULL,
+        action VARCHAR(50) NOT NULL,
+        phone_masked VARCHAR(20) DEFAULT NULL,
+        success TINYINT(1) NOT NULL DEFAULT 0,
+        code VARCHAR(80) DEFAULT NULL,
+        ip_address VARCHAR(45) DEFAULT NULL,
+        user_agent VARCHAR(500) DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sms_audit_user (user_id),
+        INDEX idx_sms_audit_action (action),
+        INDEX idx_sms_audit_created (created_at),
+        INDEX idx_sms_audit_ip (ip_address)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // Email config table
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS email_config (
@@ -173,7 +195,8 @@ async function initSchema() {
       ['session_lifetime_days', '30', 'Session有效期（天）'],
       ['password_min_length', '6', '密码最小长度'],
       ['password_require_complexity', '0', '是否要求密码复杂度（0/1）'],
-      ['registration_enabled', '1', '是否允许新用户注册（0/1）']
+      ['registration_enabled', '1', '是否允许新用户注册（0/1）'],
+      ['sms_audit_retention_days', '365', '短信审计日志保留天数']
     ];
 
     for (const [key, value, desc] of defaultConfigs) {
@@ -214,6 +237,38 @@ async function initSchema() {
     } catch (alterErr) {
       if (alterErr.code !== 'ER_DUP_FIELDNAME') {
         console.warn('Could not add banner_url:', alterErr.message);
+      }
+    }
+
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add phone:', alterErr.message);
+      }
+    }
+
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN phone_verified TINYINT(1) NOT NULL DEFAULT 0');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add phone_verified:', alterErr.message);
+      }
+    }
+
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN phone_verified_at DATETIME DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('Could not add phone_verified_at:', alterErr.message);
+      }
+    }
+
+    try {
+      await conn.execute('ALTER TABLE users ADD UNIQUE KEY unique_users_phone (phone)');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_KEYNAME') {
+        console.warn('Could not add unique_users_phone:', alterErr.message);
       }
     }
 

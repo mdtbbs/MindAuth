@@ -19,8 +19,18 @@ async function cleanupExpiredData() {
   try {
     // Clean expired refresh_tokens (MySQL table)
     const [result] = await pool.execute('DELETE FROM refresh_tokens WHERE expires_at < ?', [now]);
+    const [configRows] = await pool.execute(
+      'SELECT value FROM system_config WHERE `key` = ? LIMIT 1',
+      ['sms_audit_retention_days']
+    );
+    const retentionDays = Math.max(parseInt(configRows[0]?.value || '365', 10) || 365, 1);
+    const smsCutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .replace('T', ' ')
+      .replace(/\.\d{3}Z$/, '');
+    const [smsResult] = await pool.execute('DELETE FROM sms_audit_logs WHERE created_at < ?', [smsCutoff]);
 
-    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens from MySQL`);
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens and ${smsResult.affectedRows} sms_audit_logs from MySQL`);
 
     // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
     // are stored in Redis and cleaned automatically via TTL

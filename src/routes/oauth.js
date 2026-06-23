@@ -15,6 +15,11 @@ const AUTH_CODE_TTL = 300; // 5 minutes in seconds (Redis TTL)
 // Standard scopes
 const VALID_SCOPES = ['openid', 'profile', 'email'];
 
+function maskPhone(phone) {
+  if (!phone) return null;
+  return String(phone).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
+}
+
 // RFC6749 standard error response
 function oauthError(res, statusCode, error, description) {
   return res.status(statusCode).json({
@@ -70,7 +75,7 @@ router.get('/authorize', async (req, res) => {
         user = JSON.parse(cachedUser);
       } else {
         // Fallback to MySQL
-        const [userRows] = await pool.execute('SELECT id, username, email FROM users WHERE session_token = ?', [token]);
+        const [userRows] = await pool.execute('SELECT id, username, email, phone_verified FROM users WHERE session_token = ?', [token]);
         user = userRows[0];
       }
     }
@@ -157,7 +162,7 @@ router.post('/token', async (req, res) => {
     await client.del(`authcode:${code}`);
 
     // Get user info
-    const [userRows] = await pool.execute('SELECT id, username, email, created_at FROM users WHERE id = ?', [parsedCode.user_id]);
+    const [userRows] = await pool.execute('SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?', [parsedCode.user_id]);
     const user = userRows[0];
 
     // Generate tokens
@@ -243,7 +248,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     // Get user info
-    const [userRows] = await pool.execute('SELECT id, username, email, created_at FROM users WHERE id = ?', [storedToken.user_id]);
+    const [userRows] = await pool.execute('SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?', [storedToken.user_id]);
     const user = userRows[0];
 
     // Generate new tokens (rotation)
@@ -358,7 +363,7 @@ router.get('/userinfo', async (req, res) => {
     const scope = parsed.scope || 'openid profile email';
 
     // Get user info
-    const [userRows] = await pool.execute('SELECT id, username, email, email_verified, created_at FROM users WHERE id = ?', [parsed.user_id]);
+    const [userRows] = await pool.execute('SELECT id, username, email, email_verified, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?', [parsed.user_id]);
     const user = userRows[0];
 
     if (!user) {
@@ -370,6 +375,12 @@ router.get('/userinfo', async (req, res) => {
 
     if (scope.includes('profile')) {
       claims.name = user.username;
+      claims.id = user.id;
+      claims.username = user.username;
+      claims.avatar_url = user.avatar_url;
+      claims.phone_verified = user.phone_verified === 1 || user.phone_verified === true;
+      claims.phone_verified_at = user.phone_verified_at;
+      claims.phone_masked = maskPhone(user.phone);
       claims.updated_at = Math.floor(new Date(user.created_at).getTime() / 1000);
 
       // Include linked accounts in profile scope
@@ -401,6 +412,47 @@ router.get('/userinfo', async (req, res) => {
     res.json(claims);
   } catch (err) {
     console.error('UserInfo error:', err);
+    oauthError(res, 500, 'server_error', '获取用户信息失败');
+  }
+});
+
+// GET /user - Compatibility endpoint used by older MindFourm builds.
+router.get('/user', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return oauthError(res, 401, 'invalid_token', '缺少或无效的 Authorization header');
+    }
+
+    const accessToken = authHeader.substring(7);
+    const tokenData = await client.get(`accesstoken:${accessToken}`);
+    if (!tokenData) {
+      return oauthError(res, 401, 'invalid_token', '无效或过期的 access token');
+    }
+
+    const parsed = JSON.parse(tokenData);
+    const [userRows] = await pool.execute(
+      'SELECT id, username, email, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?',
+      [parsed.user_id]
+    );
+    const user = userRows[0];
+
+    if (!user) {
+      return oauthError(res, 401, 'invalid_token', '用户不存在');
+    }
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      avatar_url: user.avatar_url,
+      phone_masked: maskPhone(user.phone),
+      phone_verified: user.phone_verified === 1 || user.phone_verified === true,
+      phone_verified_at: user.phone_verified_at,
+      created_at: user.created_at,
+    });
+  } catch (err) {
+    console.error('User compatibility endpoint error:', err);
     oauthError(res, 500, 'server_error', '获取用户信息失败');
   }
 });
@@ -501,11 +553,21 @@ router.post('/verify', async (req, res) => {
     const cachedUser = await client.get(`session:${session_token}`);
     if (cachedUser) {
       const user = JSON.parse(cachedUser);
-      return res.json({ success: true, user: { id: user.id, username: user.username, email: user.email, created_at: user.created_at } });
+      return res.json({
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          phone_verified: user.phone_verified === 1 || user.phone_verified === true,
+          phone_verified_at: user.phone_verified_at,
+          created_at: user.created_at
+        }
+      });
     }
 
     // Fallback to MySQL
-    const [userRows] = await pool.execute('SELECT id, username, email, created_at FROM users WHERE session_token = ?', [session_token]);
+    const [userRows] = await pool.execute('SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE session_token = ?', [session_token]);
     const user = userRows[0];
 
     if (!user) {

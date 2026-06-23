@@ -16,6 +16,11 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const loginRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5 * 60 * 1000 });
 const registerRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 60 * 60 * 1000 }); // 5 per hour
 
+function maskPhone(phone) {
+  if (!phone) return null;
+  return String(phone).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
+}
+
 // Register
 router.post('/register', registerRateLimiter, async (req, res) => {
   const { username, email, password } = req.body;
@@ -112,6 +117,12 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       username: user.username,
       email: user.email,
       email_verified: user.email_verified,
+      role: user.role,
+      avatar_url: user.avatar_url,
+      banner_url: user.banner_url,
+      phone: user.phone,
+      phone_verified: user.phone_verified,
+      phone_verified_at: user.phone_verified_at,
       created_at: user.created_at
     }));
 
@@ -156,8 +167,21 @@ router.get('/login-logs', requireAuth, async (req, res) => {
 
 // Get current user
 router.get('/me', requireAuth, (req, res) => {
-  const { id, username, email, email_verified, role, avatar_url, banner_url, created_at } = req.user;
-  res.json({ success: true, id, username, email, email_verified, role, avatar_url, banner_url, created_at });
+  const { id, username, email, email_verified, role, avatar_url, banner_url, phone, phone_verified, phone_verified_at, created_at } = req.user;
+  res.json({
+    success: true,
+    id,
+    username,
+    email,
+    email_verified,
+    role,
+    avatar_url,
+    banner_url,
+    phone_masked: maskPhone(phone),
+    phone_verified: phone_verified === 1 || phone_verified === true,
+    phone_verified_at,
+    created_at
+  });
 });
 
 // Logout

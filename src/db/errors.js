@@ -6,13 +6,14 @@ function getDuplicateField(err) {
   if (!isDuplicateError(err)) return null;
 
   const message = err.sqlMessage || '';
+  if (message.includes('phone')) return 'phone';
+  if (message.includes('username')) return 'username';
+  if (message.includes('email')) return 'email';
+
   const match = message.match(/Duplicate entry '.*' for key '.*\.(.+)'/);
   if (match && match[1]) {
     return match[1];
   }
-
-  if (message.includes('username')) return 'username';
-  if (message.includes('email')) return 'email';
 
   return null;
 }
