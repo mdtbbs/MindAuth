@@ -24,12 +24,16 @@ const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware
 const app = express();
 const PORT = config.server.port;
 
-// Trust proxy for CDN/reverse proxy scenarios
-app.set('trust proxy', true);
+// IP extraction is handled by utils/request.js with explicit trusted proxy checks.
+app.set('trust proxy', false);
 
 // CDN and CORS configuration
 const CDN_URL = config.server.cdnUrl;
 const ALLOWED_ORIGINS = config.server.allowedOrigins;
+
+if (config.server.isProduction && ALLOWED_ORIGINS.includes('*')) {
+  throw new Error('ALLOWED_ORIGINS=* is not allowed in production when credentials are enabled');
+}
 
 // CORS middleware - allow cross-origin API requests
 app.use(cors({
