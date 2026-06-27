@@ -73,7 +73,7 @@ app.use(helmet({
 app.use(compression()); // 响应压缩
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, '../public'), { maxAge: '1d' })); // 静态资源缓存1天
+app.use(express.static(path.join(__dirname, '../public'), { maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0' })); // 开发模式不缓存
 // Serve shared-styles from monorepo root
 app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles'), { maxAge: '1d' }));
 // Serve shared templates from monorepo
@@ -163,14 +163,15 @@ app.get('/api/health', async (req, res) => {
 app.get('*', (req, res, next) => {
   const reqPath = req.path;
 
-  // Redirect /login, /register, /logout to hash format
-  if (reqPath === '/login' || reqPath === '/register' || reqPath === '/logout') {
-    const search = req.originalUrl.split('?')[1] || '';
-    const hashUrl = '/#' + reqPath.slice(1) + (search ? '?' + search : '');
-    return res.redirect(302, hashUrl);
+  // In development, always serve fresh HTML (no caching)
+  if (process.env.NODE_ENV !== 'production') {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   }
 
-  // For other routes, return index.html
+  // For /login, /register, /logout: serve index.html directly (the SPA hash router handles the rest)
+  // For other routes: also serve index.html (SPA fallback)
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 

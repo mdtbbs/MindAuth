@@ -36,7 +36,7 @@ test.describe('OAuth Authorization Code Flow', () => {
     await page.fill('#username', testUsername);
     await page.fill('#password', testPassword);
     await page.click('#login-form button[type="submit"]');
-    await page.waitForSelector('.dashboard-container', { timeout: 5000 });
+    await page.waitForSelector('.auth-shell', { timeout: 5000 });
 
     // 验证登录成功 - 检查 /api/me 返回用户信息
     const meResponse = await page.request.get('/api/me');

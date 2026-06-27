@@ -42,11 +42,11 @@ test.describe('已登录用户自动跳转', () => {
     await page.click('#login-form button[type="submit"]');
 
     // 等待跳转到 dashboard
-    await page.waitForSelector('.dashboard-container', { timeout: 5000 });
+    await page.waitForSelector('.auth-shell', { timeout: 5000 });
 
     // 现在访问登录页 - 应自动跳转到 dashboard
     await page.goto('/#login');
-    await page.waitForSelector('.dashboard-container', { timeout: 3000 });
+    await page.waitForSelector('.auth-shell', { timeout: 3000 });
 
     // 验证确实在 dashboard 页面
     expect(page.url()).toContain('#dashboard');
@@ -67,11 +67,11 @@ test.describe('已登录用户自动跳转', () => {
     await page.fill('#username', testUser);
     await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
-    await page.waitForSelector('.dashboard-container', { timeout: 5000 });
+    await page.waitForSelector('.auth-shell', { timeout: 5000 });
 
     // 访问首页（无hash）- 应跳转到 dashboard
     await page.goto('/');
-    await page.waitForSelector('.dashboard-container', { timeout: 3000 });
+    await page.waitForSelector('.auth-shell', { timeout: 3000 });
 
     expect(page.url()).toContain('#dashboard');
   });
@@ -91,11 +91,11 @@ test.describe('已登录用户自动跳转', () => {
     await page.fill('#username', testUser);
     await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
-    await page.waitForSelector('.dashboard-container', { timeout: 5000 });
+    await page.waitForSelector('.auth-shell', { timeout: 5000 });
 
     // 访问注册页 - 应跳转到 dashboard
     await page.goto('/#register');
-    await page.waitForSelector('.dashboard-container', { timeout: 3000 });
+    await page.waitForSelector('.auth-shell', { timeout: 3000 });
 
     expect(page.url()).toContain('#dashboard');
   });
