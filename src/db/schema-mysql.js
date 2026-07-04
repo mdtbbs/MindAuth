@@ -136,6 +136,20 @@ async function initSchema() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // SMS config table (single-row config)
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS sms_config (
+        id INT PRIMARY KEY,
+        enabled TINYINT(1) NOT NULL DEFAULT 0,
+        access_key_id VARCHAR(255) NOT NULL DEFAULT '',
+        access_key_secret VARCHAR(255) NOT NULL DEFAULT '',
+        sign_name VARCHAR(255) NOT NULL DEFAULT '',
+        template_code VARCHAR(100) NOT NULL DEFAULT '',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT chk_sms_single_row CHECK (id = 1)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // System config table
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS system_config (
@@ -146,49 +160,11 @@ async function initSchema() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    // External identities table (for account linking)
-    await conn.execute(`
-      CREATE TABLE IF NOT EXISTS external_identities (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        provider VARCHAR(50) NOT NULL,
-        external_user_id VARCHAR(255) NOT NULL,
-        external_username VARCHAR(255) DEFAULT NULL,
-        external_email VARCHAR(255) DEFAULT NULL,
-        external_avatar_url VARCHAR(500) DEFAULT NULL,
-        external_user_group_id INT DEFAULT NULL,
-        external_is_admin TINYINT(1) DEFAULT 0,
-        external_is_moderator TINYINT(1) DEFAULT 0,
-        provider_data JSON DEFAULT NULL,
-        linked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_user_provider (user_id, provider),
-        UNIQUE KEY unique_provider_external (provider, external_user_id),
-        INDEX idx_external_user (user_id),
-        INDEX idx_external_provider (provider),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    // XenForo config table (single-row config)
-    await conn.execute(`
-      CREATE TABLE IF NOT EXISTS xenforo_config (
-        id INT PRIMARY KEY,
-        base_url VARCHAR(255) NOT NULL DEFAULT '',
-        client_id VARCHAR(255) NOT NULL DEFAULT '',
-        client_secret VARCHAR(255) NOT NULL DEFAULT '',
-        enabled TINYINT(1) NOT NULL DEFAULT 0,
-        sync_avatar TINYINT(1) NOT NULL DEFAULT 1,
-        sync_user_group TINYINT(1) NOT NULL DEFAULT 1,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        CONSTRAINT chk_xenforo_single_row CHECK (id = 1)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
     // Ensure one row exists in email_config
     await conn.execute(`INSERT IGNORE INTO email_config (id) VALUES (1)`);
 
-    // Ensure one row exists in xenforo_config
-    await conn.execute(`INSERT IGNORE INTO xenforo_config (id) VALUES (1)`);
+    // Ensure one row exists in sms_config
+    await conn.execute(`INSERT IGNORE INTO sms_config (id) VALUES (1)`);
 
     // Insert default system configurations
     const defaultConfigs = [
@@ -196,7 +172,8 @@ async function initSchema() {
       ['password_min_length', '6', '密码最小长度'],
       ['password_require_complexity', '0', '是否要求密码复杂度（0/1）'],
       ['registration_enabled', '1', '是否允许新用户注册（0/1）'],
-      ['sms_audit_retention_days', '365', '短信审计日志保留天数']
+      ['sms_audit_retention_days', '365', '短信审计日志保留天数'],
+      ['audit_retention_days', '365', '管理审计日志保留天数']
     ];
 
     for (const [key, value, desc] of defaultConfigs) {
@@ -272,6 +249,151 @@ async function initSchema() {
       }
     }
 
+    // --- Account lockout columns ---
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN lock_level INT NOT NULL DEFAULT 0');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add lock_level:', alterErr.message);
+    }
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN locked_until DATETIME DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add locked_until:', alterErr.message);
+    }
+
+    // --- User ban/mute columns ---
+    try {
+      await conn.execute("ALTER TABLE users ADD COLUMN ban_status VARCHAR(10) NOT NULL DEFAULT 'none'");
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add ban_status:', alterErr.message);
+    }
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN ban_reason VARCHAR(500) DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add ban_reason:', alterErr.message);
+    }
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN banned_by INT DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add banned_by:', alterErr.message);
+    }
+    try {
+      await conn.execute('ALTER TABLE users ADD COLUMN ban_expires_at DATETIME DEFAULT NULL');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add ban_expires_at:', alterErr.message);
+    }
+
+    // --- User sessions table ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        session_token VARCHAR(255) NOT NULL,
+        ip_address VARCHAR(45),
+        user_agent VARCHAR(500),
+        device_info VARCHAR(200),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sessions_user (user_id),
+        INDEX idx_sessions_token (session_token),
+        INDEX idx_sessions_active (last_active_at),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- Challenge questions table ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS challenge_questions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        question VARCHAR(500) NOT NULL,
+        answer_hash VARCHAR(255) NOT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_challenge_enabled (enabled)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- IP bans table (supports CIDR) ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS ip_bans (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip_address VARCHAR(45) NOT NULL,
+        cidr_prefix INT DEFAULT NULL,
+        reason VARCHAR(500) DEFAULT NULL,
+        banned_by INT DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME DEFAULT NULL,
+        INDEX idx_ip_bans_expires (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- User notifications table ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS user_notifications (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        content TEXT DEFAULT NULL,
+        is_read TINYINT(1) NOT NULL DEFAULT 0,
+        ip_address VARCHAR(45) DEFAULT NULL,
+        user_agent VARCHAR(200) DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_notifications_user_read (user_id, is_read),
+        INDEX idx_notifications_created (created_at),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- User fields definition table ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS user_fields (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        field_key VARCHAR(50) NOT NULL,
+        field_label VARCHAR(100) NOT NULL,
+        field_type VARCHAR(20) NOT NULL DEFAULT 'text',
+        is_required TINYINT(1) NOT NULL DEFAULT 0,
+        is_public TINYINT(1) NOT NULL DEFAULT 1,
+        options JSON DEFAULT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_fields_key (field_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- User field values table ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS user_field_values (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        field_id INT NOT NULL,
+        value TEXT DEFAULT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_field_values (user_id, field_id),
+        INDEX idx_field_values_user (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (field_id) REFERENCES user_fields(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- Admin audit logs table ---
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS admin_audit_logs (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        admin_id INT NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        target_type VARCHAR(50) DEFAULT NULL,
+        target_id INT DEFAULT NULL,
+        details JSON DEFAULT NULL,
+        ip_address VARCHAR(45) DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_audit_admin (admin_id),
+        INDEX idx_audit_action (action),
+        INDEX idx_audit_target (target_type, target_id),
+        INDEX idx_audit_created (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     console.log('MySQL schema initialized successfully');
   } finally {
     conn.release();
@@ -296,7 +418,7 @@ async function seedTestAdmin() {
         const passwordHash = await bcrypt.hash(admin.password, 10);
         await pool.execute(
           'INSERT INTO users (username, email, password_hash, role, email_verified) VALUES (?, ?, ?, ?, ?)',
-          [admin.username, admin.email, passwordHash, 'admin', 1]
+          [admin.username, admin.email, passwordHash, 'super_admin', 1]
         );
         console.log(`Test admin '${admin.username}' created with password '${admin.password}'`);
       }
@@ -309,6 +431,12 @@ async function seedTestAdmin() {
 // Seed test OAuth client for OAuth flow tests
 async function seedTestOAuthClient() {
   const testClients = [
+    {
+      name: 'MindFourm',
+      client_id: 'forum',
+      client_secret: 'forum_secret_key_for_development',
+      redirect_uri: 'http://localhost:4000/api/auth/callback'
+    },
     {
       name: 'MindFourm (Test)',
       client_id: '6d875cc521f1c60ba17dd53c7b9edc5a',

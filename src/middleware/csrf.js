@@ -6,7 +6,7 @@ const { timingSafeCompare } = require('../utils/crypto');
  * Uses double-submit cookie pattern:
  * 1. Server sets csrf_token cookie
  * 2. Client must send X-CSRF-Token header matching the cookie
- * 3. Validates on POST/PUT/DELETE requests
+ * 3. Validates on POST/PUT/PATCH/DELETE requests
  */
 
 function generateCsrfToken() {
@@ -35,9 +35,9 @@ function setCsrfCookie(req, res, next) {
  * Middleware to validate CSRF token on state-changing requests
  */
 function validateCsrf(req, res, next) {
-  // Only validate POST/PUT/DELETE
+  // Only validate state-changing requests
   const method = req.method.toUpperCase();
-  if (!['POST', 'PUT', 'DELETE'].includes(method)) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     return next();
   }
 
@@ -51,6 +51,8 @@ function validateCsrf(req, res, next) {
     '/api/revoke',       // OAuth revoke (has client_secret)
     '/api/verify',       // Session verification (no CSRF needed)
     '/api/sms/sync-status', // Phone verification status sync uses a one-time token
+    '/api/challenge/random', // Challenge question retrieval (no session needed)
+    '/api/challenge/verify', // Challenge answer verification
     '/api/email-verification/verify', // Email verification uses a one-time token
     '/api/register',     // User registration (no session needed)
     '/api/login',        // User login (creates session, rate-limited)

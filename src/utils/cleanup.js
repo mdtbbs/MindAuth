@@ -30,7 +30,22 @@ async function cleanupExpiredData() {
       .replace(/\.\d{3}Z$/, '');
     const [smsResult] = await pool.execute('DELETE FROM sms_audit_logs WHERE created_at < ?', [smsCutoff]);
 
-    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens and ${smsResult.affectedRows} sms_audit_logs from MySQL`);
+    // Clean expired user sessions (inactive for 30 days)
+    const [sessionResult] = await pool.execute(
+      'DELETE FROM user_sessions WHERE last_active_at < DATE_SUB(NOW(), INTERVAL 30 DAY)'
+    );
+
+    // Clean expired admin audit logs
+    const [auditConfigRows] = await pool.execute(
+      "SELECT value FROM system_config WHERE `key` = ? LIMIT 1",
+      ['audit_retention_days']
+    );
+    const auditRetentionDays = Math.max(parseInt(auditConfigRows[0]?.value || '365', 10) || 365, 1);
+    const auditCutoff = new Date(Date.now() - auditRetentionDays * 24 * 60 * 60 * 1000)
+      .toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+    const [auditResult] = await pool.execute('DELETE FROM admin_audit_logs WHERE created_at < ?', [auditCutoff]);
+
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs from MySQL`);
 
     // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
     // are stored in Redis and cleaned automatically via TTL

@@ -6,7 +6,7 @@ const { generateToken } = require('../../utils/token');
 const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../../utils/validation');
 const { timingSafeCompare } = require('../../utils/crypto');
 const { getClientIp } = require('../../utils/request');
-const { createAdminSession, deleteAdminSession, requireAdmin } = require('../../middleware/requireAdmin');
+const { createAdminSession, deleteAdminSession, requireAdmin, normalizeRole, ROLE_PERMISSIONS } = require('../../middleware/requireAdmin');
 const { createRateLimiter, resetRateLimit } = require('../../middleware/rateLimit');
 const config = require('../../config');
 
@@ -63,7 +63,7 @@ router.post('/create', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    await pool.execute('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email, passwordHash, 'admin']);
+    await pool.execute('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email, passwordHash, 'super_admin']);
 
     res.status(201).json({ success: true, message: '管理员账号创建成功' });
   } catch (err) {
@@ -81,7 +81,10 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: '用户名和密码必填' });
     }
 
-    const [userRows] = await pool.execute('SELECT * FROM users WHERE username = ? AND role = ?', [username, 'admin']);
+    const [userRows] = await pool.execute(
+      "SELECT * FROM users WHERE username = ? AND role IN ('admin', 'super_admin', 'user_admin', 'security_admin', 'config_admin', 'readonly_admin')",
+      [username]
+    );
     const user = userRows[0];
 
     if (!user) {
@@ -106,7 +109,17 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
       path: '/'
     });
 
-    res.json({ success: true, user: { id: user.id, username: user.username, email: user.email } });
+    const normalizedRole = normalizeRole(user.role);
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: normalizedRole,
+        permissions: ROLE_PERMISSIONS[normalizedRole] || []
+      }
+    });
   } catch (err) {
     console.error('Admin login error:', err);
     res.status(500).json({ success: false, message: '登录失败' });
@@ -130,7 +143,17 @@ router.post('/logout', async (req, res) => {
 
 // GET /me - Get current admin info (requires authentication)
 router.get('/me', requireAdmin, (req, res) => {
-  res.json({ success: true, admin: req.admin });
+  const role = req.adminUser.normalized_role || normalizeRole(req.adminUser.role);
+  res.json({
+    success: true,
+    admin: {
+      id: req.adminUser.id,
+      username: req.adminUser.username,
+      email: req.adminUser.email,
+      role,
+      permissions: ROLE_PERMISSIONS[role] || []
+    }
+  });
 });
 
 module.exports = router;

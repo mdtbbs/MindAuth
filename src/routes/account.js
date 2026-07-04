@@ -8,6 +8,8 @@ const { generateToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
 const { avatarUpload, bannerUpload } = require('../middleware/upload');
+const { createNotification } = require('../utils/notify');
+const { getClientIp } = require('../utils/request');
 const path = require('path');
 const fs = require('fs');
 
@@ -50,6 +52,15 @@ router.post('/change-password', requireAuth, async (req, res) => {
 
     // Clear all sessions (force re-login)
     await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [user.id]);
+    await pool.execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+
+    // Password change notification
+    await createNotification({
+      user_id: user.id, type: 'password_changed', title: '密码已修改',
+      content: '您的登录密码已被修改，请重新登录。',
+      ip_address: getClientIp(req), user_agent: req.headers['user-agent'],
+      sendEmail: true,
+    }).catch(err => console.warn('[Account] password notification failed:', err.message));
 
     // Clear session cache in Redis
     const token = req.cookies.session;
@@ -262,33 +273,66 @@ router.delete('/banner', requireAuth, async (req, res) => {
   }
 });
 
-// GET /linked-accounts - Get all linked external accounts
-router.get('/linked-accounts', requireAuth, async (req, res) => {
+// GET /fields - Get user's custom field values
+router.get('/fields', requireAuth, async (req, res) => {
   try {
-    const [linkedAccounts] = await pool.execute(`
-      SELECT provider, external_user_id, external_username, external_email,
-             external_avatar_url, external_user_group_id, external_is_admin,
-             external_is_moderator, linked_at
-      FROM external_identities WHERE user_id = ?
-    `, [req.user.id]);
+    const [fields] = await pool.execute(
+      'SELECT id, field_key, field_label, field_type, is_required, options FROM user_fields ORDER BY sort_order ASC'
+    );
+    const [values] = await pool.execute(
+      'SELECT field_id, value FROM user_field_values WHERE user_id = ?',
+      [req.user.id]
+    );
+    const valueMap = {};
+    for (const v of values) valueMap[v.field_id] = v.value;
 
     res.json({
       success: true,
-      linked_accounts: linkedAccounts.map(link => ({
-        provider: link.provider,
-        external_user_id: link.external_user_id,
-        external_username: link.external_username,
-        external_email: link.external_email,
-        external_avatar_url: link.external_avatar_url,
-        external_user_group_id: link.external_user_group_id,
-        external_is_admin: link.external_is_admin === 1,
-        external_is_moderator: link.external_is_moderator === 1,
-        linked_at: link.linked_at.toISOString()
-      }))
+      fields: fields.map((f) => ({
+        field_key: f.field_key,
+        field_label: f.field_label,
+        field_type: f.field_type,
+        is_required: f.is_required === 1,
+        options: f.options ? (typeof f.options === 'string' ? JSON.parse(f.options) : f.options) : null,
+        value: valueMap[f.id] || null,
+      })),
     });
   } catch (err) {
-    console.error('Get linked accounts error:', err);
-    res.status(500).json({ success: false, message: '获取关联账号失败' });
+    console.error('[Account] fields get error:', err);
+    res.status(500).json({ success: false, message: '获取字段失败' });
+  }
+});
+
+// PUT /fields - Update user's custom field values
+router.put('/fields', requireAuth, async (req, res) => {
+  try {
+    const { values } = req.body;
+    if (!values || typeof values !== 'object') {
+      return res.status(400).json({ success: false, message: 'values 须为对象' });
+    }
+
+    const [fields] = await pool.execute('SELECT id, field_key, field_type FROM user_fields');
+    const fieldMap = {};
+    for (const f of fields) fieldMap[f.field_key] = f;
+
+    for (const [key, value] of Object.entries(values)) {
+      const field = fieldMap[key];
+      if (!field) continue;
+
+      if (value === null || value === '') {
+        await pool.execute('DELETE FROM user_field_values WHERE user_id = ? AND field_id = ?', [req.user.id, field.id]);
+      } else {
+        await pool.execute(
+          'INSERT INTO user_field_values (user_id, field_id, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = ?',
+          [req.user.id, field.id, String(value), String(value)]
+        );
+      }
+    }
+
+    res.json({ success: true, message: '字段已更新' });
+  } catch (err) {
+    console.error('[Account] fields update error:', err);
+    res.status(500).json({ success: false, message: '更新字段失败' });
   }
 });
 

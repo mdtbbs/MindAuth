@@ -12,6 +12,8 @@ function mapUser(user) {
     avatar_url: user.avatar_url,
     phone_verified: user.phone_verified === 1 || user.phone_verified === true,
     phone_verified_at: user.phone_verified_at,
+    ban_status: user.ban_status || 'none',
+    is_muted: user.ban_status === 'muted',
     created_at: user.created_at,
   };
 }
@@ -26,7 +28,7 @@ router.get('/users/:id', async (req, res) => {
 
   try {
     const [rows] = await pool.execute(
-      'SELECT id, username, email, email_verified, avatar_url, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?',
+      'SELECT id, username, email, email_verified, avatar_url, phone_verified, phone_verified_at, ban_status, created_at FROM users WHERE id = ?',
       [userId]
     );
 

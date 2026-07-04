@@ -11,7 +11,7 @@ MindAuth is an OAuth 2.0 authentication service providing centralized SSO for Mi
 - OAuth 2.0 Authorization Code Flow for third-party apps
 - Admin panel for user/client management
 - Session management with Redis caching
-- **XenForo 2 forum account linking** with avatar and user group sync
+- Forum-style account UX for Mindustry community services
 
 ## Commands
 
@@ -76,7 +76,7 @@ npx playwright test  # Run E2E tests
 | `/token` | POST | Token exchange | RFC 6749 |
 | `/refresh` | POST | Token refresh | RFC 6749 |
 | `/introspect` | POST | Token validation | RFC 7662 |
-| `/userinfo` | GET | User info + linked_accounts | OIDC Core |
+| `/userinfo` | GET | User info | OIDC Core |
 | `/revoke` | POST | Token revocation | RFC 7009 |
 | `/verify` | POST | Session verification | Custom |
 
@@ -102,17 +102,6 @@ npx playwright test  # Run E2E tests
 | `/verify` | POST | Verify email token |
 | `/status` | GET | Check verification status |
 
-### XenForo Account Linking (`/api`)
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/xenforo/config/status` | GET | Check if linking is enabled | Public |
-| `/xenforo/link` | GET | Start OAuth flow, redirect to XenForo | Session |
-| `/xenforo/callback` | GET | Handle XenForo OAuth callback | State token |
-| `/xenforo/status` | GET | Get linking status | Session |
-| `/xenforo/link` | DELETE | Unlink XenForo account | Session |
-| `/xenforo/sync` | POST | Manually sync avatar/user group | Session |
-| `/account/linked-accounts` | GET | Get all linked external accounts | Session |
-
 ### Admin Panel (`/api/admin`)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -122,8 +111,30 @@ npx playwright test  # Run E2E tests
 | `/clients` | GET/POST/PUT/DELETE | OAuth client management |
 | `/stats` | GET | System statistics |
 | `/email-config` | GET/PUT | SMTP configuration |
-| `/xenforo-config` | GET/PUT | XenForo OAuth configuration |
 | `/login-logs` | GET | Login logs |
+| `/ip-bans` | GET/POST/PUT/DELETE | IP ban management (supports CIDR) |
+| `/challenges` | GET/POST/PUT/DELETE | Challenge question bank management |
+| `/user-fields` | GET/POST/PUT/DELETE/PATCH | Custom user field definitions |
+| `/audit-logs` | GET | Admin audit log viewer (filterable) |
+| `/users/:id/ban` | POST/DELETE | Ban/unban user |
+| `/users/:id/mute` | POST | Mute user |
+| `/users/:id/unlock` | POST | Unlock locked account |
+
+### User Endpoints (`/api`)
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/sms/send` | POST | Send SMS verification code | Session |
+| `/sms/verify` | POST | Verify SMS code and bind phone | Session |
+| `/sms/sync-status` | POST | Sync phone status to external service | Token |
+| `/challenge/random` | GET | Get random challenge question | None |
+| `/challenge/verify` | POST | Verify challenge answer | None |
+| `/sessions` | GET | List active sessions | Session |
+| `/notifications` | GET | List user notifications | Session |
+| `/notifications/unread-count` | GET | Get unread notification count | Session |
+| `/notifications/:id/read` | PATCH | Mark notification as read | Session |
+| `/notifications/read-all` | PATCH | Mark all notifications as read | Session |
+| `/account/privacy` | GET/PUT | Privacy settings | Session |
+| `/account/fields` | GET/PUT | Custom field values | Session |
 
 ## Database Tables
 
@@ -138,8 +149,14 @@ npx playwright test  # Run E2E tests
 | `login_logs` | Login history | user_id, ip, device, login_type (web/oauth) |
 | `email_config` | SMTP settings | host, port, user, password, from (single row id=1) |
 | `system_config` | Runtime config | key, value (session_lifetime, password_rules, etc.) |
-| `external_identities` | External account links | user_id, provider, external_user_id, external_username, external_avatar_url, external_user_group_id, external_is_admin, external_is_moderator, provider_data (JSON) |
-| `xenforo_config` | XenForo OAuth config | base_url, client_id, client_secret, enabled, sync_avatar, sync_user_group (single row id=1) |
+| `user_sessions` | Active session tracking | user_id, session_token, ip_address, device_info, last_active_at |
+| `challenge_questions` | Challenge Q&A bank | question, answer_hash (bcrypt), enabled |
+| `ip_bans` | IP blacklist | ip_address, cidr_prefix, reason, expires_at |
+| `user_notifications` | User notifications | user_id, type, title, content, is_read |
+| `user_fields` | Custom field definitions | field_key, field_label, field_type, is_required, is_public, options |
+| `user_field_values` | Custom field values | user_id, field_id, value |
+| `admin_audit_logs` | Admin action audit trail | admin_id, action, target_type, target_id, details (JSON) |
+| `sms_audit_logs` | SMS audit trail | user_id, action, phone_masked, success, code, ip_address |
 
 ### Redis Keys
 
@@ -151,8 +168,17 @@ npx playwright test  # Run E2E tests
 | `accesstoken:${token}` | 1h | OAuth access token |
 | `verify:${token}` | 1h | Email verification token |
 | `reset:${token}` | 1h | Password reset token |
-| `xf_state:${state}` | 5min | XenForo OAuth state token |
 | `ratelimit:${ip}` | Variable | Rate limit counter |
+| `sms:code:${phone}` | 5min | SMS verification code (dysmsapi) |
+| `sms:send:ip:${ip}` | 1h | SMS send rate limit per IP |
+| `sms:send:user:${id}` | 5min | SMS send rate limit per user |
+| `sms:send:phone:${phone}` | 1min | SMS send rate limit per phone |
+| `sms:verify:fail:*` | Variable | SMS verify failure rate limit |
+| `phone_sync:${token}` | 5min | Phone verification sync token |
+| `login_fail:${username}` | 5min | Login failure counter (lockout) |
+| `session_active:${token}` | 5min | Session activity throttle |
+| `challenge_session:${csrf}` | 30min | Challenge question session |
+| `ip_bans_cache` | 5min | IP ban list cache |
 
 ## Middleware
 
@@ -223,7 +249,14 @@ npx playwright test  # Run E2E tests
 | `request.js` | `getClientIp` (Cloudflare/proxy support) |
 | `datetime.js` | `formatMySQLDateTime` |
 | `cleanup.js` | Scheduled cleanup of expired tokens |
-| `xenforo-client.js` | `buildAuthorizationUrl`, `exchangeCodeForToken`, `fetchUserInfo`, `downloadAvatar` |
+| `aliyunSms.js` | `sendSmsCode(phone)` (dysmsapi SendSms + Redis), `checkSmsCode(phone, code)` (Redis timing-safe lookup) |
+| `smsAudit.js` | `logSmsAudit(data)` — SMS audit logging with masked phone |
+| `aliyunSms.js` | `sendSmsCode(phone)` (dysmsapi V3 SendSms + Redis), `checkSmsCode(phone, code)` (Redis timing-safe lookup) |
+| `smsAudit.js` | `logSmsAudit(data)` — SMS audit logging with masked phone |
+| `auditLog.js` | `logAudit({admin_id, action, target_type, target_id, details, ip_address})` |
+| `notify.js` | `createNotification({user_id, type, title, content, sendEmail})` — 站内+邮件通知 |
+| `deviceInfo.js` | `parseDeviceInfo(ua)` — User-Agent 解析为浏览器+操作系统 |
+| `phone.js` | `maskPhone(phone)` — 手机号脱敏 `138****1234` |
 
 ## Configuration (`src/config/index.js`)
 
@@ -259,23 +292,6 @@ npx playwright test  # Run E2E tests
 5. Returns: { access_token, refresh_token, user info }
 6. Refresh: POST /refresh with refresh_token
 ```
-
-## XenForo Account Linking Flow
-
-```
-1. User clicks "Link XenForo" on dashboard
-2. MindAuth → Generate state token → Store in Redis (xf_state:${state}, 5min TTL)
-3. Redirect to XenForo: /oauth2/authorize?client_id=X&state=S
-4. User authorizes on XenForo
-5. XenForo → Redirect to /api/xenforo/callback?code=C&state=S
-6. MindAuth → Validate state → Exchange code for token → Fetch userinfo
-7. Store external_identities record + sync avatar/user group (if enabled)
-8. Redirect to dashboard with success message
-```
-
-**UserInfo Endpoint Enhancement:**
-- `/api/userinfo` returns `linked_accounts` array in `profile` scope
-- Each linked account includes: provider, external_user_id, external_username, external_avatar_url, external_user_group_id, external_is_admin, external_is_moderator, linked_at
 
 ## Tests (`tests/`)
 

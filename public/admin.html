@@ -148,58 +148,47 @@
           <div id="email-config-status" style="margin-top: 0.5rem; font-size: 0.6875rem; color: var(--text-muted);"></div>
         </div>
 
-        <!-- XenForo 配置 -->
+        <!-- SMS 配置 -->
         <div class="section-card">
           <div class="section-head">
-            <div class="section-title">XENFORO CONFIG</div>
-            <div class="section-status" id="xenforo-status-badge" style="display: none;">
-              <span class="status-dot">已启用</span>
+            <div class="section-title">SMS CONFIG</div>
+            <div class="section-status" id="sms-status-badge" style="display: none;">
+              <span class="status-dot warn">未启用</span>
             </div>
           </div>
-          <form id="xenforo-config-form">
+          <form id="sms-config-form">
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">论坛地址</label>
-                <input class="form-input" type="url" id="xf-base-url" name="base_url" placeholder="https://forum.example.com">
+                <label class="form-label">AccessKey ID</label>
+                <input class="form-input" type="text" id="sms-access-key-id" name="access_key_id" placeholder="Aliyun AccessKey ID">
+              </div>
+              <div class="form-group">
+                <label class="form-label">AccessKey Secret</label>
+                <input class="form-input" type="password" id="sms-access-key-secret" name="access_key_secret" placeholder="Aliyun AccessKey Secret">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">短信签名</label>
+                <input class="form-input" type="text" id="sms-sign-name" name="sign_name" placeholder="例如 MindProject">
+              </div>
+              <div class="form-group">
+                <label class="form-label">模板 Code</label>
+                <input class="form-input" type="text" id="sms-template-code" name="template_code" placeholder="SMS_XXXXXXXX">
               </div>
               <div class="form-group form-group-small">
                 <label class="form-label">启用</label>
                 <div style="display: flex; align-items: center; height: 40px;">
-                  <input type="checkbox" id="xf-enabled" name="enabled" style="width: 16px; height: 16px;">
-                </div>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">Client ID</label>
-                <input class="form-input" type="text" id="xf-client-id" name="client_id" placeholder="XenForo OAuth Client ID">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Client Secret</label>
-                <input class="form-input" type="password" id="xf-client-secret" name="client_secret" placeholder="XenForo OAuth Client Secret">
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group form-group-small">
-                <label class="form-label">同步头像</label>
-                <div style="display: flex; align-items: center; height: 40px;">
-                  <input type="checkbox" id="xf-sync-avatar" name="sync_avatar" style="width: 16px; height: 16px;">
-                </div>
-              </div>
-              <div class="form-group form-group-small">
-                <label class="form-label">同步用户组</label>
-                <div style="display: flex; align-items: center; height: 40px;">
-                  <input type="checkbox" id="xf-sync-user-group" name="sync_user_group" style="width: 16px; height: 16px;">
+                  <input type="checkbox" id="sms-enabled" name="enabled" style="width: 16px; height: 16px;">
                 </div>
               </div>
             </div>
             <div class="action-row">
               <button type="submit" class="btn-sm primary">保存配置</button>
+              <button type="button" id="test-sms-btn" class="btn-sm">发送测试短信</button>
             </div>
           </form>
-          <div id="xenforo-config-status" style="margin-top: 0.5rem; font-size: 0.6875rem; color: var(--text-muted);">
-            <p>回调地址: <code id="xf-callback-url"></code></p>
-          </div>
+          <div id="sms-config-status" style="margin-top: 0.5rem; font-size: 0.6875rem; color: var(--text-muted);"></div>
         </div>
 
         <!-- Secret显示 -->
@@ -233,6 +222,57 @@
           <div id="clients-container"></div>
         </div>
 
+        <!-- SMS Audit Logs -->
+        <div class="section-card">
+          <div class="section-head">
+            <div class="section-title">SMS AUDIT LOGS</div>
+            <button id="sms-audit-refresh-btn" class="btn-sm">刷新</button>
+          </div>
+          <div class="form-row" style="margin-bottom: 0.75rem;">
+            <div class="form-group form-group-small">
+              <input class="form-input" type="number" id="sms-audit-user-id" min="1" placeholder="User ID">
+            </div>
+            <div class="form-group">
+              <select class="form-input" id="sms-audit-action">
+                <option value="">全部动作</option>
+                <option value="send_code">发送验证码</option>
+                <option value="verify_code">验证验证码</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <select class="form-input" id="sms-audit-success">
+                <option value="">全部结果</option>
+                <option value="1">成功</option>
+                <option value="0">失败</option>
+              </select>
+            </div>
+            <div class="form-group form-group-small">
+              <input class="form-input" type="text" id="sms-audit-phone-last4" maxlength="4" inputmode="numeric" placeholder="后四位">
+            </div>
+            <button id="sms-audit-search-btn" class="btn-sm">搜索</button>
+          </div>
+          <div class="form-row" style="margin-bottom: 0.75rem;">
+            <div class="form-group">
+              <input class="form-input" type="text" id="sms-audit-code" placeholder="结果码">
+            </div>
+            <div class="form-group">
+              <input class="form-input" type="text" id="sms-audit-ip" placeholder="IP 地址">
+            </div>
+            <div class="form-group">
+              <input class="form-input" type="datetime-local" id="sms-audit-start-date">
+            </div>
+            <div class="form-group">
+              <input class="form-input" type="datetime-local" id="sms-audit-end-date">
+            </div>
+          </div>
+          <div id="sms-audit-container"></div>
+          <div class="action-row" style="margin-top: 0.75rem;">
+            <button id="sms-audit-prev-btn" class="btn-sm">上一页</button>
+            <span id="sms-audit-page-info" style="font-size: 0.6875rem; color: var(--text-muted);">第 1 页</span>
+            <button id="sms-audit-next-btn" class="btn-sm">下一页</button>
+          </div>
+        </div>
+
         <!-- 用户管理 -->
         <div class="section-card">
           <div class="section-head">
@@ -246,7 +286,13 @@
               <select class="form-input" id="user-role-filter">
                 <option value="">全部</option>
                 <option value="user">用户</option>
+                <option value="moderator">版主</option>
                 <option value="admin">管理员</option>
+                <option value="super_admin">超级管理员</option>
+                <option value="user_admin">用户管理员</option>
+                <option value="security_admin">安全管理员</option>
+                <option value="config_admin">配置管理员</option>
+                <option value="readonly_admin">只读管理员</option>
               </select>
             </div>
             <button id="user-search-btn" class="btn-sm">搜索</button>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>授权失败 - MindAuth</title>
+  <title>出错了 - MindAuth</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/shared-styles/variables.css">
   <link rel="stylesheet" href="/shared-styles/components.css">
@@ -18,9 +18,9 @@
 
   <main class="error-page-shell">
     <section class="error-page-panel">
-      <div class="error-page-code" id="error-code">OAUTH_ERROR</div>
-      <h1 class="error-page-title" id="error-title">授权失败</h1>
-      <p class="error-page-desc" id="error-desc">无法完成本次授权请求。</p>
+      <div class="error-page-code" id="error-code">ERROR</div>
+      <h1 class="error-page-title" id="error-title">请求无法完成</h1>
+      <p class="error-page-desc" id="error-desc">请稍后重试，或返回账号中心继续操作。</p>
       <div class="error-page-actions">
         <button class="btn-primary" onclick="goBack()">返回上一页</button>
         <a class="btn-secondary" href="/" style="text-decoration:none;">账号中心</a>
@@ -29,7 +29,12 @@
   </main>
 
   <script>
-    const errorMessages = {
+    const errorMap = {
+      '400': ['请求参数有误', '请检查链接或表单内容后重试。'],
+      '401': ['需要登录', '请登录后继续访问该页面。'],
+      '403': ['没有访问权限', '当前账号没有执行此操作的权限。'],
+      '404': ['页面不存在', '你访问的页面不存在或已经移动。'],
+      '500': ['服务器错误', '服务暂时无法完成请求，请稍后重试。'],
       invalid_client: ['应用不存在', 'OAuth 应用配置不存在或已被删除。'],
       invalid_redirect: ['回调地址不匹配', 'OAuth 回调地址与应用配置不一致。'],
       invalid_request: ['请求参数有误', '授权请求缺少必要参数。'],
@@ -62,11 +67,11 @@
 
     initTheme();
     const params = new URLSearchParams(window.location.search);
-    const error = params.get('error') || 'oauth_error';
+    const error = params.get('error') || params.get('code') || 'ERROR';
     const description = params.get('description');
-    const mapped = errorMessages[error] || ['授权失败', '无法完成本次授权请求。'];
+    const mapped = errorMap[error] || ['请求无法完成', '请稍后重试，或返回账号中心继续操作。'];
 
-    document.getElementById('error-code').textContent = error.toUpperCase();
+    document.getElementById('error-code').textContent = String(error).toUpperCase();
     document.getElementById('error-title').textContent = mapped[0];
     document.getElementById('error-desc').textContent = description || mapped[1];
   </script>

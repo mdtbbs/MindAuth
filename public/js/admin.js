@@ -35,6 +35,50 @@ function showDashboardView() {
   document.getElementById('dashboard-view').style.display = 'block';
 }
 
+const smsAuditState = {
+  page: 1,
+  limit: 20,
+  totalPages: 1,
+};
+
+const adminRoleLabels = {
+  super_admin: '超级管理员',
+  user_admin: '用户管理员',
+  security_admin: '安全管理员',
+  config_admin: '配置管理员',
+  readonly_admin: '只读管理员',
+  admin: '管理员',
+  user: '用户',
+  moderator: '版主',
+};
+
+const adminRoleOrder = {
+  super_admin: 0,
+  admin: 1,
+  user_admin: 2,
+  security_admin: 3,
+  config_admin: 4,
+  readonly_admin: 5,
+};
+
+function normalizeAdminRole(role) {
+  if (role === 'admin') return 'super_admin';
+  return role || 'readonly_admin';
+}
+
+function formatAdminRole(role) {
+  const normalized = normalizeAdminRole(role);
+  return adminRoleLabels[normalized] || normalized;
+}
+
+function roleValue(role) {
+  return adminRoleOrder[normalizeAdminRole(role)] ?? 99;
+}
+
+function canGrantRole(adminRole, targetRole) {
+  return roleValue(adminRole) <= roleValue(targetRole);
+}
+
 // Load clients list
 async function loadClients() {
   try {
@@ -115,43 +159,35 @@ async function loadEmailConfig() {
   }
 }
 
-// Load XenForo configuration
-async function loadXenForoConfig() {
+// Load SMS configuration
+async function loadSmsConfig() {
   try {
-    const result = await apiFetch('/api/admin/xenforo-config');
-    const form = document.getElementById('xenforo-config-form');
-    const statusBadge = document.getElementById('xenforo-status-badge');
-
-    // Set callback URL hint
-    const baseUrl = window.location.origin;
-    document.getElementById('xf-callback-url').textContent = `${baseUrl}/api/xenforo/callback`;
+    const result = await apiFetch('/api/admin/sms-config');
+    const form = document.getElementById('sms-config-form');
+    const statusDiv = document.getElementById('sms-config-status');
+    const statusBadge = document.getElementById('sms-status-badge');
+    if (!form || !statusDiv || !statusBadge) return;
 
     if (result.success && result.config) {
-      form.base_url.value = result.config.base_url || '';
-      form.client_id.value = result.config.client_id || '';
-      form.client_secret.value = '';
-      form.enabled.checked = result.config.enabled === 1;
-      form.sync_avatar.checked = result.config.sync_avatar === 1;
-      form.sync_user_group.checked = result.config.sync_user_group === 1;
+      form.access_key_id.value = result.config.access_key_id || '';
+      form.access_key_secret.value = '';
+      form.sign_name.value = result.config.sign_name || '';
+      form.template_code.value = result.config.template_code || '';
+      form.enabled.checked = result.config.enabled === 1 || result.config.enabled === true;
 
-      // 显示 client_secret 状态提示
-      if (result.config.has_client_secret) {
-        form.client_secret.placeholder = '密钥已设置，留空则保留原密钥';
-      } else {
-        form.client_secret.placeholder = '请输入 XenForo OAuth Client Secret';
-      }
+      form.access_key_secret.placeholder = result.config.has_access_key_secret
+        ? '密钥已设置，留空则保留原密钥'
+        : 'Aliyun AccessKey Secret';
 
-      // 显示启用状态
-      if (result.config.enabled) {
-        statusBadge.style.display = 'block';
-        statusBadge.innerHTML = '<span class="status-dot">已启用</span>';
-      } else {
-        statusBadge.style.display = 'block';
-        statusBadge.innerHTML = '<span class="status-dot warn">未启用</span>';
-      }
+      statusBadge.style.display = 'block';
+      statusBadge.innerHTML = form.enabled.checked
+        ? '<span class="status-dot">已启用</span>'
+        : '<span class="status-dot warn">未启用</span>';
+      statusDiv.textContent = result.config.updated_at ? `最后更新: ${result.config.updated_at}` : '尚未配置短信服务';
+      statusDiv.style.color = form.enabled.checked ? '#22c55e' : '#eab308';
     }
   } catch {
-    console.error('Load XenForo config error');
+    console.error('Load SMS config error');
   }
 }
 
@@ -178,7 +214,8 @@ document.getElementById('admin-login-form').addEventListener('submit', async (e)
       loadStats();
       loadClients();
       loadEmailConfig();
-      loadXenForoConfig();
+      loadSmsConfig();
+      loadSmsAuditLogs();
       loadUsers();
       showToast('登录成功', 'success');
     } else {
@@ -345,28 +382,73 @@ document.getElementById('email-config-form').addEventListener('submit', async (e
   }
 });
 
-// Handle XenForo config form
-document.getElementById('xenforo-config-form').addEventListener('submit', async (e) => {
+// Handle SMS config form
+document.getElementById('sms-config-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
   const data = {
-    base_url: formData.get('base_url'),
-    client_id: formData.get('client_id'),
-    client_secret: formData.get('client_secret'),
-    enabled: formData.get('enabled') === 'on',
-    sync_avatar: formData.get('sync_avatar') === 'on',
-    sync_user_group: formData.get('sync_user_group') === 'on'
+    access_key_id: formData.get('access_key_id'),
+    access_key_secret: formData.get('access_key_secret'),
+    sign_name: formData.get('sign_name'),
+    template_code: formData.get('template_code'),
+    enabled: formData.get('enabled') === 'on'
   };
 
-  const result = await apiFetch('/api/admin/xenforo-config', {
+  const result = await apiFetch('/api/admin/sms-config', {
     method: 'PUT',
     body: data
   });
 
   showToast(result.message, result.success ? 'success' : 'error');
   if (result.success) {
-    loadXenForoConfig();
+    loadSmsConfig();
   }
+});
+
+// Handle test SMS
+document.getElementById('test-sms-btn').addEventListener('click', async () => {
+  showModal('发送测试短信', `
+    <div class="form-group">
+      <label class="form-label">测试手机号</label>
+      <input class="form-input" type="tel" id="modal-test-phone" inputmode="numeric" maxlength="11" placeholder="13800138000">
+    </div>
+  `, async (overlay) => {
+    const phoneInput = overlay.querySelector('#modal-test-phone');
+    const phone = phoneInput.value.trim();
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      showToast('请输入有效的 11 位中国大陆手机号', 'error');
+      return;
+    }
+
+    const form = document.getElementById('sms-config-form');
+    const formData = new FormData(form);
+    const data = {
+      access_key_id: formData.get('access_key_id'),
+      access_key_secret: formData.get('access_key_secret'),
+      sign_name: formData.get('sign_name'),
+      template_code: formData.get('template_code'),
+      enabled: formData.get('enabled') === 'on'
+    };
+
+    const saveResult = await apiFetch('/api/admin/sms-config', {
+      method: 'PUT',
+      body: data
+    });
+    if (!saveResult.success) {
+      showToast(saveResult.message, 'error');
+      return;
+    }
+
+    const result = await apiFetch('/api/admin/test-sms', {
+      method: 'POST',
+      body: { phone }
+    });
+
+    showToast(result.message, result.success ? 'success' : 'error');
+    if (result.success) {
+      loadSmsConfig();
+    }
+  }, '发送', '取消');
 });
 
 // Handle test email
@@ -408,6 +490,135 @@ document.getElementById('test-email-btn').addEventListener('click', async () => 
   }, '发送', '取消');
 });
 
+function toMySQLDateTime(value) {
+  if (!value) return '';
+  return value.replace('T', ' ') + ':00';
+}
+
+function buildSmsAuditQuery() {
+  const params = new URLSearchParams();
+  params.set('page', String(smsAuditState.page));
+  params.set('limit', String(smsAuditState.limit));
+
+  const userId = document.getElementById('sms-audit-user-id').value.trim();
+  const action = document.getElementById('sms-audit-action').value;
+  const success = document.getElementById('sms-audit-success').value;
+  const phoneLast4 = document.getElementById('sms-audit-phone-last4').value.trim();
+  const code = document.getElementById('sms-audit-code').value.trim();
+  const ip = document.getElementById('sms-audit-ip').value.trim();
+  const startDate = toMySQLDateTime(document.getElementById('sms-audit-start-date').value);
+  const endDate = toMySQLDateTime(document.getElementById('sms-audit-end-date').value);
+
+  if (userId) params.set('user_id', userId);
+  if (action) params.set('action', action);
+  if (success) params.set('success', success);
+  if (phoneLast4) params.set('phone_last4', phoneLast4);
+  if (code) params.set('code', code);
+  if (ip) params.set('ip_address', ip);
+  if (startDate) params.set('start_date', startDate);
+  if (endDate) params.set('end_date', endDate);
+
+  return params.toString();
+}
+
+async function loadSmsAuditLogs() {
+  const container = document.getElementById('sms-audit-container');
+  if (!container) return;
+
+  container.innerHTML = '<div class="empty-state">加载中...</div>';
+  try {
+    const result = await apiFetch(`/api/admin/sms-audit-logs?${buildSmsAuditQuery()}`);
+    if (!result.success) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(result.message || '加载失败')}</div>`;
+      return;
+    }
+
+    smsAuditState.totalPages = Math.max(result.pagination?.totalPages || 1, 1);
+    renderSmsAuditLogs(result.logs || [], result.pagination);
+  } catch {
+    container.innerHTML = '<div class="empty-state">加载失败</div>';
+  }
+}
+
+function renderSmsAuditLogs(logs, pagination) {
+  const container = document.getElementById('sms-audit-container');
+  const pageInfo = document.getElementById('sms-audit-page-info');
+  const prevBtn = document.getElementById('sms-audit-prev-btn');
+  const nextBtn = document.getElementById('sms-audit-next-btn');
+
+  if (!logs.length) {
+    container.innerHTML = '<div class="empty-state">暂无短信审计日志</div>';
+  } else {
+    container.innerHTML = `
+      <div style="overflow-x: auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>User</th>
+              <th>Action</th>
+              <th>Phone</th>
+              <th>Result</th>
+              <th>Code</th>
+              <th>IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logs.map(log => `
+              <tr>
+                <td class="mono">${escapeHtml(formatLogTime(log.created_at))}</td>
+                <td>${log.user_id ? `${escapeHtml(log.username || '-') } <span class="mono">#${log.user_id}</span>` : '-'}</td>
+                <td><span class="tag">${escapeHtml(formatSmsAction(log.action))}</span></td>
+                <td class="mono">${escapeHtml(log.phone_masked || '-')}</td>
+                <td><span class="status-dot ${log.success ? '' : 'warn'}">${log.success ? '成功' : '失败'}</span></td>
+                <td class="mono">${escapeHtml(log.code || '-')}</td>
+                <td class="mono">${escapeHtml(log.ip_address || '-')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  pageInfo.textContent = `第 ${pagination?.page || smsAuditState.page} 页 / 共 ${smsAuditState.totalPages} 页`;
+  prevBtn.disabled = smsAuditState.page <= 1;
+  nextBtn.disabled = smsAuditState.page >= smsAuditState.totalPages;
+}
+
+function formatSmsAction(action) {
+  if (action === 'send_code') return '发送';
+  if (action === 'verify_code') return '验证';
+  return action || '-';
+}
+
+function formatLogTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+document.getElementById('sms-audit-search-btn').addEventListener('click', () => {
+  smsAuditState.page = 1;
+  loadSmsAuditLogs();
+});
+document.getElementById('sms-audit-refresh-btn').addEventListener('click', loadSmsAuditLogs);
+document.getElementById('sms-audit-prev-btn').addEventListener('click', () => {
+  if (smsAuditState.page > 1) {
+    smsAuditState.page -= 1;
+    loadSmsAuditLogs();
+  }
+});
+document.getElementById('sms-audit-next-btn').addEventListener('click', () => {
+  if (smsAuditState.page < smsAuditState.totalPages) {
+    smsAuditState.page += 1;
+    loadSmsAuditLogs();
+  }
+});
+document.getElementById('sms-audit-phone-last4').addEventListener('input', (e) => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+});
+
 // Load users
 async function loadUsers() {
   try {
@@ -436,26 +647,140 @@ function renderUsers(users) {
   const container = document.getElementById('users-container');
 
   if (users.length === 0) {
-    container.innerHTML = '<div class="empty-state">暂无用户</div>';
+    container.innerHTML = '<div class="empty-state empty-state-polished"><div class="empty-state-title">暂无用户</div><div class="empty-state-desc">调整搜索条件后再试。</div></div>';
     return;
   }
 
   container.innerHTML = users.map(user => `
     <div class="user-row" data-id="${user.id}">
       <div class="user-row-info">
-        <div class="user-row-name">${escapeHtml(user.username)}</div>
+        <div class="user-row-name">${escapeHtml(user.username)} <span class="mono muted">#${user.id}</span></div>
         <div class="user-row-email">${escapeHtml(user.email)}</div>
       </div>
       <div class="user-row-meta">
-        <span class="tag ${user.role === 'admin' ? 'admin' : ''}">${user.role === 'admin' ? 'Admin' : 'User'}</span>
+        <span class="tag ${normalizeAdminRole(user.role) === 'super_admin' ? 'admin' : ''}">${escapeHtml(formatAdminRole(user.role))}</span>
         <span class="status-dot ${user.email_verified ? '' : 'warn'}">${user.email_verified ? 'Verified' : 'Unverified'}</span>
+        ${user.ban_status && user.ban_status !== 'none' ? `<span class="tag warn">${escapeHtml(user.ban_status)}</span>` : ''}
       </div>
       <div class="user-row-actions">
+        <button class="btn-sm detail-user-btn" data-id="${user.id}">详情</button>
         <button class="btn-sm edit-user-btn" data-id="${user.id}">编辑</button>
         <button class="btn-ghost danger delete-user-btn" data-id="${user.id}">删除</button>
       </div>
     </div>
   `).join('');
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function renderDetailList(items, renderItem, emptyText) {
+  if (!items || items.length === 0) {
+    return `<div class="empty-state compact">${emptyText}</div>`;
+  }
+  return `<div class="detail-list">${items.map(renderItem).join('')}</div>`;
+}
+
+function renderUserDetailModal(data) {
+  const user = data.user;
+  const body = `
+    <div class="admin-user-detail">
+      <div class="detail-hero">
+        <div>
+          <div class="detail-title">${escapeHtml(user.username)} <span class="mono muted">#${user.id}</span></div>
+          <div class="detail-subtitle">${escapeHtml(user.email || '-')}</div>
+        </div>
+        <div class="detail-tags">
+          <span class="tag ${normalizeAdminRole(user.role) === 'super_admin' ? 'admin' : ''}">${escapeHtml(formatAdminRole(user.role))}</span>
+          <span class="status-dot ${user.email_verified ? '' : 'warn'}">${user.email_verified ? '邮箱已验证' : '邮箱未验证'}</span>
+          <span class="status-dot ${user.phone_verified ? '' : 'warn'}">${user.phone_verified ? '手机已验证' : '手机未验证'}</span>
+        </div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="detail-metric"><span>注册时间</span><strong>${escapeHtml(formatDateTime(user.created_at))}</strong></div>
+        <div class="detail-metric"><span>账号状态</span><strong>${escapeHtml(user.ban_status || 'none')}</strong></div>
+        <div class="detail-metric"><span>锁定等级</span><strong>${escapeHtml(String(user.lock_level || 0))}</strong></div>
+        <div class="detail-metric"><span>手机号</span><strong>${escapeHtml(user.phone || '-')}</strong></div>
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">登录记录</div>
+        ${renderDetailList(data.login_logs, (log) => `
+          <div class="detail-item">
+            <div><strong>${escapeHtml(log.login_type || 'web')}</strong><span>${escapeHtml(log.device || '-')}</span></div>
+            <div class="detail-item-meta">${escapeHtml(log.ip || '-')} · ${escapeHtml(formatDateTime(log.created_at))}</div>
+          </div>
+        `, '暂无登录记录')}
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">授权应用</div>
+        ${renderDetailList(data.authorizations, (auth) => `
+          <div class="detail-item">
+            <div><strong>${escapeHtml(auth.client_name || auth.client_id || '-')}</strong><span>${escapeHtml(auth.scope || '')}</span></div>
+            <div class="detail-item-meta">${escapeHtml(formatDateTime(auth.last_used_at || auth.created_at))}</div>
+          </div>
+        `, '暂无授权应用')}
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">短信日志</div>
+        ${renderDetailList(data.sms_logs, (log) => `
+          <div class="detail-item">
+            <div><strong>${escapeHtml(formatSmsAction(log.action))}</strong><span>${escapeHtml(log.phone_masked || '-')}</span></div>
+            <div class="detail-item-meta">${log.success ? '成功' : '失败'} · ${escapeHtml(log.code || '-')} · ${escapeHtml(formatDateTime(log.created_at))}</div>
+          </div>
+        `, '暂无短信日志')}
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">通知</div>
+        ${renderDetailList(data.notifications, (notification) => `
+          <div class="detail-item">
+            <div><strong>${escapeHtml(notification.title || '-')}</strong><span>${escapeHtml(notification.content || '')}</span></div>
+            <div class="detail-item-meta">${notification.is_read ? '已读' : '未读'} · ${escapeHtml(formatDateTime(notification.created_at))}</div>
+          </div>
+        `, '暂无通知')}
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">会话</div>
+        ${renderDetailList(data.sessions, (session) => `
+          <div class="detail-item">
+            <div><strong>${escapeHtml(session.device_info || '-')}</strong><span>${escapeHtml(session.ip_address || '-')}</span></div>
+            <div class="detail-item-meta">活跃于 ${escapeHtml(formatDateTime(session.last_active_at))}</div>
+          </div>
+        `, '暂无会话')}
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">后台审计</div>
+        ${renderDetailList(data.audit_logs, (log) => `
+          <div class="detail-item">
+            <div><strong>${escapeHtml(log.action || '-')}</strong><span>${escapeHtml(log.ip_address || '-')}</span></div>
+            <div class="detail-item-meta">${escapeHtml(formatDateTime(log.created_at))}</div>
+          </div>
+        `, '暂无审计记录')}
+      </div>
+    </div>
+  `;
+
+  showModal('用户详情', body, null, '关闭', '关闭');
+  const modal = document.querySelector('.modal-content');
+  if (modal) modal.classList.add('modal-content-wide');
+}
+
+async function openUserDetail(id) {
+  const result = await apiFetch(`/api/admin/users/${id}`);
+  if (!result.success) {
+    showToast(result.message || '加载用户详情失败', 'error');
+    return;
+  }
+  renderUserDetailModal(result);
 }
 
 // Handle user search
@@ -468,6 +793,10 @@ document.getElementById('user-role-filter').addEventListener('change', loadUsers
 // Handle user actions
 document.getElementById('users-container').addEventListener('click', async (e) => {
   const id = e.target.dataset.id;
+
+  if (e.target.classList.contains('detail-user-btn')) {
+    await openUserDetail(id);
+  }
 
   if (e.target.classList.contains('delete-user-btn')) {
     if (!confirm('确定要删除此用户吗？')) return;
@@ -484,14 +813,21 @@ document.getElementById('users-container').addEventListener('click', async (e) =
   if (e.target.classList.contains('edit-user-btn')) {
     const card = e.target.closest('.user-row');
     const isVerified = card.querySelector('.status-dot').classList.contains('warn') === false;
-    const currentRole = card.querySelector('.tag').classList.contains('admin') ? 'admin' : 'user';
+    const roleLabel = card.querySelector('.tag').textContent.trim();
+    const roleEntry = Object.entries(adminRoleLabels).find(([, label]) => label === roleLabel);
+    const currentRole = roleEntry ? roleEntry[0] : 'user';
 
     showModal('编辑用户', `
       <div class="form-group">
         <label class="form-label">角色</label>
         <select class="form-input" id="modal-role">
           <option value="user" ${currentRole === 'user' ? 'selected' : ''}>用户</option>
-          <option value="admin" ${currentRole === 'admin' ? 'selected' : ''}>管理员</option>
+          <option value="moderator" ${currentRole === 'moderator' ? 'selected' : ''}>版主</option>
+          <option value="super_admin" ${normalizeAdminRole(currentRole) === 'super_admin' ? 'selected' : ''}>超级管理员</option>
+          <option value="user_admin" ${currentRole === 'user_admin' ? 'selected' : ''}>用户管理员</option>
+          <option value="security_admin" ${currentRole === 'security_admin' ? 'selected' : ''}>安全管理员</option>
+          <option value="config_admin" ${currentRole === 'config_admin' ? 'selected' : ''}>配置管理员</option>
+          <option value="readonly_admin" ${currentRole === 'readonly_admin' ? 'selected' : ''}>只读管理员</option>
         </select>
       </div>
       <div class="form-group">
@@ -528,7 +864,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadStats();
     loadClients();
     loadEmailConfig();
-    loadXenForoConfig();
+    loadSmsAuditLogs();
     loadUsers();
   } else {
     showLoginView();

@@ -12,6 +12,9 @@ node_modules/
 cookies*.txt
 *_cookies.txt
 *_cookie.txt
+playwright-report/
+test-results/
+public/uploads/
 
 # Old SQLite database (migrated to MySQL)
 *.db

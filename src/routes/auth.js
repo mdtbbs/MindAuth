@@ -9,6 +9,10 @@ const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
 const { sendVerificationEmail } = require('../utils/email');
+const { maskPhone } = require('../utils/phone');
+const { logAudit } = require('../utils/auditLog');
+const { createNotification } = require('../utils/notify');
+const { parseDeviceInfo } = require('../utils/deviceInfo');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
@@ -16,17 +20,38 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const loginRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5 * 60 * 1000 });
 const registerRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 60 * 60 * 1000 }); // 5 per hour
 
-function maskPhone(phone) {
-  if (!phone) return null;
-  return String(phone).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
-}
-
 // Register
 router.post('/register', registerRateLimiter, async (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password, challenge_id, challenge_answer } = req.body;
 
   if (!username || !email || !password) {
     return res.status(400).json({ success: false, message: '所有字段必填' });
+  }
+
+  // Verify challenge question if enabled
+  if (challenge_id) {
+    const csrfToken = req.cookies.csrf_token || 'anonymous';
+    const sessionKey = `challenge_session:${csrfToken}`;
+    const sessionData = await client.get(sessionKey);
+
+    if (sessionData) {
+      const session = JSON.parse(sessionData);
+      if (session.question_id === parseInt(challenge_id)) {
+        const [qRows] = await pool.execute(
+          'SELECT answer_hash FROM challenge_questions WHERE id = ? AND enabled = 1',
+          [challenge_id]
+        );
+        if (qRows.length > 0) {
+          const match = await bcrypt.compare(String(challenge_answer || '').trim().toLowerCase(), qRows[0].answer_hash);
+          if (!match) {
+            return res.status(400).json({ success: false, code: 'CHALLENGE_FAILED', message: '问答验证失败' });
+          }
+          await client.del(sessionKey);
+        }
+      } else {
+        return res.status(400).json({ success: false, code: 'CHALLENGE_MISMATCH', message: '题目不匹配' });
+      }
+    }
   }
 
   if (!isValidUsername(username)) {
@@ -98,8 +123,73 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       return res.status(401).json({ success: false, message: '用户名或密码错误' });
     }
 
+    // Check ban status
+    if (user.ban_status === 'banned') {
+      const isExpired = user.ban_expires_at && new Date(user.ban_expires_at) < new Date();
+      if (isExpired) {
+        await pool.execute(
+          "UPDATE users SET ban_status = 'none', ban_reason = NULL, banned_by = NULL, ban_expires_at = NULL WHERE id = ?",
+          [user.id]
+        );
+      } else {
+        return res.status(403).json({
+          success: false,
+          code: 'USER_BANNED',
+          message: user.ban_reason || '账号已被封禁',
+          ban_expires_at: user.ban_expires_at,
+        });
+      }
+    }
+
+    // Check account lock status
+    if (user.locked_until) {
+      const lockExpiry = new Date(user.locked_until);
+      if (lockExpiry > new Date()) {
+        return res.status(423).json({
+          success: false,
+          code: 'ACCOUNT_LOCKED',
+          message: `账号已锁定，请${Math.ceil((lockExpiry - new Date()) / 60000)}分钟后重试`,
+          locked_until: user.locked_until,
+          lock_level: user.lock_level,
+        });
+      }
+      // Lock expired, clear it
+      await pool.execute('UPDATE users SET locked_until = NULL WHERE id = ?', [user.id]);
+    } else if (user.lock_level >= 3) {
+      return res.status(423).json({
+        success: false,
+        code: 'ACCOUNT_PERMANENTLY_LOCKED',
+        message: '账号已被永久锁定，请联系管理员解锁',
+      });
+    }
+
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
+      // Increment login failure counter
+      const failKey = `login_fail:${username}`;
+      const failCount = await client.incr(failKey);
+      if (failCount === 1) await client.expire(failKey, 300);
+
+      if (failCount >= 5) {
+        const newLevel = (user.lock_level || 0) + 1;
+        let lockedUntil = null;
+        if (newLevel === 1) lockedUntil = new Date(Date.now() + 30 * 60 * 1000);
+        else if (newLevel === 2) lockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        // newLevel >= 3: lockedUntil stays null (permanent)
+
+        await pool.execute(
+          'UPDATE users SET lock_level = ?, locked_until = ? WHERE id = ?',
+          [newLevel, lockedUntil, user.id]
+        );
+        await client.del(failKey);
+
+        const lockMsg = newLevel >= 3 ? '永久锁定' : `锁定${newLevel === 1 ? '30分钟' : '24小时'}`;
+        await createNotification({
+          user_id: user.id, type: 'account_locked', title: '账号已被锁定',
+          content: `连续登录失败次数过多，账号已被${lockMsg}`, sendEmail: true,
+        });
+      }
+
       return res.status(401).json({ success: false, message: '用户名或密码错误' });
     }
 
@@ -107,12 +197,18 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     const ip = getClientIp(req);
     const userAgent = req.headers['user-agent'] || '';
     await resetRateLimit(ip);
+    await client.del(`login_fail:${username}`);
+
+    // Reset lock status on successful login
+    if (user.lock_level > 0) {
+      await pool.execute('UPDATE users SET lock_level = 0 WHERE id = ?', [user.id]);
+    }
 
     const token = generateToken();
     await pool.execute('UPDATE users SET session_token = ? WHERE id = ?', [token, user.id]);
 
     // Cache session in Redis (exclude password_hash for security)
-    await client.setEx(`session:${token}`, 300, JSON.stringify({
+    await client.setEx(`session:${token}`, 86400, JSON.stringify({
       id: user.id,
       username: user.username,
       email: user.email,
@@ -131,6 +227,29 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       'INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)',
       [user.id, ip, userAgent.slice(0, 200), 'web']
     );
+
+    // Record user session for multi-device tracking
+    await pool.execute(
+      'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info) VALUES (?, ?, ?, ?, ?)',
+      [user.id, token, ip, userAgent.slice(0, 500), parseDeviceInfo(userAgent)]
+    );
+
+    // New device notification
+    try {
+      const [prevLog] = await pool.execute(
+        'SELECT ip FROM login_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1 OFFSET 1',
+        [user.id]
+      );
+      if (prevLog.length > 0 && prevLog[0].ip !== ip) {
+        await createNotification({
+          user_id: user.id, type: 'login_new_device', title: '新设备登录',
+          content: `检测到新设备登录，IP: ${ip}`,
+          ip_address: ip, user_agent: userAgent, sendEmail: true,
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('[Login] new device notification failed:', notifyErr.message);
+    }
 
     res.cookie('session', token, {
       httpOnly: true,
@@ -191,6 +310,9 @@ router.post('/logout', requireAuth, async (req, res) => {
 
     // Clear session in MySQL
     await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [req.user.id]);
+
+    // Clear session tracking
+    await pool.execute('DELETE FROM user_sessions WHERE session_token = ?', [token]);
 
     // Clear session cache in Redis
     await client.del(`session:${token}`);

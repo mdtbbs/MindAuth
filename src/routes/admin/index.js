@@ -8,6 +8,11 @@ const config = require('../../config');
 // IMPORTANT: Mount specific paths first to avoid conflicts with '/' mount
 router.use('/clients', require('./clients')); // /clients, /clients/:id
 router.use('/users', require('./users'));     // /users, /users/:id
+router.use('/ip-bans', require('./ipBans'));  // /ip-bans
+router.use('/challenges', require('./challenges')); // /challenges
+router.use('/user-fields', require('./userFields')); // /user-fields
+router.use('/', require('./smsAuditLogs')); // /sms-audit-logs
+router.use('/', require('./auditLogs'));    // /audit-logs
 router.use('/', require('./auth'));           // /create, /login, /logout, /me
 router.use('/', require('./settings'));       // /stats, /email-config, /test-email, /config
 router.use('/', require('./logs'));           // /authorizations, /login-logs

@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../../db');
-const { requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
 
 // GET /authorizations - Get all authorization records
-router.get('/authorizations', requireAdmin, async (req, res) => {
+router.get('/authorizations', requireAdmin, requireAdminPermission('authorizations.read'), async (req, res) => {
   try {
     const { page, limit, user_id } = req.query;
     const pageNum = parseInt(page) || 1;
@@ -37,7 +37,7 @@ router.get('/authorizations', requireAdmin, async (req, res) => {
 });
 
 // DELETE /authorizations/:id - Revoke authorization
-router.delete('/authorizations/:id', requireAdmin, async (req, res) => {
+router.delete('/authorizations/:id', requireAdmin, requireAdminPermission('users.write'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.execute('DELETE FROM authorizations WHERE id = ?', [id]);
@@ -49,7 +49,7 @@ router.delete('/authorizations/:id', requireAdmin, async (req, res) => {
 });
 
 // GET /login-logs - Get login history
-router.get('/login-logs', requireAdmin, async (req, res) => {
+router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'), async (req, res) => {
   try {
     const { page, limit, user_id, login_type } = req.query;
     const pageNum = parseInt(page) || 1;

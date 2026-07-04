@@ -35,6 +35,17 @@ async function requireAuth(req, res, next) {
     // Cache for future requests
     await client.setEx(`session:${token}`, SESSION_CACHE_TTL, JSON.stringify(rows[0]));
 
+    // Throttled update of last_active_at in user_sessions (every 5 minutes)
+    const activeKey = `session_active:${token}`;
+    const isActive = await client.get(activeKey);
+    if (!isActive) {
+      await client.setEx(activeKey, 300, '1');
+      pool.execute(
+        'UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE session_token = ?',
+        [token]
+      ).catch(err => console.warn('[Session] active update failed:', err.message));
+    }
+
     next();
   } catch (err) {
     console.error('requireAuth error:', err);

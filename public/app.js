@@ -7,6 +7,23 @@ const Store = new Proxy({ user: null }, {
   }
 });
 
+let pendingHashNavigation = null;
+
+function clearPendingHashNavigation() {
+  if (pendingHashNavigation) {
+    clearTimeout(pendingHashNavigation);
+    pendingHashNavigation = null;
+  }
+}
+
+function scheduleHashNavigation(hash, delayMs) {
+  clearPendingHashNavigation();
+  pendingHashNavigation = setTimeout(() => {
+    pendingHashNavigation = null;
+    location.hash = hash;
+  }, delayMs);
+}
+
 // Handle non-hash URLs: redirect /login to #/login, /register to #/register
 // This allows MindAuth to work with direct URL paths like /login?redirect=...
 (function handleDirectUrls() {
@@ -21,7 +38,7 @@ const Store = new Proxy({ user: null }, {
       // Redirect to hash format after all scripts have loaded
       // Use setTimeout to ensure this runs after DOMContentLoaded handlers
       setTimeout(() => {
-        const newHash = '#' + supportedPath + (search || '');
+        const newHash = '/#/' + supportedPath + (search || '');
         // Use replace to avoid adding history entry
         window.location.replace(newHash);
       }, 0);
@@ -47,8 +64,8 @@ const views = {
       <div class="auth-box">
         <div class="auth-header">
           <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
-          <h1 class="auth-title">闁偓閸戣櫣娅ヨぐ?/h1>
-          <p class="auth-subtitle">濮濓絽婀柅鈧崙?..</p>
+          <h1 class="auth-title">MindAuth 账号中心</h1>
+          <p class="auth-subtitle">Mindustry 社区统一认证服务</p>
         </div>
         <div id="logout-status">
           <div class="empty-state">婢跺嫮鎮婃稉?..</div>
@@ -60,21 +77,21 @@ const views = {
   dashboard: `
     <div class="admin-content">
       <div class="admin-header">
-        <div class="admin-title">鐠愶附鍩?/div>
-        <button id="logout-btn" class="btn-secondary btn-sm">闁偓閸?/button>
+        <div class="admin-title">账号中心</div>
+        <button id="logout-btn" class="btn-secondary btn-sm">退出登录</button>
       </div>
 
       <!-- Profile Header with Banner and Avatar -->
       <div class="profile-header animate-fade-in-up" style="animation-delay: 0s">
         <div class="profile-banner" id="banner-display">
-          <button class="banner-upload-btn" id="banner-upload-btn" title="閺囧瓨宕查懗灞炬珯閸?>閺囧瓨宕查懗灞炬珯</button>
+        <button class="banner-upload-btn" id="banner-upload-btn" title="更换封面">更换封面</button>
         </div>
         <div class="profile-avatar-container">
           <div class="profile-avatar" id="avatar-display">
             <span id="avatar-letter">U</span>
             <img id="avatar-img" src="" alt="婢舵潙鍎? style="display: none;">
           </div>
-          <button class="avatar-upload-btn" id="avatar-upload-btn" title="閺囧瓨宕叉径鏉戝剼">
+        <button class="avatar-upload-btn" id="avatar-upload-btn" title="更换头像">
             <span>棣冩懖</span>
           </button>
         </div>
@@ -91,7 +108,7 @@ const views = {
         <div class="card-header-title">STATUS</div>
         <div class="status-section">
           <div class="status-row">
-            <span class="status-label">闁喚顔堟宀冪槈</span>
+            <span class="status-label">账号状态</span>
             <span id="verified-badge"></span>
           </div>
           <div class="status-row">
@@ -100,7 +117,7 @@ const views = {
           </div>
         </div>
         <div id="verification-actions" class="action-row" style="display: none;">
-          <button id="send-verify-btn" class="btn-outline">閸欐垿鈧線鐛欑拠渚€鍋栨禒?/button>
+          <button id="send-verify-btn" class="btn-outline">发送验证邮件</button>
         </div>
       </div>
 
@@ -108,7 +125,7 @@ const views = {
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.2s">
         <div class="card-header-title">LOGIN HISTORY</div>
         <div id="login-logs-container">
-          <div class="empty-state">閸旂姾娴囨稉?..</div>
+          <div class="empty-state">加载中...</div>
         </div>
       </div>
 
@@ -116,15 +133,7 @@ const views = {
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.3s">
         <div class="card-header-title">AUTHORIZED APPS</div>
         <div id="authorizations-container">
-          <div class="empty-state">閸旂姾娴囨稉?..</div>
-        </div>
-      </div>
-
-      <!-- LINKED ACCOUNTS Card -->
-      <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.35s">
-        <div class="card-header-title">LINKED ACCOUNTS</div>
-        <div id="linked-accounts-container">
-          <div class="empty-state">閸旂姾娴囨稉?..</div>
+          <div class="empty-state">加载中...</div>
         </div>
       </div>
 
@@ -132,7 +141,7 @@ const views = {
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0.4s">
         <div class="card-header-title">ACCOUNT</div>
         <div class="action-row">
-          <a href="#account-settings" class="btn-outline">鐠愶附鍩涚拋鍓х枂</a>
+        <a href="#account-settings" class="btn-outline">账号设置</a>
         </div>
       </div>
     </div>
@@ -142,20 +151,20 @@ const views = {
     <div class="admin-content">
       <div class="admin-header">
         <div class="admin-title">鐠佸墽鐤?/div>
-        <a href="#dashboard" class="btn-secondary btn-sm" style="text-decoration: none;">鏉╂柨娲?/a>
+        <a href="#dashboard" class="btn-secondary btn-sm" style="text-decoration: none;">返回/a>
       </div>
 
       <div class="card card-lg animate-fade-in-up" style="animation-delay: 0s">
         <div class="card-header-title">CHANGE PASSWORD</div>
         <form id="change-password-form" class="auth-form">
           <div class="form-group">
-            <label class="form-label">瑜版挸澧犵€靛棛鐖?/label>
-            <input class="form-input" type="password" id="old_password" name="old_password" required placeholder="鏉堟挸鍙嗚ぐ鎾冲鐎靛棛鐖?>
+            <label class="form-label">旧密码</label>
+            <input class="form-input" type="password" id="old_password" name="old_password" required placeholder="请输入旧密码">
           </div>
           <div class="form-group">
-            <label class="form-label">閺傛澘鐦戦惍?/label>
-            <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="閼峰啿鐨?娴ｅ稄绱濋崥顐亣鐏忓繐鍟撶€涙鐦濋崪灞炬殶鐎?>
-            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">闂団偓鐟? 婢堆冨晸+鐏忓繐鍟?閺佹澘鐡ч敍宀冨殾鐏?娴?/p>
+            <label class="form-label">新密码</label>
+            <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="请输入新密码（至少8位）">
+            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要包含：大写字母 + 小写字母 + 数字</p>
           </div>
           <button type="submit" class="btn-primary">绾喛顓绘穱顔芥暭</button>
         </form>
@@ -165,23 +174,23 @@ const views = {
         <div class="card-header-title">CHANGE EMAIL</div>
         <form id="change-email-form" class="auth-form">
           <div class="form-group">
-            <label class="form-label">閺備即鍋栫粻鍗炴勾閸р偓</label>
+            <label class="form-label">新邮箱</label>
             <input class="form-input" type="email" id="new_email" name="new_email" required placeholder="name@company.com">
           </div>
-          <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem;">閺囧瓨宕查柇顔绢唸闂団偓鐟曚線鐛欑拠浣规煀闁喚顔堥崷鏉挎絻</p>
-          <button type="submit" class="btn-primary">閸欐垿鈧線鐛欑拠渚€鍋栨禒?/button>
+          <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem;">我们需要向新邮箱发送验证邮件才能完成邮箱变更</p>
+          <button type="submit" class="btn-primary">发送验证邮件</button>
         </form>
       </div>
 
       <div class="card card-lg animate-fade-in-up danger-zone" style="animation-delay: 0.2s">
         <div class="card-header-title">DELETE ACCOUNT</div>
-        <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.8125rem;">閸掔娀娅庣拹锕€褰跨亸鍡樻娑斿懐些闂勩倖鍋嶉惃鍕閺堝鏆熼幑顕嗙礉濮濄倖鎼锋担婊€绗夐崣顖涙寵闁库偓閵?/p>
+        <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.8125rem;">删除账号后，所有关联数据将被清除，此操作不可撤销。请输入密码确认。</p>
         <form id="delete-account-form" class="auth-form">
           <div class="form-group">
-            <label class="form-label">鏉堟挸鍙嗙€靛棛鐖滅涵顔款吇</label>
-            <input class="form-input" type="password" id="delete_password" name="password" required placeholder="鏉堟挸鍙嗙€靛棛鐖滅涵顔款吇閸掔娀娅?>
+        <label class="form-label">确认密码（删除后不可恢复）</label>
+        <input class="form-input" type="password" id="delete_password" name="password" required placeholder="确认密码（删除后不可恢复）">
           </div>
-          <button type="submit" class="btn-outline btn-danger">绾喛顓婚崚鐘绘珟鐠愶箑褰?/button>
+        <button type="submit" class="btn-outline btn-danger">确认删除账号</button>
         </form>
       </div>
     </div>
@@ -192,17 +201,17 @@ const views = {
       <div class="auth-box">
         <div class="auth-header">
           <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
-          <h1 class="auth-title">闁插秶鐤嗙€靛棛鐖?/h1>
-          <p class="auth-subtitle">鏉堟挸鍙嗛柇顔绢唸閼惧嘲褰囬柌宥囩枂闁剧偓甯?/p>
+        <h1 class="auth-title">注册新账号</h1>
+        <p class="auth-subtitle">填写以下信息创建您的账号</p>
         </div>
         <form id="reset-request-form" class="auth-form">
           <div class="form-group">
-            <label class="form-label">闁喚顔堥崷鏉挎絻</label>
+        <label class="form-label">验证码</label>
             <input class="form-input" type="email" id="email" name="email" required placeholder="name@company.com">
           </div>
-          <button type="submit" class="btn-primary">閸欐垿鈧線鍣哥純顕€鎽奸幒?/button>
+        <button type="submit" class="btn-primary">注册</button>
         </form>
-        <p class="auth-link"><a href="#login">鏉╂柨娲栭惂璇茬秿</a></p>
+        <p class="auth-link">没有账户？ <a href="#register">创建一个</a></p>
       </div>
     </div>
   `,
@@ -212,14 +221,14 @@ const views = {
       <div class="auth-box">
         <div class="auth-header">
           <div class="auth-logo"><div class="auth-logo-dot"></div>MindAuth</div>
-          <h1 class="auth-title">鐠佸墽鐤嗛弬鏉跨槕閻?/h1>
-          <p class="auth-subtitle">鐠囩柉绶崗銉︽煀鐎靛棛鐖?/p>
+        <h1 class="auth-title">重置密码</h1>
+        <p class="auth-subtitle">请输入您的注册邮箱</p>
         </div>
         <form id="reset-password-form" class="auth-form">
           <div class="form-group">
-            <label class="form-label">閺傛澘鐦戦惍?/label>
-            <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="閼峰啿鐨?娴ｅ稄绱濋崥顐亣鐏忓繐鍟撶€涙鐦濋崪灞炬殶鐎?>
-            <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">闂団偓鐟? 婢堆冨晸+鐏忓繐鍟?閺佹澘鐡ч敍宀冨殾鐏?娴?/p>
+        <label class="form-label">新密码</label>
+        <input class="form-input" type="password" id="new_password" name="new_password" required minlength="8" placeholder="请输入新密码（至少8位）">
+        <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要包含：大写字母 + 小写字母 + 数字</p>
           </div>
           <button type="submit" class="btn-primary">绾喛顓绘穱顔芥暭</button>
         </form>
@@ -246,37 +255,37 @@ const views = {
 const loginFormContent = `
   <form id="login-form" class="auth-form">
     <div class="form-group">
-      <label class="form-label">閻劍鍩涢崥?/label>
-      <input class="form-input" type="text" id="username" name="username" required placeholder="鐠囩柉绶崗銉ф暏閹村嘲鎮?>
+        <label class="form-label">邮箱地址</label>
+        <input class="form-input" type="text" id="username" name="username" required placeholder="请输入用户名">
     </div>
     <div class="form-group">
-      <label class="form-label">鐎靛棛鐖?/label>
-      <input class="form-input" type="password" id="password" name="password" required placeholder="鏉堟挸鍙嗙€靛棛鐖?>
+        <label class="form-label">密码</label>
+        <input class="form-input" type="password" id="password" name="password" required placeholder="请输入密码">
     </div>
     <button type="submit" class="btn-primary">缂佈呯敾</button>
   </form>
-  <p class="auth-link">濞屸剝婀佺拹锔藉煕? <a href="#register">閸掓稑缂撴稉鈧稉?/a></p>
-  <p class="auth-link"><a href="#reset-request">韫囨顔囩€靛棛鐖?</a></p>
+        <p class="auth-link">没有账户？ <a href="#register">创建一个</a></p>
+        <p class="auth-link"><a href="#reset-request">忘记密码</a></p>
 `;
 
 const registerFormContent = `
   <form id="register-form" class="auth-form">
     <div class="form-group">
-      <label class="form-label">閻劍鍩涢崥?/label>
+        <label class="form-label">邮箱地址</label>
       <input class="form-input" type="text" id="username" name="username" required placeholder="2-50娑擃亜鐡х粭?>
     </div>
     <div class="form-group">
-      <label class="form-label">闁喚顔堥崷鏉挎絻</label>
+        <label class="form-label">验证码</label>
       <input class="form-input" type="email" id="email" name="email" required placeholder="name@company.com">
     </div>
     <div class="form-group">
-      <label class="form-label">鐎靛棛鐖?/label>
-      <input class="form-input" type="password" id="password" name="password" required minlength="8" placeholder="閼峰啿鐨?娴ｅ稄绱濋崥顐亣鐏忓繐鍟撶€涙鐦濋崪灞炬殶鐎?>
-      <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">闂団偓鐟? 婢堆冨晸+鐏忓繐鍟?閺佹澘鐡ч敍宀冨殾鐏?娴?/p>
+        <label class="form-label">密码</label>
+        <input class="form-input" type="password" id="password" name="password" required minlength="8" placeholder="请输入密码（至少8位）">
+        <p class="password-hint" style="color: var(--text-muted); font-size: 0.6875rem; margin-top: 0.25rem;">需要包含：大写字母 + 小写字母 + 数字</p>
     </div>
-    <button type="submit" class="btn-primary">閸掓稑缂撶拹锔藉煕</button>
+        <button type="submit" class="btn-primary">继续</button>
   </form>
-  <p class="auth-link">瀹稿弶婀佺拹锔藉煕? <a href="#login">閻ц缍?/a></p>
+        <p class="auth-link">已有账户？ <a href="#login">返回登录</a></p>
 `;
 
 const authUiOverrides = {
@@ -396,7 +405,7 @@ const authUiOverrides = {
         <div class="dashboard-grid">
           <section class="card card-lg panel-surface profile-panel">
             <div class="profile-cover" id="banner-display">
-              <button class="banner-upload-btn" id="banner-upload-btn" title="更换封面">更换封面</button>
+              <button class="banner-upload-btn" id="banner-upload-btn" title="更换背景图">更换背景</button>
             </div>
             <div class="profile-head">
               <div class="profile-avatar-wrap">
@@ -423,7 +432,7 @@ const authUiOverrides = {
                 <span id="verified-badge"></span>
               </div>
               <div class="status-row">
-                <span class="status-label">注册时间</span>
+                <span class="status-label">邮箱验证</span>
                 <span class="status-value" id="created-display"></span>
               </div>
             </div>
@@ -437,14 +446,17 @@ const authUiOverrides = {
             <div id="login-logs-container"><div class="empty-state">暂无记录</div></div>
           </section>
 
-          <section class="card card-lg panel-surface">
-            <div class="card-header-title">已授权应用</div>
-            <div id="authorizations-container"><div class="empty-state">暂无授权</div></div>
+          <section class="card card-lg panel-surface notification-panel">
+            <div class="card-header-row">
+              <div class="card-header-title">通知中心 <span id="notification-count" class="notification-count" style="display:none;">0</span></div>
+              <button id="mark-all-notifications-read-btn" class="btn-secondary btn-sm">全部已读</button>
+            </div>
+            <div id="notifications-container"><div class="empty-state">暂无通知</div></div>
           </section>
 
           <section class="card card-lg panel-surface">
-            <div class="card-header-title">关联账号</div>
-            <div id="linked-accounts-container"><div class="empty-state">暂无关联账号</div></div>
+            <div class="card-header-title">已授权应用</div>
+            <div id="authorizations-container"><div class="empty-state">暂无授权应用</div></div>
           </section>
 
           <section class="card card-lg panel-surface">
@@ -503,7 +515,7 @@ const authUiOverrides = {
                 <label class="form-label">确认密码</label>
                 <input class="form-input" type="password" id="delete_password" name="password" required placeholder="再次输入密码">
               </div>
-              <button type="submit" class="btn-outline btn-danger">删除账号</button>
+              <button type="submit" class="btn-outline btn-danger">确认删除账号</button>
             </form>
           </section>
         </div>
@@ -516,7 +528,7 @@ const authUiOverrides = {
  * Inject form content into LoginLayout template HTML
  * @param {string} templateHtml - The LoginLayout template HTML
  * @param {string} formContent - The form HTML to inject
- * @param {string} title - The form title (e.g., "閻ц缍?, "濞夈劌鍞?)
+ * @param {string} title - The form title (e.g., "返回登录", "注册")
  * @returns {string} Complete HTML with injected content
  */
 function injectLoginFormContent(templateHtml, formContent, title) {
@@ -536,6 +548,8 @@ function injectLoginFormContent(templateHtml, formContent, title) {
 
 // Router
 async function router() {
+  clearPendingHashNavigation();
+
   // Get hash, remove # prefix and any leading /
   let hash = (location.hash.slice(1) || 'login').replace(/^\/+/, '');
 
@@ -552,7 +566,7 @@ async function router() {
     const app = document.getElementById('app');
     app.innerHTML = authUiOverrides.views.logout || views.logout;
 
-    // 閼惧嘲褰?redirect_uri 閸欏倹鏆?
+// 登录后 redirect_uri 跳转
     const urlQueryParams = new URLSearchParams(window.location.search);
     const hashQueryParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
     const redirectUri = urlQueryParams.get('redirect') || urlQueryParams.get('redirect_uri') || hashQueryParams.get('redirect') || hashQueryParams.get('redirect_uri');
@@ -565,25 +579,25 @@ async function router() {
       if (result.success) {
         statusDiv.innerHTML = `
           <div class="verify-success">
-            <div class="verify-icon">閴?/div>
+            <div class="verify-icon">✓/div>
             <h2>瀹告煡鈧偓閸戣櫣娅ヨぐ?/h2>
-            <p style="color: var(--text-muted);">閹扮喕闃挎担璺ㄦ暏 MindAuth</p>
+            <p style="color: var(--text-muted);">您已退出 MindAuth</p>
             <p id="logout-redirect-hint" style="color: var(--text-muted); margin-top: 0.5rem;">
               <span id="logout-countdown">3</span> 缁夋帒鎮楃捄瀹犳祮
             </p>
           </div>
-          <p class="auth-link"><a href="#login">闁插秵鏌婇惂璇茬秿</a></p>
+        <p class="auth-link"><a href="#login">返回登录</a></p>
         `;
       } else {
         // Even if the API reports failure, keep the same logout confirmation flow.
         statusDiv.innerHTML = `
             <h2>瀹告煡鈧偓閸戣櫣娅ヨぐ?/h2>
-            <p style="color: var(--text-muted);">閹扮喕闃挎担璺ㄦ暏 MindAuth</p>
+            <p style="color: var(--text-muted);">您已退出 MindAuth</p>
             <p id="logout-redirect-hint" style="color: var(--text-muted); margin-top: 0.5rem;">
               <span id="logout-countdown">3</span> 缁夋帒鎮楃捄瀹犳祮
             </p>
           </div>
-          <p class="auth-link"><a href="#login">闁插秵鏌婇惂璇茬秿</a></p>
+        <p class="auth-link"><a href="#login">返回登录</a></p>
         `;
       }
 
@@ -595,7 +609,7 @@ async function router() {
         if (countdownEl) countdownEl.textContent = countdown;
         if (countdown <= 0) {
           clearInterval(timer);
-          // 婵″倹鐏夐張?redirect_uri閿涘矁鐑︽潪顒€鍩岄幐鍥х暰妞ょ敻娼?
+// 简单重定向模式 redirect_uri 跳转
           if (redirectUri) {
             window.location.href = redirectUri;
           } else {
@@ -640,8 +654,8 @@ async function router() {
   const state = urlQueryParams.get('state') || hashQueryParams.get('state');
 
   // Store redirect params for later use
-  // 閺€顖涘瘮娑撱倗顫掑Ο鈥崇础閿?  // 1. OAuth濡€崇础閿涙碍婀?redirect_uri + client_id
-  // 2. 缁犫偓閸楁洟鍣哥€规艾鎮滃Ο鈥崇础閿涙艾褰ч張?redirect 閸欏倹鏆?
+// 1. OAuth 登录 redirect_uri + client_id
+// 2. 登录后 redirect 跳转
   if (redirectUri) {
     sessionStorage.setItem('oauth_redirect_uri', redirectUri);
     if (clientId) {
@@ -686,7 +700,7 @@ async function router() {
       views[viewName] = injectLoginFormContent(templateHtml, formContent, title);
     } catch (err) {
       console.error('Failed to load template:', err);
-      app.innerHTML = '<div class="empty-state">閸旂姾娴囨径杈Е閿涘矁顕崚閿嬫煀妞ょ敻娼?/div>';
+  app.innerHTML = '<div class="empty-state">加载失败，请刷新页面</div>';
       return;
     }
   }
@@ -729,37 +743,25 @@ async function router() {
     const verificationActions = document.getElementById('verification-actions');
 
     if (Store.user.email_verified) {
-      verifiedBadge.innerHTML = '<span class="status-dot">瀹告煡鐛欑拠?/span>';
+      verifiedBadge.innerHTML = '<span class="status-dot">已验证</span>';
     } else {
-      verifiedBadge.innerHTML = '<span class="status-dot warn">閺堫亪鐛欑拠?/span>';
+      verifiedBadge.innerHTML = '<span class="status-dot warn">未验证</span>';
       verificationActions.style.display = 'block';
-    }
-
-    // Handle XenForo callback success/error
-    const xfSuccess = hashQueryParams.get('xf_success');
-    const xfError = hashQueryParams.get('xf_error');
-    if (xfSuccess) {
-      showToast(xfSuccess, 'success');
-      // Clear the URL params
-      window.location.hash = 'dashboard';
-    }
-    if (xfError) {
-      showToast(xfError, 'error');
-      window.location.hash = 'dashboard';
     }
 
     // Load login logs
     loadLoginLogs();
+    // Load notifications
+    loadNotifications();
     // Load authorizations
     loadAuthorizations();
-    // Load linked accounts
-    loadLinkedAccounts();
   }
 }
 
 // Event delegation for forms
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
+  clearPendingHashNavigation();
   const form = e.target;
   const submitBtn = form.querySelector('button[type="submit"]');
 
@@ -792,8 +794,7 @@ document.addEventListener('submit', async (e) => {
       const result = await apiFetch('/api/login', { method: 'POST', body: data });
 
       if (result.success) {
-        showToast('閻ц缍嶉幋鎰', 'success');
-        await checkAuth();
+        showToast('登录成功', 'success');
 
         // Check redirect after login
         const redirectUri = sessionStorage.getItem('oauth_redirect_uri');
@@ -816,6 +817,7 @@ document.addEventListener('submit', async (e) => {
             window.location.href = finalRedirect;
           }
         } else {
+          await checkAuth();
           location.hash = 'dashboard';
         }
       } else {
@@ -858,8 +860,8 @@ document.addEventListener('submit', async (e) => {
       const result = await apiFetch('/api/register', { method: 'POST', body: data });
 
       if (result.success) {
-        showToast(result.message || '濞夈劌鍞介幋鎰閿涘矁顕惂璇茬秿', 'success');
-        setTimeout(() => location.hash = 'login', 2000);
+        showToast(result.message || '注册成功，请登录', 'success');
+        scheduleHashNavigation('login', 2000);
       } else {
         // Show specific field errors
         if (result.message.includes('用户名') || result.message.includes('账号')) {
@@ -891,7 +893,7 @@ document.addEventListener('submit', async (e) => {
 
       if (result.success) {
         showToast(result.message, 'success');
-        setTimeout(() => location.hash = 'login', 2000);
+        scheduleHashNavigation('login', 2000);
       } else {
         showFieldError('email', result.message);
       }
@@ -915,7 +917,7 @@ document.addEventListener('submit', async (e) => {
 
       if (result.success) {
         showToast(result.message, 'success');
-        setTimeout(() => location.hash = 'login', 2000);
+        scheduleHashNavigation('login', 2000);
       } else {
         showFieldError('new_password', result.message);
       }
@@ -948,9 +950,10 @@ document.addEventListener('submit', async (e) => {
       if (result.success) {
         showToast(result.message, 'success');
         Store.user = null;
-        setTimeout(() => location.hash = 'login', 2000);
+        scheduleHashNavigation('login', 2000);
       } else {
         if (result.message.includes('密码')) {
+          showToast(result.message, 'error');
           showFieldError('old_password', result.message);
         } else {
           showToast(result.message, 'error');
@@ -991,7 +994,7 @@ document.addEventListener('submit', async (e) => {
         return;
       }
 
-      if (!confirm('确认删除账号？此操作无法恢复。')) {
+      if (!confirm('确定要删除账号吗？此操作不可撤销！')) {
         setButtonLoading(submitBtn, false);
         return;
       }
@@ -1029,6 +1032,33 @@ document.addEventListener('click', async (e) => {
     showToast(result.message, result.success ? 'success' : 'error');
   }
 
+  if (e.target.id === 'mark-all-notifications-read-btn') {
+    const result = await apiFetch('/api/notifications/read-all', { method: 'PATCH' });
+    showToast(result.message || (result.success ? '已全部标为已读' : '操作失败'), result.success ? 'success' : 'error');
+    if (result.success) {
+      loadNotifications();
+    }
+  }
+
+  if (e.target.classList.contains('notification-read-btn')) {
+    const id = e.target.dataset.id;
+    const result = await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+    if (result.success) {
+      loadNotifications();
+    } else {
+      showToast(result.message || '操作失败', 'error');
+    }
+  }
+
+  if (e.target.classList.contains('notification-delete-btn')) {
+    const id = e.target.dataset.id;
+    const result = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
+    showToast(result.message || (result.success ? '通知已删除' : '删除失败'), result.success ? 'success' : 'error');
+    if (result.success) {
+      loadNotifications();
+    }
+  }
+
   // Revoke authorization
   if (e.target.classList.contains('revoke-auth-btn')) {
     const clientId = e.target.dataset.clientId;
@@ -1038,40 +1068,6 @@ document.addEventListener('click', async (e) => {
     showToast(result.message, result.success ? 'success' : 'error');
     if (result.success) {
       loadAuthorizations();
-    }
-  }
-
-  // Link XenForo account
-  if (e.target.classList.contains('link-xenforo-btn')) {
-    window.location.href = '/api/xenforo/link';
-  }
-
-  // Unlink XenForo account
-  if (e.target.classList.contains('unlink-xenforo-btn')) {
-    const provider = e.target.dataset.provider;
-    if (!confirm('确认解除绑定？')) return;
-
-    const result = await apiFetch(`/api/xenforo/link`, { method: 'DELETE' });
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success) {
-      loadLinkedAccounts();
-    }
-  }
-
-  // Sync XenForo avatar
-  if (e.target.classList.contains('sync-xenforo-btn')) {
-    const result = await apiFetch('/api/xenforo/sync', { method: 'POST' });
-    showToast(result.message, result.success ? 'success' : 'error');
-    if (result.success && result.synced.avatar) {
-      // Update avatar display
-      await checkAuth();
-      const avatarImg = document.getElementById('avatar-img');
-      const avatarLetter = document.getElementById('avatar-letter');
-      if (Store.user.avatar_url) {
-        avatarImg.src = Store.user.avatar_url;
-        avatarImg.style.display = 'block';
-        avatarLetter.style.display = 'none';
-      }
     }
   }
 
@@ -1101,7 +1097,7 @@ document.addEventListener('change', async (e) => {
       return;
     }
 
-    // 閺堫剙婀存０鍕潔
+// 上传文件
     const reader = new FileReader();
     reader.onload = (ev) => {
       const avatarImg = document.getElementById('avatar-img');
@@ -1120,7 +1116,7 @@ document.addEventListener('change', async (e) => {
       const result = await apiFetch('/api/account/avatar', {
         method: 'POST',
         body: formData,
-        headers: {} // 娑撳秷顔曠純?Content-Type閿涘矁顔€濞村繗顫嶉崳銊ㄥ殰閸斻劌顦╅悶?multipart
+  headers: {} // 不设置 Content-Type，让浏览器自动处理 multipart
       });
 
       if (result.success) {
@@ -1141,12 +1137,12 @@ document.addEventListener('change', async (e) => {
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      showToast('封面文件不能超过 5MB', 'error');
+  showToast('封面文件不能超过 5MB', 'error');
       e.target.value = '';
       return;
     }
 
-    // 閺堫剙婀存０鍕潔
+// 上传文件
     const reader = new FileReader();
     reader.onload = (ev) => {
       const bannerDisplay = document.getElementById('banner-display');
@@ -1166,7 +1162,7 @@ document.addEventListener('change', async (e) => {
       });
 
       if (result.success) {
-        showToast('封面已更新', 'success');
+        showToast('背景图已更新', 'success');
         Store.user.banner_url = result.banner_url;
       } else {
         showToast(result.message || '上传失败', 'error');
@@ -1195,10 +1191,10 @@ async function loadLoginLogs() {
         </div>
       `).join('');
     } else {
-      container.innerHTML = '<div class="empty-state">閺嗗倹妫ら惂璇茬秿鐠佹澘缍?/div>';
+      container.innerHTML = '<div class="empty-state">暂无授权应用</div>';
     }
   } catch (err) {
-    container.innerHTML = '<div class="empty-state">閸旂姾娴囨径杈Е</div>';
+      container.innerHTML = '<div class="empty-state">暂无登录记录</div>';
   }
 }
 
@@ -1212,63 +1208,73 @@ async function loadAuthorizations() {
         <div class="auth-item">
           <div class="auth-info">
             <span class="auth-name">${escapeHtml(auth.name)}</span>
-            <span class="auth-time">閹哄牊娼? ${new Date(auth.last_used_at).toLocaleDateString()}</span>
+          <span class="auth-time">授权时间 ${new Date(auth.last_used_at).toLocaleDateString()}</span>
           </div>
-          <button class="revoke-auth-btn btn-ghost danger" data-client-id="${escapeHtml(auth.client_id)}">閹俱倝鏀?/button>
+          <button class="revoke-auth-btn btn-ghost danger" data-client-id="${escapeHtml(auth.client_id)}">撤销授权</button>
         </div>
       `).join('');
     } else {
-      container.innerHTML = '<div class="empty-state">閺嗗倹妫ら幒鍫熸綀鎼存梻鏁?/div>';
+      container.innerHTML = '<div class="empty-state">暂无授权应用</div>';
     }
   } catch (err) {
-    container.innerHTML = '<div class="empty-state">閸旂姾娴囨径杈Е</div>';
+      container.innerHTML = '<div class="empty-state">暂无登录记录</div>';
   }
 }
 
-// Load linked accounts
-async function loadLinkedAccounts() {
-  const container = document.getElementById('linked-accounts-container');
+function renderNotificationItem(notification) {
+  return `
+    <div class="notification-item ${notification.is_read ? 'read' : 'unread'}" data-id="${notification.id}">
+      <div class="notification-main">
+        <div class="notification-title">${escapeHtml(notification.title || '-')}</div>
+        <div class="notification-content">${escapeHtml(notification.content || '')}</div>
+        <div class="notification-meta">${escapeHtml(notification.type || '-')} · ${escapeHtml(formatDateTime(notification.created_at))}</div>
+      </div>
+      <div class="notification-actions">
+        <button class="btn-sm notification-read-btn" data-id="${notification.id}" ${notification.is_read ? 'disabled' : ''}>${notification.is_read ? '已读' : '标为已读'}</button>
+        <button class="btn-ghost danger btn-sm notification-delete-btn" data-id="${notification.id}">删除</button>
+      </div>
+    </div>
+  `;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+async function refreshNotificationCount() {
+  const badge = document.getElementById('notification-count');
+  if (!badge) return;
   try {
-    // Check if XenForo linking is enabled
-    const configResult = await apiFetch('/api/xenforo/config/status');
-    const xfEnabled = configResult.enabled;
-
-    // Get linked accounts
-    const result = await apiFetch('/api/account/linked-accounts');
-
-    if (result.success && result.linked_accounts.length > 0) {
-      const linkedHtml = result.linked_accounts.map(link => `
-        <div class="linked-account-item">
-          <div class="linked-account-info">
-            <div class="linked-account-provider">
-              <span class="provider-badge ${link.provider}">${link.provider.toUpperCase()}</span>
-              <span class="linked-account-name">${escapeHtml(link.external_username)}</span>
-            </div>
-            <div class="linked-account-meta">
-              ${link.external_is_admin ? '<span class="badge badge-admin">缁狅紕鎮婇崨?/span>' : ''}
-              ${link.external_is_moderator ? '<span class="badge badge-mod">閻楀牅瀵?/span>' : ''}
-              <span class="linked-account-time">閸忓疇浠堟禍?${new Date(link.linked_at).toLocaleDateString()}</span>
-            </div>
-          </div>
-          <div class="linked-account-actions">
-            <button class="btn-ghost btn-sm sync-xenforo-btn" data-provider="${link.provider}" title="閸氬本顒炴径鏉戝剼">閸氬本顒?/button>
-            <button class="btn-ghost btn-sm danger unlink-xenforo-btn" data-provider="${link.provider}" title="閸欐牗绉烽崗瀹犱粓">閸欐牗绉烽崗瀹犱粓</button>
-          </div>
-        </div>
-      `).join('');
-      container.innerHTML = linkedHtml;
-    } else if (xfEnabled) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <p>閺堫亜鍙ч懕鏂款樆闁劏澶勯崣?/p>
-          <button class="btn-primary btn-sm link-xenforo-btn" style="margin-top: 0.5rem">閸忓疇浠?XenForo 鐠佸搫娼?/button>
-        </div>
-      `;
-    } else {
-      container.innerHTML = '<div class="empty-state">婢舵牠鍎寸拹锕€褰块崗瀹犱粓閸旂喕鍏橀張顏勬儙閻?/div>';
+    const result = await apiFetch('/api/notifications/unread-count');
+    if (result.success) {
+      const count = Number(result.count || 0);
+      if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.style.display = 'inline-flex';
+      } else {
+        badge.style.display = 'none';
+      }
     }
-  } catch (err) {
-    container.innerHTML = '<div class="empty-state">閸旂姾娴囨径杈Е</div>';
+  } catch {}
+}
+
+async function loadNotifications() {
+  const container = document.getElementById('notifications-container');
+  if (!container) return;
+
+  container.innerHTML = '<div class="empty-state">加载中...</div>';
+  try {
+    const result = await apiFetch('/api/notifications?limit=10');
+    if (result.success && result.notifications && result.notifications.length > 0) {
+      container.innerHTML = result.notifications.map(renderNotificationItem).join('');
+    } else {
+      container.innerHTML = '<div class="empty-state">暂无通知</div>';
+    }
+    await refreshNotificationCount();
+  } catch {
+    container.innerHTML = '<div class="empty-state">加载失败</div>';
   }
 }
 

@@ -4,18 +4,39 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { pool, transaction } = require('../../db');
 const { isValidUsername, getUsernameValidationError, escapeHtml } = require('../../utils/validation');
-const { requireAdmin } = require('../../middleware/requireAdmin');
-const { invalidateUserAdminSessions } = require('../../middleware/requireAdmin');
+const { requireAdmin, requireAdminPermission, invalidateUserAdminSessions, isAdminRole } = require('../../middleware/requireAdmin');
 const { createRateLimiter } = require('../../middleware/rateLimit');
 const { getClientIp } = require('../../utils/request');
+const { logAudit } = require('../../utils/auditLog');
+const { createNotification } = require('../../utils/notify');
 const config = require('../../config');
+
+const BAN_DURATIONS = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+  'permanent': null,
+};
+
+function calcBanExpiry(duration, expires_at) {
+  if (expires_at) return new Date(expires_at);
+  if (duration === 'permanent' || duration === undefined) return null;
+  const ms = BAN_DURATIONS[duration];
+  if (ms === undefined) return null;
+  return new Date(Date.now() + ms);
+}
 
 // Rate limiters for sensitive admin operations
 const passwordResetLimiter = createRateLimiter(config.adminSecurity.passwordReset);
 const userDeleteLimiter = createRateLimiter(config.adminSecurity.userDelete);
+const USER_ROLES = ['user', 'moderator', 'admin', 'super_admin', 'user_admin', 'security_admin', 'config_admin', 'readonly_admin'];
+
+function isSuperAdmin(req) {
+  return req.adminUser?.normalized_role === 'super_admin' || req.adminUser?.role === 'admin';
+}
 
 // GET /users - Get all users
-router.get('/', requireAdmin, async (req, res) => {
+router.get('/', requireAdmin, requireAdminPermission('users.read'), async (req, res) => {
   try {
     const { search, role, page, limit } = req.query;
 
@@ -41,7 +62,7 @@ router.get('/', requireAdmin, async (req, res) => {
       effectivePage = parsedPage;
     }
 
-    let query = 'SELECT id, username, email, email_verified, role, created_at FROM users';
+    let query = 'SELECT id, username, email, email_verified, role, phone, phone_verified, ban_status, lock_level, created_at FROM users';
     let params = [];
 
     if (search) {
@@ -51,11 +72,11 @@ router.get('/', requireAdmin, async (req, res) => {
 
     if (role) {
       if (params.length > 0) {
-        query += ' AND role = ?';
+        query += role === 'admin' ? " AND role IN ('admin', 'super_admin')" : ' AND role = ?';
       } else {
-        query += ' WHERE role = ?';
+        query += role === 'admin' ? " WHERE role IN ('admin', 'super_admin')" : ' WHERE role = ?';
       }
-      params.push(role);
+      if (role !== 'admin') params.push(role);
     }
 
     query += ' ORDER BY created_at DESC';
@@ -77,11 +98,11 @@ router.get('/', requireAdmin, async (req, res) => {
     }
     if (role) {
       if (totalParams.length > 0) {
-        totalQuery += ' AND role = ?';
+        totalQuery += role === 'admin' ? " AND role IN ('admin', 'super_admin')" : ' AND role = ?';
       } else {
-        totalQuery += ' WHERE role = ?';
+        totalQuery += role === 'admin' ? " WHERE role IN ('admin', 'super_admin')" : ' WHERE role = ?';
       }
-      totalParams.push(role);
+      if (role !== 'admin') totalParams.push(role);
     }
     const [totalRows] = await pool.execute(totalQuery, totalParams);
     const total = totalRows[0].count;
@@ -97,12 +118,17 @@ router.get('/', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /users/:id - Get user details with authorizations
-router.get('/:id', requireAdmin, async (req, res) => {
+// GET /users/:id - Get user details with related activity
+router.get('/:id', requireAdmin, requireAdminPermission('users.read'), async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [userRows] = await pool.execute('SELECT id, username, email, email_verified, role, created_at FROM users WHERE id = ?', [id]);
+    const [userRows] = await pool.execute(
+      `SELECT id, username, email, email_verified, role, avatar_url, banner_url, phone, phone_verified,
+              phone_verified_at, ban_status, ban_reason, banned_by, ban_expires_at, lock_level, locked_until, created_at
+       FROM users WHERE id = ?`,
+      [id]
+    );
     const user = userRows[0];
 
     if (!user) {
@@ -110,14 +136,64 @@ router.get('/:id', requireAdmin, async (req, res) => {
     }
 
     const [authorizations] = await pool.execute(`
-      SELECT a.client_id, c.name as client_name, a.last_used_at, a.created_at
+      SELECT a.id, a.client_id, c.name as client_name, a.scope, a.last_used_at, a.created_at
       FROM authorizations a
       LEFT JOIN clients c ON a.client_id = c.id
       WHERE a.user_id = ?
       ORDER BY a.last_used_at DESC
+      LIMIT 20
     `, [id]);
 
-    res.json({ success: true, user, authorizations });
+    const [loginLogs] = await pool.execute(`
+      SELECT id, ip, device, login_type, created_at
+      FROM login_logs
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [id]);
+
+    const [smsLogs] = await pool.execute(`
+      SELECT id, action, phone_masked, success, code, ip_address, created_at
+      FROM sms_audit_logs
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [id]);
+
+    const [notifications] = await pool.execute(`
+      SELECT id, type, title, content, is_read, created_at
+      FROM user_notifications
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [id]);
+
+    const [auditLogs] = await pool.execute(`
+      SELECT id, admin_id, action, target_type, target_id, details, ip_address, created_at
+      FROM admin_audit_logs
+      WHERE target_type = 'user' AND target_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [id]);
+
+    const [sessions] = await pool.execute(`
+      SELECT id, ip_address, device_info, created_at, last_active_at
+      FROM user_sessions
+      WHERE user_id = ?
+      ORDER BY last_active_at DESC
+      LIMIT 20
+    `, [id]);
+
+    res.json({
+      success: true,
+      user,
+      authorizations,
+      login_logs: loginLogs,
+      sms_logs: smsLogs.map((log) => ({ ...log, success: log.success === 1 || log.success === true })),
+      notifications: notifications.map((notification) => ({ ...notification, is_read: notification.is_read === 1 || notification.is_read === true })),
+      audit_logs: auditLogs,
+      sessions,
+    });
   } catch (err) {
     console.error('Get user details error:', err);
     res.status(500).json({ success: false, message: '获取用户详情失败' });
@@ -125,7 +201,7 @@ router.get('/:id', requireAdmin, async (req, res) => {
 });
 
 // POST /users/:id/reset-password - Reset user password (rate limited)
-router.post('/:id/reset-password', requireAdmin, passwordResetLimiter, async (req, res) => {
+router.post('/:id/reset-password', requireAdmin, requireAdminPermission('users.reset_password'), passwordResetLimiter, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -195,17 +271,25 @@ router.post('/:id/reset-password', requireAdmin, passwordResetLimiter, async (re
 });
 
 // PUT /users/:id - Update user
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireAdmin, requireAdminPermission('users.write'), async (req, res) => {
   try {
     const { id } = req.params;
     const { role, email_verified, username } = req.body;
 
-    if (role && !['user', 'moderator', 'admin'].includes(role)) {
+    if (role && !USER_ROLES.includes(role)) {
       return res.status(400).json({ success: false, message: '无效的角色' });
     }
 
     const [currentRows] = await pool.execute('SELECT role FROM users WHERE id = ?', [id]);
     const currentRole = currentRows[0]?.role;
+
+    if (!currentRows[0]) {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
+
+    if (role && (isAdminRole(role) || isAdminRole(currentRole)) && !isSuperAdmin(req)) {
+      return res.status(403).json({ success: false, message: '只有超级管理员可以调整管理员角色' });
+    }
 
     const updates = [];
     const params = [];
@@ -236,9 +320,14 @@ router.put('/:id', requireAdmin, async (req, res) => {
     params.push(id);
     await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    if (role && currentRole === 'admin' && role !== 'admin') {
+    if (role && isAdminRole(currentRole) && !isAdminRole(role)) {
       await invalidateUserAdminSessions(parseInt(id));
     }
+
+    await logAudit({
+      admin_id: req.adminUser.id, action: 'user.update', target_type: 'user', target_id: parseInt(id),
+      details: req.body, ip_address: getClientIp(req),
+    });
 
     res.json({ success: true, message: '用户信息已更新' });
   } catch (err) {
@@ -248,7 +337,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
 });
 
 // DELETE /users/:id - Delete user (rate limited for security)
-router.delete('/:id', requireAdmin, userDeleteLimiter, async (req, res) => {
+router.delete('/:id', requireAdmin, requireAdminPermission('users.delete'), userDeleteLimiter, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -263,6 +352,11 @@ router.delete('/:id', requireAdmin, userDeleteLimiter, async (req, res) => {
       }
     });
 
+    await logAudit({
+      admin_id: req.adminUser.id, action: 'user.delete', target_type: 'user', target_id: parseInt(id),
+      ip_address: getClientIp(req),
+    });
+
     res.json({ success: true, message: '用户已删除' });
   } catch (err) {
     if (err.message === 'USER_NOT_FOUND') {
@@ -270,6 +364,93 @@ router.delete('/:id', requireAdmin, userDeleteLimiter, async (req, res) => {
     }
     console.error('Delete user error:', err);
     res.status(500).json({ success: false, message: '删除用户失败' });
+  }
+});
+
+// POST /users/:id/ban - Ban user
+router.post('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, duration, expires_at } = req.body;
+    const banExpires = calcBanExpiry(duration, expires_at);
+
+    const [result] = await pool.execute(
+      'UPDATE users SET ban_status = ?, ban_reason = ?, banned_by = ?, ban_expires_at = ? WHERE id = ?',
+      ['banned', reason || null, req.adminUser.id, banExpires, id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
+
+    await createNotification({
+      user_id: parseInt(id), type: 'account_banned', title: '账号已被封禁',
+      content: reason ? `原因：${reason}` : '您的账号已被封禁',
+      sendEmail: true,
+    });
+    await logAudit({ admin_id: req.adminUser.id, action: 'user.ban', target_type: 'user', target_id: parseInt(id), details: { reason, duration, expires_at }, ip_address: getClientIp(req) });
+    res.json({ success: true, message: '用户已被封禁', ban_expires_at: banExpires });
+  } catch (err) {
+    console.error('Ban user error:', err);
+    res.status(500).json({ success: false, message: '封禁失败' });
+  }
+});
+
+// POST /users/:id/mute - Mute user
+router.post('/:id/mute', requireAdmin, requireAdminPermission('users.ban'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, duration, expires_at } = req.body;
+    const banExpires = calcBanExpiry(duration, expires_at);
+
+    const [result] = await pool.execute(
+      'UPDATE users SET ban_status = ?, ban_reason = ?, banned_by = ?, ban_expires_at = ? WHERE id = ?',
+      ['muted', reason || null, req.adminUser.id, banExpires, id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
+
+    await logAudit({ admin_id: req.adminUser.id, action: 'user.mute', target_type: 'user', target_id: parseInt(id), details: { reason, duration, expires_at }, ip_address: getClientIp(req) });
+    res.json({ success: true, message: '用户已被禁言', ban_expires_at: banExpires });
+  } catch (err) {
+    console.error('Mute user error:', err);
+    res.status(500).json({ success: false, message: '禁言失败' });
+  }
+});
+
+// DELETE /users/:id/ban - Unban/unmute user
+router.delete('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [result] = await pool.execute(
+      "UPDATE users SET ban_status = 'none', ban_reason = NULL, banned_by = NULL, ban_expires_at = NULL WHERE id = ?",
+      [id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
+
+    await createNotification({
+      user_id: parseInt(id), type: 'account_unbanned', title: '账号已解封',
+      content: '您的账号已被解封', sendEmail: true,
+    });
+    await logAudit({ admin_id: req.adminUser.id, action: 'user.unban', target_type: 'user', target_id: parseInt(id), ip_address: getClientIp(req) });
+    res.json({ success: true, message: '用户已解封' });
+  } catch (err) {
+    console.error('Unban user error:', err);
+    res.status(500).json({ success: false, message: '解封失败' });
+  }
+});
+
+// POST /users/:id/unlock - Unlock account (reset lock_level)
+router.post('/:id/unlock', requireAdmin, requireAdminPermission('users.unlock'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [result] = await pool.execute(
+      'UPDATE users SET lock_level = 0, locked_until = NULL WHERE id = ?',
+      [id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
+
+    await logAudit({ admin_id: req.adminUser.id, action: 'user.unlock', target_type: 'user', target_id: parseInt(id), ip_address: getClientIp(req) });
+    res.json({ success: true, message: '账号已解锁' });
+  } catch (err) {
+    console.error('Unlock user error:', err);
+    res.status(500).json({ success: false, message: '解锁失败' });
   }
 });
 

@@ -35,8 +35,8 @@ async function apiFetch(endpoint, options = {}) {
     // Check if body is FormData (for file uploads)
     const isFormData = options.body instanceof FormData;
 
-    // Add CSRF token for POST/PUT/DELETE requests
-    if (['POST', 'PUT', 'DELETE'].includes(method)) {
+    // Add CSRF token for state-changing requests
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       const csrfToken = await ensureCsrfToken();
       options.headers = {
         ...options.headers,
@@ -69,12 +69,23 @@ async function apiFetch(endpoint, options = {}) {
   }
 }
 
+let toastTimer = null;
+
 function showToast(message, type = 'info') {
   const toast = document.getElementById('toast');
   if (!toast) return;
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  toast.classList.remove('show');
+  void toast.offsetWidth;
   toast.textContent = message;
   toast.className = `toast show ${type}`;
-  setTimeout(() => toast.classList.remove('show'), 3000);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    toastTimer = null;
+  }, 3000);
 }
 
 // ========== Password Visibility Toggle ==========

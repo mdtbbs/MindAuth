@@ -40,6 +40,7 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     // 导航到登录页（这会触发 302 重定向到 /#/login?redirect=...）
     await page.goto(loginUrl);
     await page.waitForSelector('#login-form', { timeout: 5000 });
+    const authOrigin = new URL(page.url()).origin;
 
     // Step 3: 验证 sessionStorage 正确存储了 redirect 参数
     const storedBefore = await page.evaluate(() => ({
@@ -52,32 +53,39 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     expect(storedBefore.clientId).toBe(FORUM_CLIENT_ID);
     expect(storedBefore.state).toBe('/');
 
+    const loginResponsePromise = page.waitForResponse(response =>
+      response.url().includes('/api/login') && response.request().method() === 'POST',
+      { timeout: 20000 }
+    );
+    const authorizeRequestPromise = page.waitForRequest(request =>
+      request.url().includes('/api/authorize?'),
+      { timeout: 20000 }
+    );
+    const callbackRequestPromise = page.waitForRequest(request =>
+      request.url().startsWith(FORUM_CALLBACK) && request.url().includes('code='),
+      { timeout: 20000 }
+    );
+
     // Step 4: 登录
     await page.fill('#username', testUser);
     await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
 
-    // Step 5: 等待导航完成
-    // 登录后应跳转到 /api/authorize，然后 302 到回调地址
-    // 回调地址可能不可达，但 URL 应该离开 MindAuth 的 #dashboard
-    await page.waitForURL(url => {
-      const u = url.toString();
-      // 不应该停在 #dashboard
-      if (u.includes('#dashboard')) return false;
-      // 应该跳转到回调地址（带 code 参数）或者离开 MindAuth
-      return u.includes(FORUM_CALLBACK) || u.includes('code=') || !u.includes('localhost:4001');
-    }, { timeout: 10000 }).catch(() => {
-      // 如果超时，打印当前 URL 用于调试
-      console.log('超时，当前 URL:', page.url());
-    });
+    const loginResponse = await loginResponsePromise;
+    expect(loginResponse.ok()).toBe(true);
 
-    const finalUrl = page.url();
+    const authorizeRequest = await authorizeRequestPromise;
+    expect(authorizeRequest.url()).toContain('/api/authorize?');
+
+    const callbackRequest = await callbackRequestPromise;
+    const finalUrl = callbackRequest.url();
     console.log('登录后最终 URL:', finalUrl);
 
     // 核心断言：不应该停在 #dashboard
     expect(finalUrl).not.toContain('#dashboard');
 
     // sessionStorage 应该已清空（参数使用后删除）
+    await page.goto(`${authOrigin}/#login`);
     const storedAfter = await page.evaluate(() => ({
       redirectUri: sessionStorage.getItem('oauth_redirect_uri'),
       clientId: sessionStorage.getItem('oauth_client_id'),

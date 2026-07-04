@@ -6,6 +6,7 @@ const { generateShortToken, generateToken } = require('../utils/token');
 const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../utils/datetime');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
+const { maskPhone } = require('../utils/phone');
 
 const ACCESS_TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour in milliseconds
 const ACCESS_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -14,11 +15,6 @@ const AUTH_CODE_TTL = 300; // 5 minutes in seconds (Redis TTL)
 
 // Standard scopes
 const VALID_SCOPES = ['openid', 'profile', 'email'];
-
-function maskPhone(phone) {
-  if (!phone) return null;
-  return String(phone).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
-}
 
 // RFC6749 standard error response
 function oauthError(res, statusCode, error, description) {
@@ -363,7 +359,7 @@ router.get('/userinfo', async (req, res) => {
     const scope = parsed.scope || 'openid profile email';
 
     // Get user info
-    const [userRows] = await pool.execute('SELECT id, username, email, email_verified, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?', [parsed.user_id]);
+    const [userRows] = await pool.execute('SELECT id, username, email, email_verified, phone, phone_verified, phone_verified_at, avatar_url, ban_status, created_at FROM users WHERE id = ?', [parsed.user_id]);
     const user = userRows[0];
 
     if (!user) {
@@ -381,26 +377,22 @@ router.get('/userinfo', async (req, res) => {
       claims.phone_verified = user.phone_verified === 1 || user.phone_verified === true;
       claims.phone_verified_at = user.phone_verified_at;
       claims.phone_masked = maskPhone(user.phone);
+      claims.ban_status = user.ban_status || 'none';
+      claims.is_muted = user.ban_status === 'muted';
       claims.updated_at = Math.floor(new Date(user.created_at).getTime() / 1000);
 
-      // Include linked accounts in profile scope
-      const [linkedAccounts] = await pool.execute(`
-        SELECT provider, external_user_id, external_username, external_avatar_url,
-               external_user_group_id, external_is_admin, external_is_moderator, linked_at
-        FROM external_identities WHERE user_id = ?
+      // Include public custom fields
+      const [customFieldRows] = await pool.execute(`
+        SELECT f.field_key, v.value FROM user_fields f
+        JOIN user_field_values v ON v.field_id = f.id
+        WHERE v.user_id = ? AND f.is_public = 1 AND v.value IS NOT NULL
       `, [user.id]);
 
-      if (linkedAccounts.length > 0) {
-        claims.linked_accounts = linkedAccounts.map(link => ({
-          provider: link.provider,
-          external_user_id: link.external_user_id,
-          external_username: link.external_username,
-          external_avatar_url: link.external_avatar_url,
-          external_user_group_id: link.external_user_group_id,
-          external_is_admin: link.external_is_admin === 1,
-          external_is_moderator: link.external_is_moderator === 1,
-          linked_at: link.linked_at.toISOString()
-        }));
+      if (customFieldRows.length > 0) {
+        claims.custom_fields = {};
+        for (const f of customFieldRows) {
+          claims.custom_fields[f.field_key] = f.value;
+        }
       }
     }
 

@@ -15,11 +15,14 @@ const oauthRoutes = require('./routes/oauth');
 const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
-const xenforoRoutes = require('./routes/xenforo');
 const smsRoutes = require('./routes/sms');
 const internalRoutes = require('./routes/internal');
+const challengeRoutes = require('./routes/challenge');
+const sessionsRoutes = require('./routes/sessions');
+const notificationsRoutes = require('./routes/notifications');
 const { startCleanupScheduler } = require('./utils/cleanup');
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
+const { ipBanMiddleware } = require('./middleware/ipBan');
 
 const app = express();
 const PORT = config.server.port;
@@ -48,7 +51,7 @@ app.use(cors({
     }
   },
   credentials: true,  // Allow cookies
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
 }));
 
@@ -73,13 +76,36 @@ app.use(helmet({
 app.use(compression()); // 响应压缩
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, '../public'), { maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0' })); // 开发模式不缓存
+app.use(express.static(path.join(__dirname, '../public'), {
+  maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0',
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    }
+  },
+})); // 开发模式不缓存
 // Serve shared-styles from monorepo root
-app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles'), { maxAge: '1d' }));
+app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles'), {
+  maxAge: '1d',
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('.css')) {
+      const type = filePath.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/css; charset=utf-8';
+      res.setHeader('Content-Type', type);
+    }
+  },
+}));
 // Serve shared templates from monorepo
-app.use('/templates', express.static(path.join(__dirname, '../../shared/dist/templates'), { maxAge: '1d' }));
+app.use('/templates', express.static(path.join(__dirname, '../../shared/dist/templates'), {
+  maxAge: '1d',
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    }
+  },
+}));
 
 // CSRF protection
+app.use(ipBanMiddleware);       // IP ban check (before CSRF)
 app.use(setCsrfCookie);  // Set CSRF cookie on all responses
 app.get('/api/csrf-token', csrfTokenEndpoint);  // Endpoint to get CSRF token
 app.use(validateCsrf);   // Validate CSRF on POST/PUT/DELETE
@@ -92,8 +118,10 @@ app.use('/api/password', passwordRoutes);
 app.use('/api/email-verification', emailVerificationRoutes);
 app.use('/api/account', accountRoutes);
 app.use('/api/sms', smsRoutes);
+app.use('/api/challenge', challengeRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 app.use('/api/internal', internalRoutes);
-app.use('/api', xenforoRoutes);
 
 // Health check endpoint (public) - simplified for production security
 app.get('/api/health', async (req, res) => {
@@ -159,6 +187,10 @@ app.get('/api/health', async (req, res) => {
   res.status(statusCode).json(health);
 });
 
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, code: 'NOT_FOUND', message: '接口不存在' });
+});
+
 // SPA fallback - handle direct /login, /register, /logout URLs
 app.get('*', (req, res, next) => {
   const reqPath = req.path;
@@ -172,6 +204,7 @@ app.get('*', (req, res, next) => {
 
   // For /login, /register, /logout: serve index.html directly (the SPA hash router handles the rest)
   // For other routes: also serve index.html (SPA fallback)
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
@@ -194,6 +227,11 @@ app.use((err, req, res, next) => {
   // Handle multer general errors
   if (err.message && err.message.includes('File too large')) {
     return res.status(400).json({ success: false, message: '文件大小超出限制' });
+  }
+
+  if (err.message === '只支持 JPEG、PNG、GIF、WebP 格式的图片') {
+    console.warn('Upload rejected:', err.message);
+    return res.status(400).json({ success: false, message: err.message });
   }
 
   console.error('Server error:', err);
@@ -226,20 +264,42 @@ async function startServer() {
     // Start cleanup scheduler (for MySQL expired data)
     const cleanupInterval = startCleanupScheduler();
 
+    let shuttingDown = false;
+
+    async function closeResourcesAndExit(code) {
+      try {
+        await closePool();
+        console.log('MySQL pool closed');
+        await closeRedis();
+        console.log('Redis closed');
+      } catch (err) {
+        console.error('Error closing connections:', err);
+      }
+      process.exit(code);
+    }
+
     // Graceful shutdown
     function gracefulShutdown(signal) {
+      if (shuttingDown) return;
+      shuttingDown = true;
       console.log(`Received ${signal}, shutting down...`);
       clearInterval(cleanupInterval);
-      server.close(async () => {
-        try {
-          await closePool();
-          console.log('MySQL pool closed');
-          await closeRedis();
-          console.log('Redis closed');
-        } catch (err) {
-          console.error('Error closing connections:', err);
+
+      const forcedExitTimer = setTimeout(() => {
+        if (typeof server.closeAllConnections === 'function') {
+          server.closeAllConnections();
         }
-        process.exit(0);
+        closeResourcesAndExit(0);
+      }, 5000);
+      forcedExitTimer.unref();
+
+      if (typeof server.closeIdleConnections === 'function') {
+        server.closeIdleConnections();
+      }
+
+      server.close(() => {
+        clearTimeout(forcedExitTimer);
+        closeResourcesAndExit(0);
       });
     }
 

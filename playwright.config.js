@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const port = process.env.PLAYWRIGHT_PORT || process.env.PORT || '4001';
+const baseURL = `http://localhost:${port}`;
+
 export default defineConfig({
   testDir: './tests/specs',
   fullyParallel: false,
@@ -8,7 +11,7 @@ export default defineConfig({
   workers: 1, // 串行执行避免DB冲突
   reporter: [['html'], ['list']],
   use: {
-    baseURL: 'http://localhost:4001',
+    baseURL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -17,14 +20,21 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:4001',
+        baseURL,
       },
     },
   ],
   webServer: {
-    command: 'node src/server.js',
-    url: 'http://localhost:4001',
+    command: `node src/server.js`,
+    url: baseURL,
     reuseExistingServer: true,
     timeout: 120000,
+    env: {
+      ...process.env,
+      PORT: port,
+      BASE_URL: baseURL,
+      ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || `http://localhost:3000,http://localhost:4000,http://localhost:4001,${baseURL}`,
+      USE_MEMORY_REDIS: process.env.USE_MEMORY_REDIS || '1',
+    },
   },
 });

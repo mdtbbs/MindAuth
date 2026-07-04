@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../../db');
 const { generateToken, generateShortToken } = require('../../utils/token');
-const { requireAdmin } = require('../../middleware/requireAdmin');
+const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
 const { createRateLimiter } = require('../../middleware/rateLimit');
+const { getClientIp } = require('../../utils/request');
+const { logAudit } = require('../../utils/auditLog');
 const config = require('../../config');
 
 // Rate limiter for client creation
@@ -62,7 +64,7 @@ function isPrivateOrInternalHost(hostname) {
 }
 
 // GET /clients - Get all clients
-router.get('/', requireAdmin, async (req, res) => {
+router.get('/', requireAdmin, requireAdminPermission('clients.read'), async (req, res) => {
   try {
     const [clients] = await pool.execute('SELECT id, name, client_id, redirect_uri, created_at FROM clients');
     res.json({ success: true, clients });
@@ -73,7 +75,7 @@ router.get('/', requireAdmin, async (req, res) => {
 });
 
 // POST /clients - Create client (rate limited)
-router.post('/', requireAdmin, clientCreateLimiter, async (req, res) => {
+router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCreateLimiter, async (req, res) => {
   try {
     const { name, redirect_uri } = req.body;
 
@@ -103,6 +105,7 @@ router.post('/', requireAdmin, clientCreateLimiter, async (req, res) => {
     const clientSecret = generateToken();
 
     await pool.execute('INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)', [name, clientId, clientSecret, redirect_uri]);
+    await logAudit({ admin_id: req.adminUser.id, action: 'client.create', target_type: 'client', details: { name, client_id: clientId }, ip_address: getClientIp(req) });
     res.status(201).json({ success: true, client_id: clientId, client_secret: clientSecret });
   } catch (err) {
     console.error('Create client error:', err);
@@ -111,10 +114,11 @@ router.post('/', requireAdmin, clientCreateLimiter, async (req, res) => {
 });
 
 // DELETE /clients/:id - Delete client
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.execute('DELETE FROM clients WHERE id = ?', [id]);
+    await logAudit({ admin_id: req.adminUser.id, action: 'client.delete', target_type: 'client', target_id: parseInt(id), ip_address: getClientIp(req) });
     res.json({ success: true });
   } catch (err) {
     console.error('Delete client error:', err);
@@ -123,7 +127,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 });
 
 // PUT /clients/:id - Update client
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, redirect_uri } = req.body;
@@ -151,6 +155,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
     }
 
     await pool.execute('UPDATE clients SET name = ?, redirect_uri = ? WHERE id = ?', [name, redirect_uri, id]);
+    await logAudit({ admin_id: req.adminUser.id, action: 'client.update', target_type: 'client', target_id: parseInt(id), details: { name, redirect_uri }, ip_address: getClientIp(req) });
     res.json({ success: true });
   } catch (err) {
     console.error('Update client error:', err);

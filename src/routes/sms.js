@@ -7,6 +7,7 @@ const { sendSmsCode, checkSmsCode } = require('../utils/aliyunSms');
 const { getClientIp } = require('../utils/request');
 const { notifyForumUserUpdated } = require('../utils/forumSync');
 const { logSmsAudit } = require('../utils/smsAudit');
+const { createNotification } = require('../utils/notify');
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
@@ -264,6 +265,13 @@ router.post('/verify', requireAuth, async (req, res) => {
     await clearVerifyFailureLimits(req, phone);
     notifyForumUserUpdated(req.user.id).catch(err => console.warn('[SMS] forum sync failed:', err.message));
     await logSmsAudit({ ...audit, success: true, code: 'PHONE_BOUND' });
+
+    // Phone bound notification
+    await createNotification({
+      user_id: req.user.id, type: 'phone_bound', title: '手机号已绑定',
+      content: `手机号 ${phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')} 已成功绑定`,
+      ip_address: getClientIp(req), user_agent: req.headers['user-agent'],
+    }).catch(err => console.warn('[SMS] phone notification failed:', err.message));
 
     return res.json({
       success: true,
