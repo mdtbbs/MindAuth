@@ -81,6 +81,8 @@ app.use(express.static(path.join(__dirname, '../public'), {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html')) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    } else if (filePath.endsWith('.js')) {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
     }
   },
 })); // 开发模式不缓存

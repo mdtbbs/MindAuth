@@ -313,4 +313,4 @@ npx playwright test  # Run E2E tests
 - SSRF protection (private IP redirect_uri blocked)
 
 ---
-*Last updated: 2026-06-06*
+*Last updated: 2026-07-05*
