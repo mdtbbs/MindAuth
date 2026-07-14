@@ -443,12 +443,13 @@ async function seedTestOAuthClient() {
       client_secret: '35d820f46aa6a1b330258d3af5b60b3c0094719acebcb149fc03d96cdf8f99f1',
       redirect_uri: 'http://localhost:4000/api/auth/callback'
     },
-    {
-      name: 'EasyManager',
-      client_id: 'easymanager',
-      client_secret: 'easymanager_secret_key_2024_dev_only',
-      redirect_uri: 'http://localhost:3001/api/auth/callback'
-    }
+    // EasyManager — 暂停中，保留以便恢复
+    // {
+    //   name: 'EasyManager',
+    //   client_id: 'easymanager',
+    //   client_secret: 'easymanager_secret_key_2024_dev_only',
+    //   redirect_uri: 'http://localhost:3001/api/auth/callback'
+    // }
   ];
 
   for (const client of testClients) {
