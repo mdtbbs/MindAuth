@@ -45,7 +45,19 @@ async function cleanupExpiredData() {
       .toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     const [auditResult] = await pool.execute('DELETE FROM admin_audit_logs WHERE created_at < ?', [auditCutoff]);
 
-    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs from MySQL`);
+    // Clean expired email verification tokens (Redis fallback table)
+    const [emailTokenResult] = await pool.execute(
+      'DELETE FROM email_verification_tokens WHERE expires_at < ?',
+      [now]
+    );
+
+    // Clean expired user audit logs (same retention as admin audit logs)
+    const [userAuditResult] = await pool.execute(
+      'DELETE FROM user_audit_logs WHERE created_at < ?',
+      [auditCutoff]
+    );
+
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${userAuditResult.affectedRows} user_audit_logs from MySQL`);
 
     // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
     // are stored in Redis and cleaned automatically via TTL

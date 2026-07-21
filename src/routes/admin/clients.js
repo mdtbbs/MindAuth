@@ -66,8 +66,11 @@ function isPrivateOrInternalHost(hostname) {
 // GET /clients - Get all clients
 router.get('/', requireAdmin, requireAdminPermission('clients.read'), async (req, res) => {
   try {
-    const [clients] = await pool.execute('SELECT id, name, client_id, redirect_uri, created_at FROM clients');
-    res.json({ success: true, clients });
+    const [clients] = await pool.execute('SELECT id, name, client_id, redirect_uri, require_pkce, created_at FROM clients');
+    res.json({
+      success: true,
+      clients: clients.map((c) => ({ ...c, require_pkce: c.require_pkce === 1 || c.require_pkce === true }))
+    });
   } catch (err) {
     console.error('Get clients error:', err);
     res.status(500).json({ success: false, message: '获取客户端列表失败' });
@@ -77,7 +80,7 @@ router.get('/', requireAdmin, requireAdminPermission('clients.read'), async (req
 // POST /clients - Create client (rate limited)
 router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCreateLimiter, async (req, res) => {
   try {
-    const { name, redirect_uri } = req.body;
+    const { name, redirect_uri, require_pkce } = req.body;
 
     if (!name || !redirect_uri) {
       return res.status(400).json({ success: false, message: '名称和回调地址必填' });
@@ -103,9 +106,13 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
 
     const clientId = generateShortToken();
     const clientSecret = generateToken();
+    const pkceFlag = require_pkce ? 1 : 0;
 
-    await pool.execute('INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)', [name, clientId, clientSecret, redirect_uri]);
-    await logAudit({ admin_id: req.adminUser.id, action: 'client.create', target_type: 'client', details: { name, client_id: clientId }, ip_address: getClientIp(req) });
+    await pool.execute(
+      'INSERT INTO clients (name, client_id, client_secret, redirect_uri, require_pkce) VALUES (?, ?, ?, ?, ?)',
+      [name, clientId, clientSecret, redirect_uri, pkceFlag]
+    );
+    await logAudit({ admin_id: req.adminUser.id, action: 'client.create', target_type: 'client', details: { name, client_id: clientId, require_pkce: pkceFlag }, ip_address: getClientIp(req) });
     res.status(201).json({ success: true, client_id: clientId, client_secret: clientSecret });
   } catch (err) {
     console.error('Create client error:', err);
@@ -130,7 +137,7 @@ router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), asy
 router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, redirect_uri } = req.body;
+    const { name, redirect_uri, require_pkce } = req.body;
 
     if (!name || !redirect_uri) {
       return res.status(400).json({ success: false, message: '名称和回调地址必填' });
@@ -154,8 +161,16 @@ router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async 
       return res.status(400).json({ success: false, message: '回调地址格式不正确' });
     }
 
-    await pool.execute('UPDATE clients SET name = ?, redirect_uri = ? WHERE id = ?', [name, redirect_uri, id]);
-    await logAudit({ admin_id: req.adminUser.id, action: 'client.update', target_type: 'client', target_id: parseInt(id), details: { name, redirect_uri }, ip_address: getClientIp(req) });
+    // Only update require_pkce when explicitly provided (so PATCH-style partial
+    // updates that omit it don't accidentally flip the flag).
+    if (require_pkce !== undefined) {
+      const pkceFlag = require_pkce ? 1 : 0;
+      await pool.execute('UPDATE clients SET name = ?, redirect_uri = ?, require_pkce = ? WHERE id = ?', [name, redirect_uri, pkceFlag, id]);
+      await logAudit({ admin_id: req.adminUser.id, action: 'client.update', target_type: 'client', target_id: parseInt(id), details: { name, redirect_uri, require_pkce: pkceFlag }, ip_address: getClientIp(req) });
+    } else {
+      await pool.execute('UPDATE clients SET name = ?, redirect_uri = ? WHERE id = ?', [name, redirect_uri, id]);
+      await logAudit({ admin_id: req.adminUser.id, action: 'client.update', target_type: 'client', target_id: parseInt(id), details: { name, redirect_uri }, ip_address: getClientIp(req) });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error('Update client error:', err);

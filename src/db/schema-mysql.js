@@ -394,6 +394,53 @@ async function initSchema() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // --- User audit logs table (security events only) ---
+    // Records security-relevant actions by regular users: login failures,
+    // password changes, session terminations, etc. Low-frequency by design;
+    // high-frequency events (login success, OAuth grants) live in dedicated tables.
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS user_audit_logs (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        ip_address VARCHAR(45) DEFAULT NULL,
+        user_agent VARCHAR(500) DEFAULT NULL,
+        details JSON DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_audit_user (user_id),
+        INDEX idx_user_audit_action (action),
+        INDEX idx_user_audit_created (created_at),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // --- PKCE support for OAuth clients (RFC 7636) ---
+    // When require_pkce = 1, /authorize must include code_challenge and
+    // /token must include code_verifier. Opt-in per client for backward
+    // compatibility with existing integrations.
+    try {
+      await conn.execute('ALTER TABLE clients ADD COLUMN require_pkce TINYINT(1) NOT NULL DEFAULT 0');
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') console.warn('Could not add require_pkce:', alterErr.message);
+    }
+
+    // --- Email verification tokens (Redis fallback) ---
+    // When Redis restarts, pending verification tokens are lost. This table
+    // acts as a durable fallback: verify endpoints check Redis first, then
+    // fall back to this table. Expired rows are cleaned up by cleanup.js.
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS email_verification_tokens (
+        token VARCHAR(128) PRIMARY KEY,
+        user_id INT NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_email_tokens_user (user_id),
+        INDEX idx_email_tokens_expires (expires_at),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     console.log('MySQL schema initialized successfully');
   } finally {
     conn.release();

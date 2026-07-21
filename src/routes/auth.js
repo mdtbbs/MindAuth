@@ -13,6 +13,7 @@ const { maskPhone } = require('../utils/phone');
 const { logAudit } = require('../utils/auditLog');
 const { createNotification } = require('../utils/notify');
 const { parseDeviceInfo } = require('../utils/deviceInfo');
+const { logUserAudit } = require('../utils/userAudit');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
@@ -28,30 +29,50 @@ router.post('/register', registerRateLimiter, async (req, res) => {
     return res.status(400).json({ success: false, message: '所有字段必填' });
   }
 
+  // Check if any challenge questions are enabled; if so, verification is mandatory
+  const [challengeEnabledRows] = await pool.execute(
+    'SELECT COUNT(*) as count FROM challenge_questions WHERE enabled = 1'
+  );
+  const challengeRequired = challengeEnabledRows[0].count > 0;
+
+  if (challengeRequired && !challenge_id) {
+    return res.status(400).json({
+      success: false,
+      code: 'CHALLENGE_REQUIRED',
+      message: '请先完成验证问答'
+    });
+  }
+
   // Verify challenge question if enabled
   if (challenge_id) {
     const csrfToken = req.cookies.csrf_token || 'anonymous';
     const sessionKey = `challenge_session:${csrfToken}`;
     const sessionData = await client.get(sessionKey);
 
-    if (sessionData) {
-      const session = JSON.parse(sessionData);
-      if (session.question_id === parseInt(challenge_id)) {
-        const [qRows] = await pool.execute(
-          'SELECT answer_hash FROM challenge_questions WHERE id = ? AND enabled = 1',
-          [challenge_id]
-        );
-        if (qRows.length > 0) {
-          const match = await bcrypt.compare(String(challenge_answer || '').trim().toLowerCase(), qRows[0].answer_hash);
-          if (!match) {
-            return res.status(400).json({ success: false, code: 'CHALLENGE_FAILED', message: '问答验证失败' });
-          }
-          await client.del(sessionKey);
-        }
-      } else {
-        return res.status(400).json({ success: false, code: 'CHALLENGE_MISMATCH', message: '题目不匹配' });
-      }
+    if (!sessionData) {
+      return res.status(400).json({ success: false, code: 'CHALLENGE_EXPIRED', message: '验证已过期，请刷新获取新题' });
     }
+
+    const session = JSON.parse(sessionData);
+    if (session.question_id !== parseInt(challenge_id)) {
+      return res.status(400).json({ success: false, code: 'CHALLENGE_MISMATCH', message: '题目不匹配' });
+    }
+
+    const [qRows] = await pool.execute(
+      'SELECT answer_hash FROM challenge_questions WHERE id = ? AND enabled = 1',
+      [challenge_id]
+    );
+    if (qRows.length === 0) {
+      return res.status(400).json({ success: false, code: 'CHALLENGE_NOT_FOUND', message: '题目不存在' });
+    }
+    const match = await bcrypt.compare(String(challenge_answer || '').trim().toLowerCase(), qRows[0].answer_hash);
+    if (!match) {
+      return res.status(400).json({ success: false, code: 'CHALLENGE_FAILED', message: '问答验证失败' });
+    }
+    await client.del(sessionKey);
+  } else if (challengeRequired) {
+    // Should not reach here (already handled above), but guard defensively
+    return res.status(400).json({ success: false, code: 'CHALLENGE_REQUIRED', message: '请先完成验证问答' });
   }
 
   if (!isValidUsername(username)) {
@@ -165,6 +186,15 @@ router.post('/login', loginRateLimiter, async (req, res) => {
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
+      // Audit: login failed
+      logUserAudit({
+        user_id: user.id,
+        action: 'login_failed',
+        ip_address: getClientIp(req),
+        user_agent: req.headers['user-agent'],
+        details: { reason: 'invalid_password' },
+      });
+
       // Increment login failure counter
       const failKey = `login_fail:${username}`;
       const failCount = await client.incr(failKey);
@@ -187,6 +217,13 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         await createNotification({
           user_id: user.id, type: 'account_locked', title: '账号已被锁定',
           content: `连续登录失败次数过多，账号已被${lockMsg}`, sendEmail: true,
+        });
+        logUserAudit({
+          user_id: user.id,
+          action: 'account_locked',
+          ip_address: getClientIp(req),
+          user_agent: req.headers['user-agent'],
+          details: { lock_level: newLevel, duration: lockMsg },
         });
       }
 

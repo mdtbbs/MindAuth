@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const { pool } = require('../db');
+const { pool, transaction } = require('../db');
 const { client } = require('../redis');
 const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
 const { generateToken } = require('../utils/token');
@@ -10,11 +10,31 @@ const requireAuth = require('../middleware/requireAuth');
 const { avatarUpload, bannerUpload } = require('../middleware/upload');
 const { createNotification } = require('../utils/notify');
 const { getClientIp } = require('../utils/request');
+const { getUserAuditLogs, logUserAudit } = require('../utils/userAudit');
 const path = require('path');
 const fs = require('fs');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
+
+// Ensure a resolved path stays under public/ to prevent path traversal
+const PUBLIC_ROOT = path.resolve(__dirname, '../../public');
+function safePublicPath(relative) {
+  if (!relative || typeof relative !== 'string') return null;
+  const resolved = path.resolve(PUBLIC_ROOT, '.' + relative);
+  if (!resolved.startsWith(PUBLIC_ROOT + path.sep) && resolved !== PUBLIC_ROOT) return null;
+  return resolved;
+}
+
+function tryRemovePublicFile(relative) {
+  const abs = safePublicPath(relative);
+  if (!abs) return;
+  try {
+    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+  } catch (err) {
+    console.warn('[Account] failed to remove old file:', relative, err.message);
+  }
+}
 
 // POST /change-password - Change password
 router.post('/change-password', requireAuth, async (req, res) => {
@@ -46,13 +66,32 @@ router.post('/change-password', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, message: '旧密码错误' });
     }
 
-    // Update password
+    // Update password and clear all sessions atomically
     const newPasswordHash = await bcrypt.hash(new_password, 10);
-    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newPasswordHash, user.id]);
 
-    // Clear all sessions (force re-login)
-    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [user.id]);
-    await pool.execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+    // Collect all active session tokens before clearing, so we can invalidate
+    // their Redis caches. Other devices should be forced to re-login immediately,
+    // not after their 24h cache TTL expires.
+    const [activeSessionRows] = await pool.execute(
+      'SELECT session_token FROM user_sessions WHERE user_id = ?',
+      [user.id]
+    );
+    const activeTokens = activeSessionRows
+      .map((r) => r.session_token)
+      .filter(Boolean);
+
+    await transaction(async (conn) => {
+      await conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newPasswordHash, user.id]);
+      await conn.execute('UPDATE users SET session_token = NULL WHERE id = ?', [user.id]);
+      await conn.execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+    });
+
+    // Invalidate all Redis session caches for this user (best-effort, parallel)
+    if (activeTokens.length > 0) {
+      await Promise.all(
+        activeTokens.map((t) => client.del(`session:${t}`).catch(() => {}))
+      );
+    }
 
     // Password change notification
     await createNotification({
@@ -69,6 +108,13 @@ router.post('/change-password', requireAuth, async (req, res) => {
     }
 
     res.clearCookie('session', { path: '/' });
+
+    logUserAudit({
+      user_id: user.id,
+      action: 'password_changed',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+    });
 
     res.json({ success: true, message: '密码已更新，请重新登录' });
   } catch (err) {
@@ -96,11 +142,28 @@ router.post('/change-email', requireAuth, async (req, res) => {
     // Generate verification token
     const token = generateToken();
 
-    // Store verification token in Redis (replaces any existing)
+    // Store verification token in Redis (replaces any existing) and MySQL (fallback)
     await client.setEx(`verify:${token}`, TOKEN_TTL, JSON.stringify({
       user_id: user.id,
       email: new_email
     }));
+    try {
+      const expiresAt = new Date(Date.now() + TOKEN_TTL * 1000).toISOString().slice(0, 19).replace('T', ' ');
+      await pool.execute(
+        'INSERT INTO email_verification_tokens (token, user_id, email, expires_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), email = VALUES(email), expires_at = VALUES(expires_at)',
+        [token, user.id, new_email, expiresAt]
+      );
+    } catch (persistErr) {
+      console.warn('[Account] MySQL token persist failed:', persistErr.message);
+    }
+
+    logUserAudit({
+      user_id: user.id,
+      action: 'email_change_requested',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+      details: { new_email },
+    });
 
     // Send verification email to new address
     const verifyLink = `${BASE_URL}/#/verify-email?token=${token}`;
@@ -139,23 +202,56 @@ router.delete('/', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, message: '密码错误' });
     }
 
-    // Delete user's related data from MySQL
-    await pool.execute('DELETE FROM authorizations WHERE user_id = ?', [user.id]);
-    await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
-    await pool.execute('DELETE FROM login_logs WHERE user_id = ?', [user.id]);
+    // Delete user and all related data atomically
+    // Collect active session tokens first so we can invalidate Redis caches
+    // after the user is gone (otherwise cache would live until TTL expires).
+    const [activeSessionRows] = await pool.execute(
+      'SELECT session_token FROM user_sessions WHERE user_id = ?',
+      [user.id]
+    );
+    const activeTokens = activeSessionRows
+      .map((r) => r.session_token)
+      .filter(Boolean);
 
-    // Delete user
-    await pool.execute('DELETE FROM users WHERE id = ?', [user.id]);
+    await transaction(async (conn) => {
+      await conn.execute('DELETE FROM authorizations WHERE user_id = ?', [user.id]);
+      await conn.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
+      await conn.execute('DELETE FROM login_logs WHERE user_id = ?', [user.id]);
+      await conn.execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+      await conn.execute('DELETE FROM user_notifications WHERE user_id = ?', [user.id]);
+      await conn.execute('DELETE FROM user_field_values WHERE user_id = ?', [user.id]);
+      const [result] = await conn.execute('DELETE FROM users WHERE id = ?', [user.id]);
+      if (result.affectedRows === 0) {
+        throw new Error('USER_NOT_FOUND');
+      }
+    });
 
-    // Clear session cache in Redis
+    // Clear all session caches in Redis (best-effort, parallel)
+    if (activeTokens.length > 0) {
+      await Promise.all(
+        activeTokens.map((t) => client.del(`session:${t}`).catch(() => {}))
+      );
+    }
+
+    // Clear session cache in Redis (defensive: covers any token missed above)
     const token = req.cookies.session;
     if (token) {
       await client.del(`session:${token}`);
     }
 
+    logUserAudit({
+      user_id: user.id,
+      action: 'account_deleted',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+    });
+
     res.clearCookie('session', { path: '/' });
     res.json({ success: true, message: '账号已删除' });
   } catch (err) {
+    if (err.message === 'USER_NOT_FOUND') {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
     console.error('Delete account error:', err);
     res.status(500).json({ success: false, message: '删除账号失败' });
   }
@@ -171,17 +267,22 @@ router.post('/avatar', requireAuth, avatarUpload.single('file'), async (req, res
     const user = req.user;
     const avatarUrl = `/uploads/avatars/${req.file.filename}`;
 
-    // 删除旧头像文件（如果存在）
+    // 删除旧头像文件（如果存在），并校验路径防止穿越
     const [oldRows] = await pool.execute('SELECT avatar_url FROM users WHERE id = ?', [user.id]);
     if (oldRows.length > 0 && oldRows[0].avatar_url) {
-      const oldPath = path.join(__dirname, '../../public', oldRows[0].avatar_url);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
+      tryRemovePublicFile(oldRows[0].avatar_url);
     }
 
     // 更新数据库
     await pool.execute('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, user.id]);
+
+    logUserAudit({
+      user_id: user.id,
+      action: 'avatar_changed',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+      details: { kind: 'avatar' },
+    });
 
     res.json({ success: true, avatar_url: avatarUrl });
   } catch (err) {
@@ -198,13 +299,10 @@ router.delete('/avatar', requireAuth, async (req, res) => {
   try {
     const user = req.user;
 
-    // 获取旧头像路径
+    // 获取旧头像路径，并校验路径防止穿越
     const [rows] = await pool.execute('SELECT avatar_url FROM users WHERE id = ?', [user.id]);
     if (rows.length > 0 && rows[0].avatar_url) {
-      const oldPath = path.join(__dirname, '../../public', rows[0].avatar_url);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
+      tryRemovePublicFile(rows[0].avatar_url);
     }
 
     // 更新数据库
@@ -227,17 +325,22 @@ router.post('/banner', requireAuth, bannerUpload.single('file'), async (req, res
     const user = req.user;
     const bannerUrl = `/uploads/banners/${req.file.filename}`;
 
-    // 删除旧背景文件（如果存在）
+    // 删除旧背景文件（如果存在），并校验路径防止穿越
     const [oldRows] = await pool.execute('SELECT banner_url FROM users WHERE id = ?', [user.id]);
     if (oldRows.length > 0 && oldRows[0].banner_url) {
-      const oldPath = path.join(__dirname, '../../public', oldRows[0].banner_url);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
+      tryRemovePublicFile(oldRows[0].banner_url);
     }
 
     // 更新数据库
     await pool.execute('UPDATE users SET banner_url = ? WHERE id = ?', [bannerUrl, user.id]);
+
+    logUserAudit({
+      user_id: user.id,
+      action: 'avatar_changed',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+      details: { kind: 'banner' },
+    });
 
     res.json({ success: true, banner_url: bannerUrl });
   } catch (err) {
@@ -254,13 +357,10 @@ router.delete('/banner', requireAuth, async (req, res) => {
   try {
     const user = req.user;
 
-    // 获取旧背景路径
+    // 获取旧背景路径，并校验路径防止穿越
     const [rows] = await pool.execute('SELECT banner_url FROM users WHERE id = ?', [user.id]);
     if (rows.length > 0 && rows[0].banner_url) {
-      const oldPath = path.join(__dirname, '../../public', rows[0].banner_url);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
+      tryRemovePublicFile(rows[0].banner_url);
     }
 
     // 更新数据库
@@ -333,6 +433,18 @@ router.put('/fields', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Account] fields update error:', err);
     res.status(500).json({ success: false, message: '更新字段失败' });
+  }
+});
+
+// GET /audit-logs - Get current user's security audit log
+router.get('/audit-logs', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const logs = await getUserAuditLogs(req.user.id, limit);
+    res.json({ success: true, logs });
+  } catch (err) {
+    console.error('[Account] audit-logs error:', err);
+    res.status(500).json({ success: false, message: '获取安全日志失败' });
   }
 });
 

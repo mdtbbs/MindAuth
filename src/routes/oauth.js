@@ -1,17 +1,43 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db');
+const crypto = require('crypto');
+const { pool, transaction } = require('../db');
 const { client } = require('../redis');
 const { generateShortToken, generateToken } = require('../utils/token');
 const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../utils/datetime');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { maskPhone } = require('../utils/phone');
+const { createRateLimiter } = require('../middleware/rateLimit');
 
 const ACCESS_TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour in milliseconds
 const ACCESS_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
 const REFRESH_TOKEN_EXPIRY = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTH_CODE_TTL = 300; // 5 minutes in seconds (Redis TTL)
+
+// Rate limiter for token verification / userinfo / user endpoints.
+// These endpoints are CSRF-exempt and accept bearer tokens, so a loose
+// per-IP limiter prevents brute-force token enumeration.
+const verifyEndpointLimiter = createRateLimiter({
+  maxAttempts: 30,
+  windowMs: 60 * 1000,
+  keyPrefix: 'ratelimit:verify_api'
+});
+
+// PKCE (RFC 7636) helpers - only S256 method is supported (plain is not).
+function base64UrlEncode(buffer) {
+  return buffer.toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function verifyPkce(codeVerifier, codeChallenge) {
+  const computed = base64UrlEncode(crypto.createHash('sha256').update(codeVerifier).digest());
+  // Timing-safe compare (both are base64url strings of equal length when valid)
+  if (computed.length !== codeChallenge.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(codeChallenge));
+}
 
 // Standard scopes
 const VALID_SCOPES = ['openid', 'profile', 'email'];
@@ -27,7 +53,7 @@ function oauthError(res, statusCode, error, description) {
 // GET /authorize - Authorization endpoint for third-party redirect
 router.get('/authorize', async (req, res) => {
   try {
-    const { redirect_uri, client_id, state, scope, response_type } = req.query;
+    const { redirect_uri, client_id, state, scope, response_type, code_challenge, code_challenge_method } = req.query;
 
     // Validate required parameters
     if (!redirect_uri || !client_id) {
@@ -50,6 +76,26 @@ router.get('/authorize', async (req, res) => {
     if (clientData.redirect_uri !== redirect_uri) {
       return res.redirect(`/oauth-error.html?error=invalid_redirect&description=${encodeURIComponent('redirect_uri 不匹配')}`);
     }
+
+    // PKCE validation (RFC 7636) — only enforced when the client opts in
+    const clientRequiresPkce = clientData.require_pkce === 1;
+    if (clientRequiresPkce) {
+      if (!code_challenge) {
+        return res.redirect(`/oauth-error.html?error=invalid_request&description=${encodeURIComponent('该客户端要求 PKCE，缺少 code_challenge')}`);
+      }
+      if (code_challenge_method && code_challenge_method !== 'S256') {
+        return res.redirect(`/oauth-error.html?error=invalid_request&description=${encodeURIComponent('仅支持 S256 code_challenge_method')}`);
+      }
+    } else if (code_challenge) {
+      // Client didn't require PKCE but still supplied a challenge — accept it.
+      // This lets a client enable PKCE later without breaking already-distributed builds.
+      if (code_challenge_method && code_challenge_method !== 'S256') {
+        return res.redirect(`/oauth-error.html?error=invalid_request&description=${encodeURIComponent('仅支持 S256 code_challenge_method')}`);
+      }
+    }
+    // Note: code_challenge_method defaults to "plain" per RFC, but we only honor S256.
+    // If code_challenge is present without method, we still store it and require S256 verification.
+    const effectivePkceMethod = (code_challenge && code_challenge_method) ? code_challenge_method : 'S256';
 
     // Validate scope if provided
     if (scope) {
@@ -81,19 +127,24 @@ router.get('/authorize', async (req, res) => {
       // Security: redirect_uri is already validated against registered client
       // Include client name for user awareness of which app they're logging into
       const encodedClientName = encodeURIComponent(clientData.name);
-      return res.redirect(`/#/login?redirect_uri=${encodeURIComponent(redirect_uri)}&client_id=${client_id}&client_name=${encodedClientName}${state ? '&state=' + encodeURIComponent(state) : ''}${scope ? '&scope=' + encodeURIComponent(scope) : ''}`);
+      return res.redirect(`/#/login?redirect_uri=${encodeURIComponent(redirect_uri)}&client_id=${client_id}&client_name=${encodedClientName}${state ? '&state=' + encodeURIComponent(state) : ''}${scope ? '&scope=' + encodeURIComponent(scope) : ''}${code_challenge ? '&code_challenge=' + encodeURIComponent(code_challenge) : ''}${code_challenge_method ? '&code_challenge_method=' + encodeURIComponent(code_challenge_method) : ''}`);
     }
 
     // User is logged in - generate code and store in Redis
     const code = generateShortToken();
 
-    // Store auth code in Redis (5 min TTL) with scope
-    await client.setEx(`authcode:${code}`, AUTH_CODE_TTL, JSON.stringify({
+    // Store auth code in Redis (5 min TTL) with scope and optional PKCE challenge
+    const authCodePayload = {
       client_id,
       user_id: user.id,
       scope: scope || 'openid profile email',
       redirect_uri
-    }));
+    };
+    if (code_challenge) {
+      authCodePayload.code_challenge = code_challenge;
+      authCodePayload.code_challenge_method = effectivePkceMethod;
+    }
+    await client.setEx(`authcode:${code}`, AUTH_CODE_TTL, JSON.stringify(authCodePayload));
 
     // Upsert authorization record
     await pool.execute(`
@@ -120,7 +171,7 @@ router.get('/authorize', async (req, res) => {
 // POST /token - Token exchange (third-party backend calls this)
 router.post('/token', async (req, res) => {
   try {
-    const { code, client_id, client_secret, grant_type } = req.body;
+    const { code, client_id, client_secret, grant_type, code_verifier } = req.body;
 
     // Validate grant_type (RFC 6749 Section 4.1.3)
     if (!grant_type || grant_type !== 'authorization_code') {
@@ -152,6 +203,22 @@ router.post('/token', async (req, res) => {
     // Verify redirect_uri matches (stored in auth code)
     if (parsedCode.redirect_uri && clientData.redirect_uri !== parsedCode.redirect_uri) {
       return oauthError(res, 401, 'invalid_grant', 'redirect_uri 不匹配');
+    }
+
+    // PKCE (RFC 7636) verification — required if the authcode was issued with a challenge
+    if (parsedCode.code_challenge) {
+      if (!code_verifier) {
+        await client.del(`authcode:${code}`);
+        return oauthError(res, 400, 'invalid_request', '该授权码使用了 PKCE，必须提供 code_verifier');
+      }
+      if (parsedCode.code_challenge_method !== 'S256') {
+        await client.del(`authcode:${code}`);
+        return oauthError(res, 400, 'unsupported_grant_type', '不支持的 code_challenge_method');
+      }
+      if (!verifyPkce(code_verifier, parsedCode.code_challenge)) {
+        await client.del(`authcode:${code}`);
+        return oauthError(res, 401, 'invalid_grant', 'code_verifier 校验失败');
+      }
     }
 
     // Delete code (single-use)
@@ -215,57 +282,88 @@ router.post('/refresh', async (req, res) => {
       return oauthError(res, 401, 'invalid_client', '无效的 client_id 或 client_secret');
     }
 
-    // Verify refresh token
-    const [tokenRows] = await pool.execute(`
-      SELECT * FROM refresh_tokens
-      WHERE token = ? AND client_id = ? AND revoked = 0 AND expires_at > ?
-    `, [refresh_token, client_id, formatMySQLDateTime()]);
-    const storedToken = tokenRows[0];
+    // Rotate the refresh token atomically. SELECT FOR UPDATE prevents
+    // concurrent requests from redeeming the same token twice and producing
+    // two new refresh tokens.
+    let storedToken;
+    let user;
+    let newRefreshToken;
+    let newRefreshExpiresAt;
+    let accessTokenPayload;
 
-    if (!storedToken) {
-      // Check if token was recently revoked (replay attack detection)
-      const [revokedRows] = await pool.execute(`
-        SELECT * FROM refresh_tokens
-        WHERE token = ? AND client_id = ? AND revoked = 1
-      `, [refresh_token, client_id]);
+    try {
+      await transaction(async (conn) => {
+        const [tokenRows] = await conn.execute(`
+          SELECT * FROM refresh_tokens
+          WHERE token = ? AND client_id = ?
+          FOR UPDATE
+        `, [refresh_token, client_id]);
+        const row = tokenRows[0];
 
-      if (revokedRows.length > 0) {
-        // Replay attack detected - revoke all tokens for this user/client
-        console.warn(`Replay attack detected for user ${revokedRows[0].user_id}, client ${client_id}`);
-        await pool.execute(
-          'UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND client_id = ?',
-          [revokedRows[0].user_id, client_id]
+        if (!row) {
+          const err = new Error('TOKEN_NOT_FOUND');
+          throw err;
+        }
+
+        // Replay attack detection: if the token was already revoked, flag it.
+        if (row.revoked === 1) {
+          console.warn(`Replay attack detected for user ${row.user_id}, client ${client_id}`);
+          await conn.execute(
+            'UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND client_id = ?',
+            [row.user_id, client_id]
+          );
+          const err = new Error('TOKEN_REVOKED');
+          throw err;
+        }
+
+        // Check expiry
+        if (new Date(row.expires_at) <= new Date()) {
+          const err = new Error('TOKEN_EXPIRED');
+          throw err;
+        }
+
+        storedToken = row;
+
+        // Get user info
+        const [userRows] = await conn.execute(
+          'SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?',
+          [row.user_id]
         );
-        // Also invalidate all access tokens for this client (scan Redis)
-        // Note: This is best-effort; access tokens expire in 1 hour anyway
-      }
+        user = userRows[0];
+        if (!user) {
+          const err = new Error('USER_NOT_FOUND');
+          throw err;
+        }
 
-      return oauthError(res, 401, 'invalid_grant', '无效或已过期的 refresh_token');
+        // Generate new tokens (rotation)
+        newRefreshToken = generateToken();
+        newRefreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY);
+
+        // Revoke old refresh token and create new one atomically
+        await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [row.id]);
+        await conn.execute(
+          'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at) VALUES (?, ?, ?, ?, ?)',
+          [user.id, client_id, newRefreshToken, storedToken.scope || 'openid profile email', newRefreshExpiresAt]
+        );
+      });
+    } catch (txErr) {
+      if (txErr.message === 'TOKEN_NOT_FOUND' || txErr.message === 'TOKEN_REVOKED' || txErr.message === 'TOKEN_EXPIRED') {
+        return oauthError(res, 401, 'invalid_grant', '无效或已过期的 refresh_token');
+      }
+      if (txErr.message === 'USER_NOT_FOUND') {
+        return oauthError(res, 401, 'invalid_grant', '用户不存在');
+      }
+      throw txErr;
     }
 
-    // Get user info
-    const [userRows] = await pool.execute('SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?', [storedToken.user_id]);
-    const user = userRows[0];
-
-    // Generate new tokens (rotation)
+    // Store access token in Redis (outside transaction - Redis is not transactional with MySQL)
     const accessToken = generateToken();
-    const newRefreshToken = generateToken();
-    const newRefreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY);
-
-    // Store access token in Redis
     await client.setEx(`accesstoken:${accessToken}`, ACCESS_TOKEN_TTL, JSON.stringify({
       user_id: user.id,
       client_id,
       scope: storedToken.scope || 'openid profile email',
       token_type: 'Bearer'
     }));
-
-    // Revoke old refresh token and create new one
-    await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [storedToken.id]);
-    await pool.execute(
-      'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at) VALUES (?, ?, ?, ?, ?)',
-      [user.id, client_id, newRefreshToken, storedToken.scope || 'openid profile email', newRefreshExpiresAt]
-    );
 
     // RFC 6749 compliant response with new refresh token
     res.json({
@@ -339,7 +437,7 @@ router.post('/introspect', async (req, res) => {
 });
 
 // GET /userinfo - UserInfo endpoint (OIDC Core)
-router.get('/userinfo', async (req, res) => {
+router.get('/userinfo', verifyEndpointLimiter, async (req, res) => {
   try {
     // Get access token from Authorization header
     const authHeader = req.headers.authorization;
@@ -409,7 +507,7 @@ router.get('/userinfo', async (req, res) => {
 });
 
 // GET /user - Compatibility endpoint used by older MindFourm builds.
-router.get('/user', async (req, res) => {
+router.get('/user', verifyEndpointLimiter, async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -533,7 +631,7 @@ router.delete('/authorizations/:client_id', requireAuth, async (req, res) => {
 });
 
 // POST /verify - Session token verification (for same-domain scenarios)
-router.post('/verify', async (req, res) => {
+router.post('/verify', verifyEndpointLimiter, async (req, res) => {
   try {
     const { session_token } = req.body;
 

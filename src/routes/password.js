@@ -7,6 +7,8 @@ const { generateToken } = require('../utils/token');
 const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/email');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const { logUserAudit } = require('../utils/userAudit');
+const { getClientIp } = require('../utils/request');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const RESET_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -71,6 +73,18 @@ router.post('/reset', async (req, res) => {
 
     const parsed = JSON.parse(tokenData);
 
+    // Security: Re-verify email_verified at reset time.
+    // If the user's email was unverified between /reset-request and /reset,
+    // refuse to honor the token.
+    const [userRows] = await pool.execute(
+      'SELECT id, email_verified FROM users WHERE id = ?',
+      [parsed.user_id]
+    );
+    if (!userRows[0] || userRows[0].email_verified !== 1) {
+      await client.del(`reset:${token}`);
+      return res.status(400).json({ success: false, message: '邮箱未验证或用户不存在' });
+    }
+
     // Update password
     const passwordHash = await bcrypt.hash(new_password, 10);
     await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, parsed.user_id]);
@@ -80,6 +94,54 @@ router.post('/reset', async (req, res) => {
 
     // Clear all sessions (force re-login)
     await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [parsed.user_id]);
+
+    // Security: Revoke all OAuth refresh tokens for this user.
+    // Otherwise an OAuth client holding a refresh token could keep issuing
+    // new access tokens even after the password was reset.
+    await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [parsed.user_id]);
+
+    // Collect active session tokens and clear their Redis caches, so other
+    // devices get kicked out immediately instead of after 24h cache TTL.
+    const [activeSessionRows] = await pool.execute(
+      'SELECT session_token FROM user_sessions WHERE user_id = ?',
+      [parsed.user_id]
+    );
+    if (activeSessionRows.length > 0) {
+      await Promise.all(
+        activeSessionRows.map((r) => client.del(`session:${r.session_token}`).catch(() => {}))
+      );
+    }
+    await pool.execute('DELETE FROM user_sessions WHERE user_id = ?', [parsed.user_id]);
+
+    // Best-effort: invalidate cached access tokens for this user in Redis.
+    // Access tokens are keyed by token (not user_id), so we must scan.
+    // Password reset is rare, so this one-time scan cost is acceptable.
+    try {
+      const scanStream = client.scanIterator({ MATCH: 'accesstoken:*', COUNT: 200 });
+      const deletions = [];
+      for await (const key of scanStream) {
+        const data = await client.get(key);
+        if (!data) continue;
+        try {
+          const payload = JSON.parse(data);
+          if (payload.user_id === parsed.user_id) {
+            deletions.push(client.del(key).catch(() => {}));
+          }
+        } catch (_) {
+          // ignore malformed entries
+        }
+      }
+      if (deletions.length > 0) await Promise.all(deletions);
+    } catch (scanErr) {
+      console.warn('[Password] access token scan failed:', scanErr.message);
+    }
+
+    logUserAudit({
+      user_id: parsed.user_id,
+      action: 'password_reset',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+    });
 
     res.json({ success: true, message: '密码已更新，请重新登录' });
   } catch (err) {

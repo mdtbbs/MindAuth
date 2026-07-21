@@ -8,6 +8,7 @@ const { requireAdmin, requireAdminPermission, invalidateUserAdminSessions, isAdm
 const { createRateLimiter } = require('../../middleware/rateLimit');
 const { getClientIp } = require('../../utils/request');
 const { logAudit } = require('../../utils/auditLog');
+const { logUserAudit } = require('../../utils/userAudit');
 const { createNotification } = require('../../utils/notify');
 const config = require('../../config');
 
@@ -447,6 +448,12 @@ router.post('/:id/unlock', requireAdmin, requireAdminPermission('users.unlock'),
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
 
     await logAudit({ admin_id: req.adminUser.id, action: 'user.unlock', target_type: 'user', target_id: parseInt(id), ip_address: getClientIp(req) });
+    logUserAudit({
+      user_id: parseInt(id),
+      action: 'account_unlocked',
+      ip_address: getClientIp(req),
+      details: { unlocked_by: req.adminUser.id },
+    });
     res.json({ success: true, message: '账号已解锁' });
   } catch (err) {
     console.error('Unlock user error:', err);

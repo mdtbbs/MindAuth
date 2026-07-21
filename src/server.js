@@ -57,6 +57,11 @@ app.use(cors({
 
 // Security headers with CDN support
 app.use(helmet({
+  strictTransportSecurity: process.env.NODE_ENV === 'production' ? {
+    maxAge: 31536000,           // 1 year
+    includeSubDomains: true,
+    preload: true
+  } : false,                    // disabled in dev to allow HTTP
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -124,6 +129,28 @@ app.use('/api/challenge', challengeRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/internal', internalRoutes);
+
+// OIDC Discovery (RFC 8414 / OpenID Connect Discovery 1.0).
+// Exposes endpoint metadata so third-party clients can auto-discover MindAuth
+// endpoints instead of hard-coding them. MindAuth does not sign ID tokens
+// (RS256); callers retrieve user claims via /api/userinfo with an access_token.
+app.get('/.well-known/openid-configuration', (req, res) => {
+  const baseUrl = config.server.baseUrl;
+  res.json({
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/authorize`,
+    token_endpoint: `${baseUrl}/token`,
+    userinfo_endpoint: `${baseUrl}/userinfo`,
+    revocation_endpoint: `${baseUrl}/revoke`,
+    introspection_endpoint: `${baseUrl}/introspect`,
+    response_types_supported: ['code'],
+    subject_types_supported: ['public'],
+    scopes_supported: ['openid', 'profile', 'email'],
+    token_endpoint_auth_methods_supported: ['client_secret_post'],
+    code_challenge_methods_supported: ['S256'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
+  });
+});
 
 // Health check endpoint (public) - simplified for production security
 app.get('/api/health', async (req, res) => {
