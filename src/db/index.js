@@ -1,14 +1,14 @@
 const { pool, closePool } = require('./pool');
-const { initSchema, seedTestAdmin, seedTestOAuthClient } = require('./schema-mysql');
+const { runMigrations } = require('./migrator');
+const { seedTestFixtures } = require('./seeds/testSeeds');
 const { transaction } = require('./transactions');
 const { isDuplicateError, getDuplicateField, isForeignKeyError } = require('./errors');
 
 module.exports = {
   pool,
   closePool,
-  initSchema,
-  seedTestAdmin,
-  seedTestOAuthClient,
+  runMigrations,
+  seedTestFixtures,
   transaction,
   isDuplicateError,
   getDuplicateField,

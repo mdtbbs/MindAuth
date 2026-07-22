@@ -17,7 +17,7 @@
 
 const config = require('./config');
 const { validateConfig } = require('./config/validate');
-const { pool, closePool, initSchema, seedTestAdmin, seedTestOAuthClient } = require('./db');
+const { pool, closePool, runMigrations, seedTestFixtures } = require('./db');
 const { client, connectRedis, closeRedis } = require('./redis');
 const { createApp } = require('./app');
 const { startCleanupScheduler } = require('./utils/cleanup');
@@ -32,15 +32,14 @@ async function start() {
   validateConfig(config);
   console.log('Configuration validated');
 
-  // 2. Connect to MySQL and initialize schema
-  await initSchema();
-  console.log('MySQL database initialized');
+  // 2. Connect to MySQL and run migrations
+  await runMigrations(pool);
+  console.log('MySQL database migrated');
 
   // 3. Seed test data only when the environment explicitly allows it.
   const shouldSeedTestData = ['development', 'test'].includes(process.env.NODE_ENV) || process.env.ENABLE_TEST_SEEDS === 'true';
   if (shouldSeedTestData) {
-    await seedTestAdmin();
-    await seedTestOAuthClient();
+    await seedTestFixtures(pool);
   }
 
   // 4. Connect to Redis
