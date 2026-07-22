@@ -5,10 +5,8 @@ const { client } = require('../redis');
 const requireAuth = require('../middleware/requireAuth');
 const { sendSmsCode, checkSmsCode } = require('../utils/aliyunSms');
 const { getClientIp } = require('../utils/request');
-const { notifyForumUserUpdated } = require('../utils/forumSync');
 const { logSmsAudit } = require('../utils/smsAudit');
 const { createNotification } = require('../utils/notify');
-const sessionManager = require('../modules/sessions/sessionManager');
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
@@ -18,16 +16,6 @@ function normalizePhone(phone) {
 
 function isPhoneVerifiedForUser(user, phone) {
   return (user.phone_verified === 1 || user.phone_verified === true) && String(user.phone || '') === phone;
-}
-
-async function createPhoneSyncToken(user) {
-  const syncToken = require('crypto').randomBytes(32).toString('hex');
-  await client.setEx(`phone_sync:${syncToken}`, 5 * 60, JSON.stringify({
-    user_id: user.id,
-    phone_verified: true,
-    phone_verified_at: user.phone_verified_at || new Date().toISOString(),
-  }));
-  return syncToken;
 }
 
 async function hitLimit(key, max, ttlSeconds) {
@@ -134,14 +122,12 @@ router.post('/send', requireAuth, async (req, res) => {
 
   try {
     if (isPhoneVerifiedForUser(req.user, phone)) {
-      const syncToken = await createPhoneSyncToken(req.user);
       await logSmsAudit({ ...audit, success: true, code: 'PHONE_ALREADY_VERIFIED' });
       return res.json({
         success: true,
         code: 'PHONE_ALREADY_VERIFIED',
         message: '手机号已验证',
         phone_verified: true,
-        phone_sync_token: syncToken,
       });
     }
 
@@ -200,13 +186,11 @@ router.post('/verify', requireAuth, async (req, res) => {
 
   try {
     if (isPhoneVerifiedForUser(req.user, phone)) {
-      const syncToken = await createPhoneSyncToken(req.user);
       await logSmsAudit({ ...audit, success: true, code: 'PHONE_ALREADY_VERIFIED' });
       return res.json({
         success: true,
         message: '手机号已验证',
         phone_verified: true,
-        phone_sync_token: syncToken,
       });
     }
 
@@ -255,16 +239,10 @@ router.post('/verify', requireAuth, async (req, res) => {
       [phone, req.user.id]
     );
 
-    const syncToken = await createPhoneSyncToken({
-      id: req.user.id,
-      phone_verified_at: new Date().toISOString(),
-    });
-
     if (token) {
-      await client.del(`session:${sessionManager.hashToken(token)}`);
+      await client.del(`session:${token}`);
     }
     await clearVerifyFailureLimits(req, phone);
-    notifyForumUserUpdated(req.user.id).catch(err => console.warn('[SMS] forum sync failed:', err.message));
     await logSmsAudit({ ...audit, success: true, code: 'PHONE_BOUND' });
 
     // Phone bound notification
@@ -278,7 +256,6 @@ router.post('/verify', requireAuth, async (req, res) => {
       success: true,
       message: '手机号绑定成功',
       phone_verified: true,
-      phone_sync_token: syncToken,
     });
   } catch (err) {
     if (isDuplicateError(err) && getDuplicateField(err) === 'phone') {
@@ -290,27 +267,6 @@ router.post('/verify', requireAuth, async (req, res) => {
     const status = err.code === 'SMS_NOT_CONFIGURED' ? 503 : 500;
     await logSmsAudit({ ...audit, success: false, code: err.code || 'SMS_VERIFY_FAILED' });
     return res.status(status).json({ success: false, code: err.code || 'SMS_VERIFY_FAILED', message: err.message || '验证失败，请稍后重试' });
-  }
-});
-
-router.post('/sync-status', async (req, res) => {
-  const syncToken = String(req.body?.phone_sync_token || '').trim();
-
-  if (!/^[a-f0-9]{64}$/.test(syncToken)) {
-    return res.status(400).json({ success: false, code: 'INVALID_SYNC_TOKEN', message: '同步令牌无效' });
-  }
-
-  try {
-    const payload = await client.get(`phone_sync:${syncToken}`);
-    if (!payload) {
-      return res.status(401).json({ success: false, code: 'SYNC_TOKEN_EXPIRED', message: '同步令牌已过期' });
-    }
-
-    await client.del(`phone_sync:${syncToken}`);
-    return res.json({ success: true, ...JSON.parse(payload) });
-  } catch (err) {
-    console.error('[SMS] sync status failed:', err);
-    return res.status(500).json({ success: false, code: 'SYNC_STATUS_FAILED', message: '同步手机号状态失败' });
   }
 });
 

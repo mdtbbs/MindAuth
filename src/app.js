@@ -27,7 +27,6 @@ const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
 const smsRoutes = require('./routes/sms');
-const internalRoutes = require('./routes/internal');
 const challengeRoutes = require('./routes/challenge');
 const sessionsRoutes = require('./routes/sessions');
 const notificationsRoutes = require('./routes/notifications');
@@ -147,7 +146,6 @@ function createApp(deps = {}) {
   app.use('/api/challenge', challengeRoutes);
   app.use('/api/sessions', sessionsRoutes);
   app.use('/api/notifications', notificationsRoutes);
-  app.use('/api/internal', internalRoutes);
 
   // OIDC Discovery (RFC 8414 / OpenID Connect Discovery 1.0).
   // Exposes endpoint metadata so third-party clients can auto-discover MindAuth
