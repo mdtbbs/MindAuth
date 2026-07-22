@@ -4,6 +4,7 @@ const config = require('../config');
 function createMemoryRedisClient() {
   const store = new Map();
   const expires = new Map();
+  const sets = new Map(); // Redis SET support
 
   function now() {
     return Date.now();
@@ -33,6 +34,14 @@ function createMemoryRedisClient() {
     async get(key) {
       return isExpired(key) ? null : store.get(key) || null;
     },
+    async getDel(key) {
+      if (isExpired(key)) return null;
+      const val = store.get(key);
+      if (val === undefined) return null;
+      store.delete(key);
+      expires.delete(key);
+      return val;
+    },
     async setEx(key, ttlSeconds, value) {
       store.set(key, String(value));
       expires.set(key, now() + Number(ttlSeconds) * 1000);
@@ -43,9 +52,32 @@ function createMemoryRedisClient() {
       let count = 0;
       for (const key of list.flat()) {
         if (store.delete(key)) count += 1;
+        if (sets.delete(key)) count += 1;
         expires.delete(key);
       }
       return count;
+    },
+    async sAdd(key, members) {
+      const list = Array.isArray(members) ? members : [String(members)];
+      if (!sets.has(key)) sets.set(key, new Set());
+      const s = sets.get(key);
+      let added = 0;
+      for (const m of list) { if (!s.has(String(m))) { s.add(String(m)); added++; } }
+      return added;
+    },
+    async sRem(key, members) {
+      const list = Array.isArray(members) ? members : [String(members)];
+      const s = sets.get(key);
+      if (!s) return 0;
+      let removed = 0;
+      for (const m of list) { if (s.delete(String(m))) removed++; }
+      if (s.size === 0) sets.delete(key);
+      return removed;
+    },
+    async sMembers(key) {
+      const s = sets.get(key);
+      if (!s) return [];
+      return Array.from(s);
     },
     async incr(key) {
       const current = Number((await this.get(key)) || 0) + 1;
@@ -76,6 +108,18 @@ function createMemoryRedisClient() {
         }
       }
       return { cursor: '0', keys: getMatchingKeys(pattern) };
+    },
+    scanIterator(options) {
+      const pattern = options?.MATCH || '*';
+      const keys = getMatchingKeys(pattern);
+      let i = 0;
+      return {
+        [Symbol.asyncIterator]() { return this; },
+        async next() {
+          if (i >= keys.length) return { done: true };
+          return { value: keys[i++], done: false };
+        },
+      };
     },
     async eval(script, options) {
       const key = options?.keys?.[0];
