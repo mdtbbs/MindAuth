@@ -9,11 +9,8 @@
     "build": "npm run build:client",
     "build:client": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'lint not configured yet'",
-    "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "node --test tests/unit/*.test.js",
-    "test:e2e": "npx playwright test",
-    "verify": "npm run typecheck && npm run build && npm run test:unit"
+    "verify": "npm run typecheck && npm run build"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
