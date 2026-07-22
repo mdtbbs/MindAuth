@@ -3,8 +3,8 @@ const router = express.Router();
 const { pool } = require('../../db');
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
 const { getClientIp } = require('../../utils/request');
-const { logAudit } = require('../../utils/auditLog');
-const { invalidateIpBanCache } = require('../../middleware/ipBan');
+const ipBanMatcher = require('../../modules/security/ipBanMatcher');
+const auditWriter = require('../../modules/audit/auditWriter');
 
 const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
 
@@ -50,15 +50,11 @@ router.post('/', requireAdmin, requireAdminPermission('ip_bans.write'), async (r
       [ip, cidr_prefix ?? null, reason || null, req.adminUser.id, expires_at || null]
     );
 
-    await invalidateIpBanCache();
-    await logAudit({
-      admin_id: req.adminUser.id,
-      action: 'ip_ban.create',
-      target_type: 'ip_ban',
-      target_id: result.insertId,
-      details: { ip, cidr_prefix, reason, expires_at },
-      ip_address: getClientIp(req),
-    });
+    await ipBanMatcher.refreshCache();
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'ip_ban.create', 'ip_ban', result.insertId,
+      { ip, cidr_prefix, reason, expires_at }, getClientIp(req),
+    );
 
     res.json({ success: true, message: 'IP 已加入黑名单', id: result.insertId });
   } catch (err) {
@@ -79,15 +75,11 @@ router.put('/:id', requireAdmin, requireAdminPermission('ip_bans.write'), async 
       return res.status(404).json({ success: false, message: '记录不存在' });
     }
 
-    await invalidateIpBanCache();
-    await logAudit({
-      admin_id: req.adminUser.id,
-      action: 'ip_ban.update',
-      target_type: 'ip_ban',
-      target_id: parseInt(req.params.id),
-      details: { reason, expires_at },
-      ip_address: getClientIp(req),
-    });
+    await ipBanMatcher.refreshCache();
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'ip_ban.update', 'ip_ban', parseInt(req.params.id),
+      { reason, expires_at }, getClientIp(req),
+    );
 
     res.json({ success: true, message: '已更新' });
   } catch (err) {
@@ -104,14 +96,11 @@ router.delete('/:id', requireAdmin, requireAdminPermission('ip_bans.write'), asy
       return res.status(404).json({ success: false, message: '记录不存在' });
     }
 
-    await invalidateIpBanCache();
-    await logAudit({
-      admin_id: req.adminUser.id,
-      action: 'ip_ban.delete',
-      target_type: 'ip_ban',
-      target_id: parseInt(req.params.id),
-      ip_address: getClientIp(req),
-    });
+    await ipBanMatcher.refreshCache();
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'ip_ban.delete', 'ip_ban', parseInt(req.params.id),
+      null, getClientIp(req),
+    );
 
     res.json({ success: true, message: '已删除' });
   } catch (err) {

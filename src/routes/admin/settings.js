@@ -4,9 +4,9 @@ const { pool } = require('../../db');
 const { formatMySQLDateTime } = require('../../utils/datetime');
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
 const { getClientIp } = require('../../utils/request');
-const { logAudit } = require('../../utils/auditLog');
 const config = require('../../config');
 const runtimeConfig = require('../../modules/config/runtimeConfig');
+const auditWriter = require('../../modules/audit/auditWriter');
 
 // GET /stats - Dashboard statistics
 router.get('/stats', requireAdmin, async (req, res) => {
@@ -140,7 +140,7 @@ router.put('/email-config', requireAdmin, requireAdminPermission('email_config.w
       WHERE id = 1
     `, [host, port, user, finalPassword, from, secure ? 1 : 0]);
 
-    await logAudit({ admin_id: req.adminUser.id, action: 'config.email', target_type: 'config', ip_address: getClientIp(req) });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'config.email', 'config', null, null, getClientIp(req));
     runtimeConfig.invalidate();
     res.json({ success: true, message: '配置已保存' });
   } catch (err) {
@@ -234,7 +234,7 @@ router.put('/sms-config', requireAdmin, requireAdminPermission('sms_config.write
       template_code || ''
     ]);
 
-    await logAudit({ admin_id: req.adminUser.id, action: 'config.sms', target_type: 'config', ip_address: getClientIp(req) });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'config.sms', 'config', null, null, getClientIp(req));
     runtimeConfig.invalidate();
     res.json({ success: true, message: '短信配置已保存' });
   } catch (err) {
@@ -255,13 +255,11 @@ router.post('/test-sms', requireAdmin, requireAdminPermission('sms_config.write'
     const { sendSmsCode } = require('../../utils/aliyunSms');
     const result = await sendSmsCode(phone);
 
-    await logAudit({
-      admin_id: req.adminUser.id,
-      action: 'config.sms.test',
-      target_type: 'config',
-      details: { phone_last4: phone.slice(-4), bizId: result.bizId || null },
-      ip_address: getClientIp(req)
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'config.sms.test', 'config', null,
+      { phone_last4: phone.slice(-4), bizId: result.bizId || null },
+      getClientIp(req)
+    );
 
     res.json({ success: true, message: '测试短信已发送', bizId: result.bizId || null });
   } catch (err) {
@@ -296,7 +294,7 @@ router.put('/config/:key', requireAdmin, requireAdminPermission('config.write'),
 
     await runtimeConfig.set(key, value);
 
-    await logAudit({ admin_id: req.adminUser.id, action: 'config.system', target_type: 'config', target_id: 0, details: { key, value }, ip_address: getClientIp(req) });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'config.system', 'config', 0, { key, value }, getClientIp(req));
     res.json({ success: true, message: '配置已更新' });
   } catch (err) {
     console.error('Update config error:', err);

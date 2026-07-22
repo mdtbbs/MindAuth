@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
 const { getClientIp } = require('../../utils/request');
-const { logAudit } = require('../../utils/auditLog');
 const challengeManager = require('../../modules/challenges/challengeManager');
+const auditWriter = require('../../modules/audit/auditWriter');
 
 // GET /challenges - List all challenge questions
 router.get('/', requireAdmin, requireAdminPermission('config.read'), async (req, res) => {
@@ -26,10 +26,10 @@ router.post('/', requireAdmin, requireAdminPermission('config.write'), async (re
 
     const result = await challengeManager.createChallenge(question, answer);
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'challenge.create', target_type: 'challenge',
-      target_id: result.id, details: { question }, ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'challenge.create', 'challenge', result.id,
+      { question }, getClientIp(req),
+    );
 
     res.json({ success: true, message: '题目已添加', id: result.id });
   } catch (err) {
@@ -52,11 +52,10 @@ router.put('/:id', requireAdmin, requireAdminPermission('config.write'), async (
       return res.status(404).json({ success: false, message: '题目不存在' });
     }
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'challenge.update', target_type: 'challenge',
-      target_id: parseInt(req.params.id), details: { question: !!question, answer: !!answer },
-      ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'challenge.update', 'challenge', parseInt(req.params.id),
+      { question: !!question, answer: !!answer }, getClientIp(req),
+    );
 
     res.json({ success: true, message: '题目已更新' });
   } catch (err) {
@@ -73,10 +72,10 @@ router.delete('/:id', requireAdmin, requireAdminPermission('config.write'), asyn
       return res.status(404).json({ success: false, message: '题目不存在' });
     }
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'challenge.delete', target_type: 'challenge',
-      target_id: parseInt(req.params.id), ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'challenge.delete', 'challenge', parseInt(req.params.id),
+      null, getClientIp(req),
+    );
 
     res.json({ success: true, message: '题目已删除' });
   } catch (err) {
@@ -94,11 +93,10 @@ router.patch('/:id/toggle', requireAdmin, requireAdminPermission('config.write')
       return res.status(404).json({ success: false, message: '题目不存在' });
     }
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'challenge.toggle', target_type: 'challenge',
-      target_id: parseInt(req.params.id), details: { enabled: !!enabled },
-      ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'challenge.toggle', 'challenge', parseInt(req.params.id),
+      { enabled: !!enabled }, getClientIp(req),
+    );
 
     res.json({ success: true, message: enabled ? '已启用' : '已禁用' });
   } catch (err) {

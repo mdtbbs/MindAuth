@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../../db');
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
 const { getClientIp } = require('../../utils/request');
-const { logAudit } = require('../../utils/auditLog');
+const auditWriter = require('../../modules/audit/auditWriter');
 
 const VALID_FIELD_TYPES = ['text', 'textarea', 'number', 'select', 'url'];
 
@@ -44,11 +44,10 @@ router.post('/', requireAdmin, requireAdminPermission('config.write'), async (re
       [field_key, field_label, type, is_required ? 1 : 0, is_public !== false ? 1 : 0, options ? JSON.stringify(options) : null]
     );
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'field.create', target_type: 'user_field',
-      target_id: result.insertId, details: { field_key, field_label, field_type: type },
-      ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'field.create', 'user_field', result.insertId,
+      { field_key, field_label, field_type: type }, getClientIp(req),
+    );
 
     res.json({ success: true, message: '字段已创建', id: result.insertId });
   } catch (err) {
@@ -85,10 +84,10 @@ router.put('/:id', requireAdmin, requireAdminPermission('config.write'), async (
     const [result] = await pool.execute(`UPDATE user_fields SET ${updates.join(', ')} WHERE id = ?`, params);
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '字段不存在' });
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'field.update', target_type: 'user_field',
-      target_id: parseInt(req.params.id), ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'field.update', 'user_field', parseInt(req.params.id),
+      null, getClientIp(req),
+    );
 
     res.json({ success: true, message: '字段已更新' });
   } catch (err) {
@@ -103,10 +102,10 @@ router.delete('/:id', requireAdmin, requireAdminPermission('config.write'), asyn
     const [result] = await pool.execute('DELETE FROM user_fields WHERE id = ?', [req.params.id]);
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '字段不存在' });
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'field.delete', target_type: 'user_field',
-      target_id: parseInt(req.params.id), ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'field.delete', 'user_field', parseInt(req.params.id),
+      null, getClientIp(req),
+    );
 
     res.json({ success: true, message: '字段已删除' });
   } catch (err) {
@@ -125,10 +124,10 @@ router.patch('/sort', requireAdmin, requireAdminPermission('config.write'), asyn
       await pool.execute('UPDATE user_fields SET sort_order = ? WHERE id = ?', [item.sort_order, item.id]);
     }
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'field.sort', target_type: 'user_field',
-      details: { orders }, ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'field.sort', 'user_field', null,
+      { orders }, getClientIp(req),
+    );
 
     res.json({ success: true, message: '排序已更新' });
   } catch (err) {

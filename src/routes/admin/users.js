@@ -7,11 +7,10 @@ const { isValidUsername, getUsernameValidationError, escapeHtml } = require('../
 const { requireAdmin, requireAdminPermission, invalidateUserAdminSessions, isAdminRole } = require('../../middleware/requireAdmin');
 const { createRateLimiter } = require('../../middleware/rateLimit');
 const { getClientIp } = require('../../utils/request');
-const { logAudit } = require('../../utils/auditLog');
-const { logUserAudit } = require('../../utils/userAudit');
 const { createNotification } = require('../../utils/notify');
 const config = require('../../config');
 const sessionManager = require('../../modules/sessions/sessionManager');
+const auditWriter = require('../../modules/audit/auditWriter');
 
 const BAN_DURATIONS = {
   '24h': 24 * 60 * 60 * 1000,
@@ -328,10 +327,10 @@ router.put('/:id', requireAdmin, requireAdminPermission('users.write'), async (r
       await invalidateUserAdminSessions(parseInt(id));
     }
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'user.update', target_type: 'user', target_id: parseInt(id),
-      details: req.body, ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'user.update', 'user', parseInt(id),
+      req.body, getClientIp(req),
+    );
 
     res.json({ success: true, message: '用户信息已更新' });
   } catch (err) {
@@ -363,10 +362,10 @@ router.delete('/:id', requireAdmin, requireAdminPermission('users.delete'), user
       }
     });
 
-    await logAudit({
-      admin_id: req.adminUser.id, action: 'user.delete', target_type: 'user', target_id: parseInt(id),
-      ip_address: getClientIp(req),
-    });
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id, 'user.delete', 'user', parseInt(id),
+      null, getClientIp(req),
+    );
 
     res.json({ success: true, message: '用户已删除' });
   } catch (err) {
@@ -400,7 +399,7 @@ router.post('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async
       content: reason ? `原因：${reason}` : '您的账号已被封禁',
       sendEmail: true,
     });
-    await logAudit({ admin_id: req.adminUser.id, action: 'user.ban', target_type: 'user', target_id: parseInt(id), details: { reason, duration, expires_at }, ip_address: getClientIp(req) });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'user.ban', 'user', parseInt(id), { reason, duration, expires_at }, getClientIp(req));
     res.json({ success: true, message: '用户已被封禁', ban_expires_at: banExpires });
   } catch (err) {
     console.error('Ban user error:', err);
@@ -421,7 +420,7 @@ router.post('/:id/mute', requireAdmin, requireAdminPermission('users.ban'), asyn
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
 
-    await logAudit({ admin_id: req.adminUser.id, action: 'user.mute', target_type: 'user', target_id: parseInt(id), details: { reason, duration, expires_at }, ip_address: getClientIp(req) });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'user.mute', 'user', parseInt(id), { reason, duration, expires_at }, getClientIp(req));
     res.json({ success: true, message: '用户已被禁言', ban_expires_at: banExpires });
   } catch (err) {
     console.error('Mute user error:', err);
@@ -443,7 +442,7 @@ router.delete('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), asy
       user_id: parseInt(id), type: 'account_unbanned', title: '账号已解封',
       content: '您的账号已被解封', sendEmail: true,
     });
-    await logAudit({ admin_id: req.adminUser.id, action: 'user.unban', target_type: 'user', target_id: parseInt(id), ip_address: getClientIp(req) });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'user.unban', 'user', parseInt(id), null, getClientIp(req));
     res.json({ success: true, message: '用户已解封' });
   } catch (err) {
     console.error('Unban user error:', err);
@@ -461,13 +460,11 @@ router.post('/:id/unlock', requireAdmin, requireAdminPermission('users.unlock'),
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
 
-    await logAudit({ admin_id: req.adminUser.id, action: 'user.unlock', target_type: 'user', target_id: parseInt(id), ip_address: getClientIp(req) });
-    logUserAudit({
-      user_id: parseInt(id),
-      action: 'account_unlocked',
-      ip_address: getClientIp(req),
-      details: { unlocked_by: req.adminUser.id },
-    });
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'user.unlock', 'user', parseInt(id), null, getClientIp(req));
+    await auditWriter.writeUserAudit(
+      parseInt(id), 'account_unlocked', getClientIp(req),
+      { unlocked_by: req.adminUser.id },
+    );
     res.json({ success: true, message: '账号已解锁' });
   } catch (err) {
     console.error('Unlock user error:', err);
