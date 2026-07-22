@@ -28,10 +28,11 @@ const LEGACY_PATTERNS = [
  * Collect every URL requested by the page during initial load + a short
  * settling period (for lazy-loaded chunks / dynamic imports).
  */
-async function collectRequestedUrls(page) {
+async function collectRequestedUrls(page, path) {
   const urls = [];
   page.on('request', (req) => urls.push(req.url()));
 
+  await page.goto(path);
   // Wait for network to settle so lazy imports are captured.
   await page.waitForLoadState('networkidle');
   return urls;
@@ -58,17 +59,17 @@ function assertNoLegacyRequests(urls, label) {
 // ─────────────────────────────────────────────────────────────
 test.describe('User SPA — no legacy static dependencies', () => {
   test('homepage (/) must not request legacy paths', async ({ page }) => {
-    const urls = await collectRequestedUrls(page.goto('/'));
+    const urls = await collectRequestedUrls(page, '/');
     assertNoLegacyRequests(urls, '/');
   });
 
   test('login page (/login) must not request legacy paths', async ({ page }) => {
-    const urls = await collectRequestedUrls(page.goto('/login'));
+    const urls = await collectRequestedUrls(page, '/login');
     assertNoLegacyRequests(urls, '/login');
   });
 
   test('register page (/register) must not request legacy paths', async ({ page }) => {
-    const urls = await collectRequestedUrls(page.goto('/register'));
+    const urls = await collectRequestedUrls(page, '/register');
     assertNoLegacyRequests(urls, '/register');
   });
 });
@@ -78,7 +79,7 @@ test.describe('User SPA — no legacy static dependencies', () => {
 // ─────────────────────────────────────────────────────────────
 test.describe('Admin SPA — no legacy static dependencies', () => {
   test('admin page (/admin) must not request legacy paths', async ({ page }) => {
-    const urls = await collectRequestedUrls(page.goto('/admin'));
+    const urls = await collectRequestedUrls(page, '/admin');
     assertNoLegacyRequests(urls, '/admin');
   });
 });
