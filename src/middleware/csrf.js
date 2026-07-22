@@ -57,7 +57,10 @@ function validateCsrf(req, res, next) {
     '/api/register',     // User registration (no session needed)
     '/api/login',        // User login (creates session, rate-limited)
     '/api/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
-    '/api/admin/test/clear-rate-limits' // Test endpoint (non-production only)
+    '/api/admin/test/clear-rate-limits', // Test endpoint (non-production only)
+    '/api/admin/test/create-reset-token', // Test endpoint (non-production only)
+    '/api/admin/test/verify-email', // Test endpoint (non-production only)
+    '/api/admin/test/get-user-id' // Test endpoint (non-production only)
   ]);
 
   if (exemptPaths.has(path)) {

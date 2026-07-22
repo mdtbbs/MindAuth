@@ -123,16 +123,7 @@ test.describe('CSRF protection — state-changing routes require token', () => {
   test('admin endpoint without CSRF returns 403', async ({ request }) => {
     const cookieHeader = await getAdminCookieHeader(request);
 
-    // Try to access admin stats without CSRF token
-    const res = await request.get('/api/admin/stats', {
-      headers: { cookie: cookieHeader }
-    });
-    // GET is not CSRF-protected — should succeed
-    // Actually admin stats is GET so it's not CSRF-protected
-    // Let's use a POST admin endpoint instead
-    // The CSRF cookie header is needed for state-changing requests
-
-    // Use a DELETE to test CSRF on admin
+    // DELETE to an admin endpoint without CSRF token should return 403
     const deleteRes = await request.delete('/api/admin/clients/nonexistent', {
       headers: { cookie: cookieHeader }
     });

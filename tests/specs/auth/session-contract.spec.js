@@ -52,6 +52,34 @@ async function loginAndGetToken(request, username, password) {
   return sessionCookie ? sessionCookie.value : null;
 }
 
+/** Helper: get user ID by username via test endpoint */
+async function getUserId(request, username) {
+  const res = await request.post('/api/admin/test/get-user-id', {
+    data: { secret: ADMIN_SECRET, username }
+  });
+  expect(res.ok()).toBeTruthy();
+  const body = await res.json();
+  return body.user_id;
+}
+
+/** Helper: mark a user's email as verified via test endpoint */
+async function verifyEmail(request, userId) {
+  const res = await request.post('/api/admin/test/verify-email', {
+    data: { secret: ADMIN_SECRET, user_id: userId }
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
+/** Helper: create a password reset token via test endpoint */
+async function createResetToken(request, userId) {
+  const res = await request.post('/api/admin/test/create-reset-token', {
+    data: { secret: ADMIN_SECRET, user_id: userId }
+  });
+  expect(res.ok()).toBeTruthy();
+  const body = await res.json();
+  return body.token;
+}
+
 test.beforeAll(async ({ request }) => {
   await clearRateLimits(request);
 });
@@ -232,9 +260,13 @@ test.describe('Password change — all sessions revoked', () => {
 // Password reset — revoke all sessions
 // ─────────────────────────────────────────────────────────────
 test.describe('Password reset — all sessions revoked', () => {
-  test('resetting password requires valid token and revokes sessions', async ({ request, playwright }) => {
+  test('resetting password with valid token revokes all sessions', async ({ request, playwright }) => {
     await clearRateLimits(request);
     const { username, email, password } = await registerUser(request);
+
+    // Look up user ID and verify email (required for password reset flow)
+    const userId = await getUserId(request, username);
+    await verifyEmail(request, userId);
 
     // Login from two devices
     const device1 = await playwright.request.newContext({ baseURL: BASE_URL });
@@ -247,9 +279,43 @@ test.describe('Password reset — all sessions revoked', () => {
     expect((await device1.get('/api/me')).ok()).toBeTruthy();
     expect((await device2.get('/api/me')).ok()).toBeTruthy();
 
-    // /api/password/reset requires CSRF (not in exempt list)
-    // Test with CSRF token + invalid reset token
+    // Create a valid reset token via test helper
+    const resetToken = await createResetToken(request, userId);
+
+    // Get CSRF token for the reset request
     await request.get('/api/health'); // ensure csrf cookie
+    const state = await request.storageState();
+    const csrf = state.cookies.find(c => c.name === 'csrf_token')?.value;
+
+    // Perform password reset with valid token
+    const resetRes = await request.post('/api/password/reset', {
+      data: { token: resetToken, new_password: 'ResetPass789!' },
+      headers: { 'X-CSRF-Token': csrf }
+    });
+    expect(resetRes.ok()).toBeTruthy();
+    const resetBody = await resetRes.json();
+    expect(resetBody.success).toBe(true);
+
+    // Both devices should now be unauthenticated (all sessions revoked)
+    const me1 = await device1.get('/api/me');
+    expect(me1.status()).toBe(401);
+
+    const me2 = await device2.get('/api/me');
+    expect(me2.status()).toBe(401);
+
+    // Login with new password should work
+    const device3 = await playwright.request.newContext({ baseURL: BASE_URL });
+    const newToken = await loginAndGetToken(device3, username, 'ResetPass789!');
+    expect(newToken).toBeTruthy();
+
+    await device1.dispose();
+    await device2.dispose();
+    await device3.dispose();
+  });
+
+  test('resetting password with invalid token returns 400', async ({ request }) => {
+    // Get CSRF token
+    await request.get('/api/health');
     const state = await request.storageState();
     const csrf = state.cookies.find(c => c.name === 'csrf_token')?.value;
 
@@ -260,9 +326,6 @@ test.describe('Password reset — all sessions revoked', () => {
     expect(resetRes.status()).toBe(400);
     const resetBody = await resetRes.json();
     expect(resetBody.success).toBe(false);
-
-    await device1.dispose();
-    await device2.dispose();
   });
 });
 
