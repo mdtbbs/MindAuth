@@ -10,6 +10,8 @@
     "build:client": "vite build",
     "typecheck": "tsc --noEmit",
     "test:unit": "node --test tests/unit/*.test.js",
+    "test:e2e": "npx playwright test",
+    "test:verify-routing": "node scripts/verify-routing.js",
     "verify": "npm run typecheck && npm run build"
   },
   "dependencies": {

@@ -96,37 +96,63 @@ function createApp(deps = {}) {
   }));
 
   // Middleware
-  app.use(compression()); // 响应压缩
+  app.use(compression());
   app.use(express.json());
   app.use(cookieParser());
-  app.use(express.static(path.join(__dirname, '../public'), {
-    maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0',
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html')) {
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      } else if (filePath.endsWith('.js')) {
-        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-      }
-    },
-  })); // 开发模式不缓存
-  // Serve shared-styles from monorepo root
-  app.use('/shared-styles', express.static(path.join(__dirname, '../../shared-styles'), {
+
+  // ── Static assets (before CSRF — static files don't need CSRF) ──────
+  //
+  // Resolution order:
+  //   1. Legacy compatibility files (error.html, robots.txt, etc.)
+  //   2. User uploads (/uploads/*) — 1-day cache, no immutable
+  //   3. Vite hashed assets (/assets/*) — 1-year cache, immutable
+  //   4. Vite root files (favicon.svg) — 1-hour cache
+  //
+  // After these, requests flow through CSRF → API routes → API 404 →
+  // admin SPA → user SPA fallback.
+
+  const PUBLIC_DIR = path.join(__dirname, '../public');
+  const distClientDir = path.join(__dirname, '../dist/client');
+
+  // 1. Legacy files that must remain accessible at their original URLs.
+  //    We use an explicit allowlist instead of express.static(public/)
+  //    to prevent public/index.html and public/admin.html from shadowing
+  //    the React build.
+  const LEGACY_FILES = new Set([
+    '/error.html',
+    '/oauth-error.html',
+    '/robots.txt',
+    '/docs.html',
+  ]);
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && LEGACY_FILES.has(req.path)) {
+      const filePath = path.join(PUBLIC_DIR, req.path);
+      res.sendFile(filePath);
+    } else {
+      next();
+    }
+  });
+
+  // 2. User uploads — safe cache (1 day), no immutable flag.
+  //    User uploads can change at any time, so we must not cache aggressively.
+  app.use('/uploads', express.static(path.join(PUBLIC_DIR, 'uploads'), {
     maxAge: '1d',
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html') || filePath.endsWith('.css')) {
-        const type = filePath.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/css; charset=utf-8';
-        res.setHeader('Content-Type', type);
-      }
-    },
   }));
-  // Serve shared templates from monorepo
-  app.use('/templates', express.static(path.join(__dirname, '../../shared/dist/templates'), {
-    maxAge: '1d',
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html')) {
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      }
-    },
+
+  // 3. Vite build output — hashed assets get long cache (1 year).
+  //    Vite emits filenames like assets/index-a1b2c3.js so cache-busting
+  //    is built in.  This MUST come before the SPA fallback.
+  app.use('/assets', express.static(path.join(distClientDir, 'assets'), {
+    maxAge: '1y',
+    immutable: true,
+  }));
+
+  // 4. Other root-level files from dist/client (favicon.svg, etc.)
+  //    index: false prevents serving index.html/admin.html — those are
+  //    handled by the SPA fallback routes below.
+  app.use(express.static(distClientDir, {
+    maxAge: '1h',
+    index: false,
   }));
 
   // CSRF protection
@@ -238,7 +264,23 @@ function createApp(deps = {}) {
     res.status(404).json({ success: false, code: 'NOT_FOUND', message: '接口不存在' });
   });
 
-  // SPA fallback - handle direct /login, /register, /logout URLs
+  // ── Admin SPA ──────────────────────────────────────────────────────
+  // /admin and /admin/* serve the admin React entry.
+  // Must come after /api/* routes so API calls are never intercepted.
+  const serveAdminSpa = (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (process.env.NODE_ENV !== 'production') {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    }
+    res.sendFile(path.join(distClientDir, 'admin.html'));
+  };
+  app.get('/admin', serveAdminSpa);
+  app.get('/admin/*', serveAdminSpa);
+
+  // ── User SPA fallback ──────────────────────────────────────────────
+  // Serve the React user app for all remaining routes.
+  // This MUST come after API routes and static asset middleware so that
+  // /api/*, /uploads/*, and /assets/* are never intercepted.
   app.get('*', (req, res, next) => {
     // In development, always serve fresh HTML (no caching)
     if (process.env.NODE_ENV !== 'production') {
@@ -247,10 +289,8 @@ function createApp(deps = {}) {
       res.setHeader('Expires', '0');
     }
 
-    // For /login, /register, /logout: serve index.html directly (the SPA hash router handles the rest)
-    // For other routes: also serve index.html (SPA fallback)
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.sendFile(path.join(__dirname, '../public/index.html'));
+    res.sendFile(path.join(distClientDir, 'index.html'));
   });
 
   // Error handler - handle multer errors specifically
