@@ -6,6 +6,9 @@
 # Dependencies
 node_modules/
 
+# Build output
+dist/
+
 # Test artifacts
 *.txt
 !public/robots.txt  # Allow robots.txt for SEO/security
