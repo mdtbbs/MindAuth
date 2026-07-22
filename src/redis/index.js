@@ -4,6 +4,7 @@ const config = require('../config');
 function createMemoryRedisClient() {
   const store = new Map();
   const expires = new Map();
+  const sets = new Map(); // Redis SET support
 
   function now() {
     return Date.now();
@@ -43,6 +44,7 @@ function createMemoryRedisClient() {
       let count = 0;
       for (const key of list.flat()) {
         if (store.delete(key)) count += 1;
+        if (sets.delete(key)) count += 1;
         expires.delete(key);
       }
       return count;
@@ -76,6 +78,28 @@ function createMemoryRedisClient() {
         }
       }
       return { cursor: '0', keys: getMatchingKeys(pattern) };
+    },
+    async sAdd(key, members) {
+      const list = Array.isArray(members) ? members : [String(members)];
+      if (!sets.has(key)) sets.set(key, new Set());
+      const s = sets.get(key);
+      let added = 0;
+      for (const m of list) { if (!s.has(String(m))) { s.add(String(m)); added++; } }
+      return added;
+    },
+    async sRem(key, members) {
+      const list = Array.isArray(members) ? members : [String(members)];
+      const s = sets.get(key);
+      if (!s) return 0;
+      let removed = 0;
+      for (const m of list) { if (s.delete(String(m))) removed++; }
+      if (s.size === 0) sets.delete(key);
+      return removed;
+    },
+    async sMembers(key) {
+      const s = sets.get(key);
+      if (!s) return [];
+      return Array.from(s);
     },
     async eval(script, options) {
       const key = options?.keys?.[0];

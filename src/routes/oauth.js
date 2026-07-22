@@ -9,6 +9,7 @@ const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { maskPhone } = require('../utils/phone');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const sessionManager = require('../modules/sessions/sessionManager');
 
 const ACCESS_TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour in milliseconds
 const ACCESS_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -111,14 +112,9 @@ router.get('/authorize', async (req, res) => {
     let user = null;
 
     if (token) {
-      // Check Redis cache first
-      const cachedUser = await client.get(`session:${token}`);
-      if (cachedUser) {
-        user = JSON.parse(cachedUser);
-      } else {
-        // Fallback to MySQL
-        const [userRows] = await pool.execute('SELECT id, username, email, phone_verified FROM users WHERE session_token = ?', [token]);
-        user = userRows[0];
+      const authResult = await sessionManager.authenticateUserSession(token);
+      if (authResult) {
+        user = authResult.user;
       }
     }
 
@@ -639,32 +635,24 @@ router.post('/verify', verifyEndpointLimiter, async (req, res) => {
       return oauthError(res, 400, 'invalid_request', '缺少 session_token');
     }
 
-    // Check Redis cache first
-    const cachedUser = await client.get(`session:${session_token}`);
-    if (cachedUser) {
-      const user = JSON.parse(cachedUser);
-      return res.json({
-        success: true,
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          phone_verified: user.phone_verified === 1 || user.phone_verified === true,
-          phone_verified_at: user.phone_verified_at,
-          created_at: user.created_at
-        }
-      });
-    }
-
-    // Fallback to MySQL
-    const [userRows] = await pool.execute('SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE session_token = ?', [session_token]);
-    const user = userRows[0];
-
-    if (!user) {
+    // Use sessionManager to authenticate (hash-based lookup)
+    const authResult = await sessionManager.authenticateUserSession(session_token);
+    if (!authResult) {
       return oauthError(res, 401, 'invalid_grant', '无效的 session_token');
     }
 
-    res.json({ success: true, user });
+    const user = authResult.user;
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        phone_verified: user.phone_verified === 1 || user.phone_verified === true,
+        phone_verified_at: user.phone_verified_at,
+        created_at: user.created_at,
+      },
+    });
   } catch (err) {
     console.error('Verify error:', err);
     oauthError(res, 500, 'server_error', '验证失败');

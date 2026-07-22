@@ -12,8 +12,8 @@ const { sendVerificationEmail } = require('../utils/email');
 const { maskPhone } = require('../utils/phone');
 const { logAudit } = require('../utils/auditLog');
 const { createNotification } = require('../utils/notify');
-const { parseDeviceInfo } = require('../utils/deviceInfo');
 const { logUserAudit } = require('../utils/userAudit');
+const sessionManager = require('../modules/sessions/sessionManager');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
@@ -241,34 +241,17 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       await pool.execute('UPDATE users SET lock_level = 0 WHERE id = ?', [user.id]);
     }
 
-    const token = generateToken();
-    await pool.execute('UPDATE users SET session_token = ? WHERE id = ?', [token, user.id]);
-
-    // Cache session in Redis (exclude password_hash for security)
-    await client.setEx(`session:${token}`, 86400, JSON.stringify({
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      email_verified: user.email_verified,
-      role: user.role,
-      avatar_url: user.avatar_url,
-      banner_url: user.banner_url,
-      phone: user.phone,
-      phone_verified: user.phone_verified,
-      phone_verified_at: user.phone_verified_at,
-      created_at: user.created_at
-    }));
+    // Create session via sessionManager (hash-based, stored in user_sessions)
+    const sessionResult = await sessionManager.createUserSession({
+      userId: user.id,
+      ipAddress: ip,
+      userAgent: userAgent,
+    });
 
     // Record login log
     await pool.execute(
       'INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)',
       [user.id, ip, userAgent.slice(0, 200), 'web']
-    );
-
-    // Record user session for multi-device tracking
-    await pool.execute(
-      'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info) VALUES (?, ?, ?, ?, ?)',
-      [user.id, token, ip, userAgent.slice(0, 500), parseDeviceInfo(userAgent)]
     );
 
     // New device notification
@@ -288,7 +271,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       console.warn('[Login] new device notification failed:', notifyErr.message);
     }
 
-    res.cookie('session', token, {
+    res.cookie('session', sessionResult.token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       maxAge: SESSION_MAX_AGE,
@@ -345,14 +328,8 @@ router.post('/logout', requireAuth, async (req, res) => {
   try {
     const token = req.cookies.session;
 
-    // Clear session in MySQL
-    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [req.user.id]);
-
-    // Clear session tracking
-    await pool.execute('DELETE FROM user_sessions WHERE session_token = ?', [token]);
-
-    // Clear session cache in Redis
-    await client.del(`session:${token}`);
+    // Revoke session via sessionManager (clears MySQL, Redis cache, and index set)
+    await sessionManager.revokeUserSession({ token, userId: req.user.id });
 
     res.clearCookie('session', { path: '/' });
     res.json({ success: true });

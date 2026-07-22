@@ -11,6 +11,7 @@ const { logAudit } = require('../../utils/auditLog');
 const { logUserAudit } = require('../../utils/userAudit');
 const { createNotification } = require('../../utils/notify');
 const config = require('../../config');
+const sessionManager = require('../../modules/sessions/sessionManager');
 
 const BAN_DURATIONS = {
   '24h': 24 * 60 * 60 * 1000,
@@ -217,8 +218,10 @@ router.post('/:id/reset-password', requireAdmin, requireAdminPermission('users.r
     const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
     await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashedPassword, id]);
-    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [id]);
     await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [id]);
+
+    // Revoke all user sessions via sessionManager
+    await sessionManager.revokeAllUserSessions(parseInt(id));
 
     // Try to send temporary password via email
     // Security: Escape all dynamic content in HTML email
@@ -341,11 +344,18 @@ router.put('/:id', requireAdmin, requireAdminPermission('users.write'), async (r
 router.delete('/:id', requireAdmin, requireAdminPermission('users.delete'), userDeleteLimiter, async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = parseInt(id);
+
+    // Revoke all sessions (user + admin) BEFORE deletion so Redis keys are cleaned up
+    // while we still have the session data to find them
+    await sessionManager.revokeAllUserSessions(userId);
+    await sessionManager.revokeAdminSessionsForUser(userId);
 
     await transaction(async (conn) => {
       await conn.execute('DELETE FROM authorizations WHERE user_id = ?', [id]);
       await conn.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [id]);
       await conn.execute('DELETE FROM login_logs WHERE user_id = ?', [id]);
+      await conn.execute('DELETE FROM user_sessions WHERE user_id = ?', [id]);
       const [result] = await conn.execute('DELETE FROM users WHERE id = ?', [id]);
 
       if (result.affectedRows === 0) {
@@ -380,6 +390,10 @@ router.post('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async
       ['banned', reason || null, req.adminUser.id, banExpires, id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: '用户不存在' });
+
+    // Revoke all user sessions so the banned user is immediately logged out
+    await sessionManager.revokeAllUserSessions(parseInt(id));
+    await sessionManager.revokeAdminSessionsForUser(parseInt(id));
 
     await createNotification({
       user_id: parseInt(id), type: 'account_banned', title: '账号已被封禁',

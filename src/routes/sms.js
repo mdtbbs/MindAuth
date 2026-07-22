@@ -8,6 +8,7 @@ const { getClientIp } = require('../utils/request');
 const { notifyForumUserUpdated } = require('../utils/forumSync');
 const { logSmsAudit } = require('../utils/smsAudit');
 const { createNotification } = require('../utils/notify');
+const sessionManager = require('../modules/sessions/sessionManager');
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
@@ -260,7 +261,7 @@ router.post('/verify', requireAuth, async (req, res) => {
     });
 
     if (token) {
-      await client.del(`session:${token}`);
+      await client.del(`session:${sessionManager.hashToken(token)}`);
     }
     await clearVerifyFailureLimits(req, phone);
     notifyForumUserUpdated(req.user.id).catch(err => console.warn('[SMS] forum sync failed:', err.message));

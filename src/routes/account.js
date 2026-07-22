@@ -13,6 +13,7 @@ const { getClientIp } = require('../utils/request');
 const { getUserAuditLogs, logUserAudit } = require('../utils/userAudit');
 const path = require('path');
 const fs = require('fs');
+const sessionManager = require('../modules/sessions/sessionManager');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -66,32 +67,16 @@ router.post('/change-password', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, message: '旧密码错误' });
     }
 
-    // Update password and clear all sessions atomically
+    // Update password and revoke all sessions
     const newPasswordHash = await bcrypt.hash(new_password, 10);
-
-    // Collect all active session tokens before clearing, so we can invalidate
-    // their Redis caches. Other devices should be forced to re-login immediately,
-    // not after their 24h cache TTL expires.
-    const [activeSessionRows] = await pool.execute(
-      'SELECT session_token FROM user_sessions WHERE user_id = ?',
-      [user.id]
-    );
-    const activeTokens = activeSessionRows
-      .map((r) => r.session_token)
-      .filter(Boolean);
 
     await transaction(async (conn) => {
       await conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newPasswordHash, user.id]);
-      await conn.execute('UPDATE users SET session_token = NULL WHERE id = ?', [user.id]);
-      await conn.execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+      // Note: user_sessions deleted via sessionManager below (outside transaction)
     });
 
-    // Invalidate all Redis session caches for this user (best-effort, parallel)
-    if (activeTokens.length > 0) {
-      await Promise.all(
-        activeTokens.map((t) => client.del(`session:${t}`).catch(() => {}))
-      );
-    }
+    // Revoke all user sessions via sessionManager (clears MySQL, Redis, index sets)
+    await sessionManager.revokeAllUserSessions(user.id);
 
     // Password change notification
     await createNotification({
@@ -100,12 +85,6 @@ router.post('/change-password', requireAuth, async (req, res) => {
       ip_address: getClientIp(req), user_agent: req.headers['user-agent'],
       sendEmail: true,
     }).catch(err => console.warn('[Account] password notification failed:', err.message));
-
-    // Clear session cache in Redis
-    const token = req.cookies.session;
-    if (token) {
-      await client.del(`session:${token}`);
-    }
 
     res.clearCookie('session', { path: '/' });
 
@@ -203,16 +182,6 @@ router.delete('/', requireAuth, async (req, res) => {
     }
 
     // Delete user and all related data atomically
-    // Collect active session tokens first so we can invalidate Redis caches
-    // after the user is gone (otherwise cache would live until TTL expires).
-    const [activeSessionRows] = await pool.execute(
-      'SELECT session_token FROM user_sessions WHERE user_id = ?',
-      [user.id]
-    );
-    const activeTokens = activeSessionRows
-      .map((r) => r.session_token)
-      .filter(Boolean);
-
     await transaction(async (conn) => {
       await conn.execute('DELETE FROM authorizations WHERE user_id = ?', [user.id]);
       await conn.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
@@ -226,18 +195,8 @@ router.delete('/', requireAuth, async (req, res) => {
       }
     });
 
-    // Clear all session caches in Redis (best-effort, parallel)
-    if (activeTokens.length > 0) {
-      await Promise.all(
-        activeTokens.map((t) => client.del(`session:${t}`).catch(() => {}))
-      );
-    }
-
-    // Clear session cache in Redis (defensive: covers any token missed above)
-    const token = req.cookies.session;
-    if (token) {
-      await client.del(`session:${token}`);
-    }
+    // Clean up Redis session caches + index sets (best-effort, user_sessions already deleted)
+    await sessionManager.revokeAdminSessionsForUser(user.id);
 
     logUserAudit({
       user_id: user.id,
