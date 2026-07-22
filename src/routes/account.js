@@ -181,12 +181,15 @@ router.delete('/', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, message: '密码错误' });
     }
 
+    // Revoke all user sessions BEFORE deleting MySQL rows (so sessionManager can find them for Redis cleanup)
+    await sessionManager.revokeAllUserSessions(user.id);
+    await sessionManager.revokeAdminSessionsForUser(user.id);
+
     // Delete user and all related data atomically
     await transaction(async (conn) => {
       await conn.execute('DELETE FROM authorizations WHERE user_id = ?', [user.id]);
       await conn.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
       await conn.execute('DELETE FROM login_logs WHERE user_id = ?', [user.id]);
-      await conn.execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
       await conn.execute('DELETE FROM user_notifications WHERE user_id = ?', [user.id]);
       await conn.execute('DELETE FROM user_field_values WHERE user_id = ?', [user.id]);
       const [result] = await conn.execute('DELETE FROM users WHERE id = ?', [user.id]);
@@ -194,9 +197,6 @@ router.delete('/', requireAuth, async (req, res) => {
         throw new Error('USER_NOT_FOUND');
       }
     });
-
-    // Clean up Redis session caches + index sets (best-effort, user_sessions already deleted)
-    await sessionManager.revokeAdminSessionsForUser(user.id);
 
     logUserAudit({
       user_id: user.id,

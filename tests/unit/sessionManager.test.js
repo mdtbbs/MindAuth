@@ -20,7 +20,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 process.env.USE_MEMORY_REDIS = '1';
 process.env.NODE_ENV = 'test';
 
-const { pool, closePool, initSchema } = require('../../src/db');
+const { pool, closePool, runMigrations } = require('../../src/db');
 const { client } = require('../../src/redis');
 const sessionManager = require('../../src/modules/sessions/sessionManager');
 const bcrypt = require('bcrypt');
@@ -51,7 +51,7 @@ async function cleanupUser(userId) {
 
 describe('sessionManager', () => {
   before(async () => {
-    await initSchema();
+    await runMigrations(pool);
   });
 
   after(async () => {
