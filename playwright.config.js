@@ -23,6 +23,13 @@ export default defineConfig({
         baseURL,
       },
     },
+    {
+      name: 'mobile',
+      use: {
+        ...devices['Pixel 5'],
+        baseURL,
+      },
+    },
   ],
   webServer: {
     command: `node src/server.js`,
