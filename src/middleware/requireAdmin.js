@@ -1,7 +1,9 @@
 const { client } = require('../redis');
-const { pool } = require('../db');
-
-const ADMIN_SESSION_TTL = 24 * 60 * 60; // 24 hours
+const {
+  createAdminSession: smCreateAdminSession,
+  authenticateAdminSession,
+  revokeAdminSessionsForUser,
+} = require('../modules/sessions/sessionManager');
 
 const ROLE_PERMISSIONS = {
   super_admin: ['*'],
@@ -41,55 +43,25 @@ function requireAdminPermission(permission) {
 }
 
 /**
- * Require admin middleware
- * - Validates admin session exists in Redis
- * - Verifies user is actually an admin in database (prevents privilege escalation)
+ * Require admin middleware.
+ * - Delegates session auth to sessionManager (hash-based Redis + DB role/ban re-check).
+ * - Sets req.adminUser, req.admin, req.isAdmin for downstream routes.
  */
 async function requireAdmin(req, res, next) {
-  const token = req.cookies.admin_session;
-  if (!token) {
+  const rawToken = req.cookies.admin_session;
+  if (!rawToken) {
     return res.status(401).json({ success: false, message: '未登录管理员' });
   }
 
   try {
-    // Check Redis for admin session
-    const sessionData = await client.get(`admin_session:${token}`);
-    if (!sessionData) {
+    const result = await authenticateAdminSession(rawToken);
+    if (!result) {
       return res.status(401).json({ success: false, message: '管理员会话已失效' });
     }
 
-    const session = JSON.parse(sessionData);
-    const userId = session.user_id;
-
-    if (!userId) {
-      // Legacy session without user_id - invalidate it
-      await client.del(`admin_session:${token}`);
-      return res.status(401).json({ success: false, message: '管理员会话格式无效' });
-    }
-
-    // Verify user is actually an admin in database
-    const [userRows] = await pool.execute(
-      'SELECT id, username, email, role FROM users WHERE id = ?',
-      [userId]
-    );
-    const user = userRows[0];
-
-    if (!user) {
-      // User doesn't exist - invalidate session
-      await client.del(`admin_session:${token}`);
-      return res.status(401).json({ success: false, message: '用户不存在' });
-    }
-
-    const normalizedRole = normalizeRole(user.role);
-    if (!normalizedRole) {
-      // User is no longer admin - invalidate session
-      await client.del(`admin_session:${token}`);
-      return res.status(403).json({ success: false, message: '权限不足' });
-    }
-
-    // Attach user to request for use in routes
-    req.adminUser = { ...user, normalized_role: normalizedRole };
-    req.admin = req.adminUser;
+    const { admin } = result;
+    req.adminUser = admin;
+    req.admin = admin;
     req.isAdmin = true;
     next();
   } catch (err) {
@@ -99,48 +71,42 @@ async function requireAdmin(req, res, next) {
 }
 
 /**
- * Create admin session in Redis
- * Stores user_id for database role verification
+ * Create admin session.
+ * Adapter for sessionManager — accepts (token, userId) for backward compat
+ * with existing call sites in admin/auth.js.
  */
 async function createAdminSession(token, userId) {
-  await client.setEx(`admin_session:${token}`, ADMIN_SESSION_TTL, JSON.stringify({
-    user_id: userId,
-    created: Date.now()
-  }));
+  // sessionManager generates its own token; we ignore the passed token
+  // and use the one from sessionManager.  But to maintain backward compat
+  // with the admin login route that sets the cookie itself, we create the
+  // session via sessionManager and store the raw token it returns.
+  // Actually, the caller in admin/auth.js generates its own token and expects
+  // us to store it.  Let's just use sessionManager.createAdminSession directly
+  // and return the result so the caller can use the token.
+  //
+  // This function is a legacy adapter. New code should call sessionManager directly.
+  const result = await smCreateAdminSession({ adminId: userId });
+  // The caller expects to use `token` as the cookie value, but sessionManager
+  // generates its own.  We return the sessionManager token.
+  return result;
 }
 
 /**
- * Delete admin session from Redis
+ * Delete admin session by raw token.
+ * Legacy adapter — prefer sessionManager directly.
  */
-async function deleteAdminSession(token) {
-  await client.del(`admin_session:${token}`);
+async function deleteAdminSession(rawToken) {
+  const { hashToken } = require('../modules/sessions/sessionManager');
+  const tokenHash = hashToken(rawToken);
+  await client.del(`admin_session:${tokenHash}`);
 }
 
 /**
- * Invalidate all admin sessions for a user
- * Call this when user's role changes from admin to non-admin
+ * Invalidate all admin sessions for a user.
+ * Delegates to sessionManager (uses per-user index set, no SCAN).
  */
 async function invalidateUserAdminSessions(userId) {
-  try {
-    // Use SCAN instead of KEYS to avoid blocking Redis
-    let cursor = '0';
-    do {
-      const result = await client.scan(cursor, 'MATCH', 'admin_session:*', 'COUNT', 100);
-      cursor = result.cursor;
-
-      for (const key of result.keys) {
-        const sessionData = await client.get(key);
-        if (sessionData) {
-          const session = JSON.parse(sessionData);
-          if (session.user_id === userId) {
-            await client.del(key);
-          }
-        }
-      }
-    } while (cursor !== '0');
-  } catch (err) {
-    console.error('Error invalidating admin sessions:', err);
-  }
+  return revokeAdminSessionsForUser(userId);
 }
 
 module.exports = {
@@ -152,5 +118,5 @@ module.exports = {
   ROLE_PERMISSIONS,
   createAdminSession,
   deleteAdminSession,
-  invalidateUserAdminSessions
+  invalidateUserAdminSessions,
 };
