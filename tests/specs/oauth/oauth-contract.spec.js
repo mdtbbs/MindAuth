@@ -122,27 +122,17 @@ test.describe('OIDC Discovery (/.well-known/openid-configuration)', () => {
     expect(body.code_challenge_methods_supported).toContain('S256');
   });
 
-  // KNOWN ISSUE: Current discovery returns endpoints WITHOUT /api prefix
-  // (e.g. /authorize instead of /api/authorize). This will be fixed during refactor.
-  test('CURRENT BEHAVIOR: endpoints lack /api prefix (known issue to fix)', async ({ request }) => {
+  // FIXED: Discovery now returns endpoints WITH /api prefix
+  test('endpoints include /api prefix', async ({ request }) => {
     const res = await request.get('/.well-known/openid-configuration');
     const body = await res.json();
 
-    // Capture CURRENT behavior — endpoints do NOT have /api prefix
-    expect(body.authorization_endpoint).toContain('/authorize');
-    expect(body.authorization_endpoint).not.toContain('/api/authorize');
-
-    expect(body.token_endpoint).toContain('/token');
-    expect(body.token_endpoint).not.toContain('/api/token');
-
-    expect(body.userinfo_endpoint).toContain('/userinfo');
-    expect(body.userinfo_endpoint).not.toContain('/api/userinfo');
-
-    expect(body.revocation_endpoint).toContain('/revoke');
-    expect(body.revocation_endpoint).not.toContain('/api/revoke');
-
-    expect(body.introspection_endpoint).toContain('/introspect');
-    expect(body.introspection_endpoint).not.toContain('/api/introspect');
+    // Endpoints now have /api prefix
+    expect(body.authorization_endpoint).toContain('/api/authorize');
+    expect(body.token_endpoint).toContain('/api/token');
+    expect(body.userinfo_endpoint).toContain('/api/userinfo');
+    expect(body.revocation_endpoint).toContain('/api/revoke');
+    expect(body.introspection_endpoint).toContain('/api/introspect');
   });
 });
 

@@ -157,11 +157,11 @@ function createApp(deps = {}) {
     const baseUrl = config.server.baseUrl;
     res.json({
       issuer: baseUrl,
-      authorization_endpoint: `${baseUrl}/authorize`,
-      token_endpoint: `${baseUrl}/token`,
-      userinfo_endpoint: `${baseUrl}/userinfo`,
-      revocation_endpoint: `${baseUrl}/revoke`,
-      introspection_endpoint: `${baseUrl}/introspect`,
+      authorization_endpoint: `${baseUrl}/api/authorize`,
+      token_endpoint: `${baseUrl}/api/token`,
+      userinfo_endpoint: `${baseUrl}/api/userinfo`,
+      revocation_endpoint: `${baseUrl}/api/revoke`,
+      introspection_endpoint: `${baseUrl}/api/introspect`,
       response_types_supported: ['code'],
       subject_types_supported: ['public'],
       scopes_supported: ['openid', 'profile', 'email'],
