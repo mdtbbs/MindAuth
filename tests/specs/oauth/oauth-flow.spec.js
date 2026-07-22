@@ -46,7 +46,7 @@ test.describe('OAuth Authorization Code Flow', () => {
     expect(meData.username).toBe(testUsername);
 
     // Step 3: 访问 authorize 端点 - 使用 page.request 处理重定向
-    const redirectUri = encodeURIComponent('http://localhost:4000/api/auth/callback');
+    const redirectUri = encodeURIComponent('http://localhost:4500/api/auth/callback');
     const state = encodeURIComponent('/');
     const authorizeUrl = `/api/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&state=${state}`;
 
@@ -121,5 +121,78 @@ test.describe('OAuth Authorization Code Flow', () => {
       data: { session_token: 'invalid-token' }
     });
     expect(invalidRes.status()).toBe(401);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Redirect URI rejection (contract: SSRF protection)
+// ─────────────────────────────────────────────────────────────
+test.describe('Redirect URI rejection — admin client management', () => {
+  let adminCookieHeader;
+  let csrfToken;
+
+  test.beforeAll(async ({ request }) => {
+    await request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    });
+    const res = await request.post('/api/admin/login', {
+      data: { username: 'testadmin', password: 'AdminPass123' }
+    });
+    expect(res.ok()).toBeTruthy();
+    const state = await request.storageState();
+    adminCookieHeader = state.cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    csrfToken = state.cookies.find(c => c.name === 'csrf_token')?.value;
+  });
+
+  async function adminPost(request, url, data) {
+    return request.post(url, {
+      data,
+      headers: { cookie: adminCookieHeader, 'X-CSRF-Token': csrfToken }
+    });
+  }
+
+  test('rejects localhost redirect_uri on client creation', async ({ request }) => {
+    const res = await adminPost(request, '/api/admin/clients', {
+      name: 'SSRF Test Localhost',
+      redirect_uri: 'http://localhost:3000/callback'
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.message).toContain('内部网络');
+  });
+
+  test('rejects 127.0.0.1 redirect_uri on client creation', async ({ request }) => {
+    const res = await adminPost(request, '/api/admin/clients', {
+      name: 'SSRF Test 127',
+      redirect_uri: 'http://127.0.0.1:3000/callback'
+    });
+    expect(res.status()).toBe(400);
+  });
+
+  test('rejects private IP 192.168.x redirect_uri', async ({ request }) => {
+    const res = await adminPost(request, '/api/admin/clients', {
+      name: 'SSRF Test Private',
+      redirect_uri: 'http://192.168.1.1/callback'
+    });
+    expect(res.status()).toBe(400);
+  });
+
+  test('rejects invalid URL format redirect_uri', async ({ request }) => {
+    const res = await adminPost(request, '/api/admin/clients', {
+      name: 'Bad URL',
+      redirect_uri: 'not-a-valid-url'
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('格式不正确');
+  });
+
+  test('rejects non-http(s) protocol', async ({ request }) => {
+    const res = await adminPost(request, '/api/admin/clients', {
+      name: 'FTP Test',
+      redirect_uri: 'ftp://example.com/callback'
+    });
+    expect(res.status()).toBe(400);
   });
 });
