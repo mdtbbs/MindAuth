@@ -11,9 +11,10 @@ const { createRateLimiter, resetRateLimit } = require('../middleware/rateLimit')
 const { sendVerificationEmail } = require('../utils/email');
 const { maskPhone } = require('../utils/phone');
 const { logAudit } = require('../utils/auditLog');
-const { createNotification } = require('../utils/notify');
+const notificationCenter = require('../modules/notifications/notificationCenter');
 const { logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
+const challengeManager = require('../modules/challenges/challengeManager');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
@@ -30,10 +31,7 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   }
 
   // Check if any challenge questions are enabled; if so, verification is mandatory
-  const [challengeEnabledRows] = await pool.execute(
-    'SELECT COUNT(*) as count FROM challenge_questions WHERE enabled = 1'
-  );
-  const challengeRequired = challengeEnabledRows[0].count > 0;
+  const challengeRequired = await challengeManager.isChallengeRequired();
 
   if (challengeRequired && !challenge_id) {
     return res.status(400).json({
@@ -46,30 +44,20 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   // Verify challenge question if enabled
   if (challenge_id) {
     const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const sessionKey = `challenge_session:${csrfToken}`;
-    const sessionData = await client.get(sessionKey);
-
-    if (!sessionData) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_EXPIRED', message: '验证已过期，请刷新获取新题' });
+    const challengeResult = await challengeManager.verifyForRegistration(csrfToken, challenge_id, challenge_answer);
+    if (!challengeResult.success) {
+      const messageMap = {
+        CHALLENGE_EXPIRED: '验证已过期，请刷新获取新题',
+        CHALLENGE_MISMATCH: '题目不匹配',
+        CHALLENGE_NOT_FOUND: '题目不存在',
+        CHALLENGE_FAILED: '问答验证失败',
+      };
+      return res.status(400).json({
+        success: false,
+        code: challengeResult.code,
+        message: messageMap[challengeResult.code] || '问答验证失败',
+      });
     }
-
-    const session = JSON.parse(sessionData);
-    if (session.question_id !== parseInt(challenge_id)) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_MISMATCH', message: '题目不匹配' });
-    }
-
-    const [qRows] = await pool.execute(
-      'SELECT answer_hash FROM challenge_questions WHERE id = ? AND enabled = 1',
-      [challenge_id]
-    );
-    if (qRows.length === 0) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_NOT_FOUND', message: '题目不存在' });
-    }
-    const match = await bcrypt.compare(String(challenge_answer || '').trim().toLowerCase(), qRows[0].answer_hash);
-    if (!match) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_FAILED', message: '问答验证失败' });
-    }
-    await client.del(sessionKey);
   } else if (challengeRequired) {
     // Should not reach here (already handled above), but guard defensively
     return res.status(400).json({ success: false, code: 'CHALLENGE_REQUIRED', message: '请先完成验证问答' });
@@ -214,7 +202,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         await client.del(failKey);
 
         const lockMsg = newLevel >= 3 ? '永久锁定' : `锁定${newLevel === 1 ? '30分钟' : '24小时'}`;
-        await createNotification({
+        await notificationCenter.create({
           user_id: user.id, type: 'account_locked', title: '账号已被锁定',
           content: `连续登录失败次数过多，账号已被${lockMsg}`, sendEmail: true,
         });
@@ -261,7 +249,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         [user.id]
       );
       if (prevLog.length > 0 && prevLog[0].ip !== ip) {
-        await createNotification({
+        await notificationCenter.create({
           user_id: user.id, type: 'login_new_device', title: '新设备登录',
           content: `检测到新设备登录，IP: ${ip}`,
           ip_address: ip, user_agent: userAgent, sendEmail: true,

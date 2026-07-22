@@ -8,7 +8,7 @@ const { generateToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
 const { avatarUpload, bannerUpload } = require('../middleware/upload');
-const { createNotification } = require('../utils/notify');
+const notificationCenter = require('../modules/notifications/notificationCenter');
 const { getClientIp } = require('../utils/request');
 const { getUserAuditLogs, logUserAudit } = require('../utils/userAudit');
 const path = require('path');
@@ -79,7 +79,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     await sessionManager.revokeAllUserSessions(user.id);
 
     // Password change notification
-    await createNotification({
+    await notificationCenter.create({
       user_id: user.id, type: 'password_changed', title: '密码已修改',
       content: '您的登录密码已被修改，请重新登录。',
       ip_address: getClientIp(req), user_agent: req.headers['user-agent'],
