@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const { pool } = require('../../db');
-const { generateToken } = require('../../utils/token');
 const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../../utils/validation');
 const { timingSafeCompare } = require('../../utils/crypto');
 const { getClientIp } = require('../../utils/request');
@@ -98,8 +97,8 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
 
     await resetRateLimit(getClientIp(req), 'admin');
 
-    const token = generateToken();
-    await createAdminSession(token, user.id);
+    const sessionResult = await createAdminSession(null, user.id);
+    const token = sessionResult.token;
 
     res.cookie('admin_session', token, {
       httpOnly: true,

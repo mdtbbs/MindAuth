@@ -9,6 +9,7 @@ const { sendPasswordResetEmail } = require('../utils/email');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const { logUserAudit } = require('../utils/userAudit');
 const { getClientIp } = require('../utils/request');
+const sessionManager = require('../modules/sessions/sessionManager');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const RESET_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -92,26 +93,13 @@ router.post('/reset', async (req, res) => {
     // Delete token (single-use)
     await client.del(`reset:${token}`);
 
-    // Clear all sessions (force re-login)
-    await pool.execute('UPDATE users SET session_token = NULL WHERE id = ?', [parsed.user_id]);
-
     // Security: Revoke all OAuth refresh tokens for this user.
     // Otherwise an OAuth client holding a refresh token could keep issuing
     // new access tokens even after the password was reset.
     await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [parsed.user_id]);
 
-    // Collect active session tokens and clear their Redis caches, so other
-    // devices get kicked out immediately instead of after 24h cache TTL.
-    const [activeSessionRows] = await pool.execute(
-      'SELECT session_token FROM user_sessions WHERE user_id = ?',
-      [parsed.user_id]
-    );
-    if (activeSessionRows.length > 0) {
-      await Promise.all(
-        activeSessionRows.map((r) => client.del(`session:${r.session_token}`).catch(() => {}))
-      );
-    }
-    await pool.execute('DELETE FROM user_sessions WHERE user_id = ?', [parsed.user_id]);
+    // Revoke all user sessions via sessionManager (clears MySQL, Redis, index sets)
+    await sessionManager.revokeAllUserSessions(parsed.user_id);
 
     // Best-effort: invalidate cached access tokens for this user in Redis.
     // Access tokens are keyed by token (not user_id), so we must scan.

@@ -1,31 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db');
-const { client } = require('../redis');
-const bcrypt = require('bcrypt');
-
-const CHALLENGE_SESSION_TTL = 30 * 60; // 30 minutes
+const challengeManager = require('../modules/challenges/challengeManager');
 
 // GET /challenge/random - Get a random challenge question
 router.get('/random', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
-      'SELECT id, question FROM challenge_questions WHERE enabled = 1 ORDER BY RAND() LIMIT 1'
-    );
-    if (rows.length === 0) {
+    const csrfToken = req.cookies.csrf_token || 'anonymous';
+    const result = await challengeManager.getRandomChallenge(csrfToken);
+
+    if (!result.challenge_id) {
       return res.json({ success: true, challenge_id: null, question: null, message: '暂无问答题' });
     }
 
-    const challenge = rows[0];
-    const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const sessionKey = `challenge_session:${csrfToken}`;
-
-    await client.setEx(sessionKey, CHALLENGE_SESSION_TTL, JSON.stringify({
-      question_id: challenge.id,
-      attempts: 0,
-    }));
-
-    res.json({ success: true, challenge_id: challenge.id, question: challenge.question });
+    res.json({ success: true, challenge_id: result.challenge_id, question: result.question });
   } catch (err) {
     console.error('[Challenge] random error:', err);
     res.status(500).json({ success: false, message: '获取验证问题失败' });
@@ -41,61 +28,40 @@ router.post('/verify', async (req, res) => {
     }
 
     const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const sessionKey = `challenge_session:${csrfToken}`;
-    const sessionData = await client.get(sessionKey);
+    const result = await challengeManager.verifyChallengeAnswer(csrfToken, challenge_id, challenge_answer);
 
-    if (!sessionData) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_EXPIRED', message: '验证已过期，请刷新获取新题' });
+    if (result.error) {
+      const statusMap = {
+        CHALLENGE_EXPIRED: 400,
+        CHALLENGE_MISMATCH: 400,
+        CHALLENGE_NOT_FOUND: 400,
+        CHALLENGE_FAILED: 400,
+      };
+      const messageMap = {
+        CHALLENGE_EXPIRED: '验证已过期，请刷新获取新题',
+        CHALLENGE_MISMATCH: '题目不匹配',
+        CHALLENGE_NOT_FOUND: '题目不存在',
+        CHALLENGE_FAILED: '问答验证失败次数过多，请稍后再试',
+      };
+      return res.status(statusMap[result.error] || 400).json({
+        success: false,
+        code: result.error,
+        message: messageMap[result.error] || '验证失败',
+      });
     }
 
-    const session = JSON.parse(sessionData);
-    if (session.question_id !== parseInt(challenge_id)) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_MISMATCH', message: '题目不匹配' });
-    }
-
-    const [rows] = await pool.execute(
-      'SELECT answer_hash FROM challenge_questions WHERE id = ? AND enabled = 1',
-      [challenge_id]
-    );
-    if (rows.length === 0) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_NOT_FOUND', message: '题目不存在' });
-    }
-
-    const match = await bcrypt.compare(String(challenge_answer).trim().toLowerCase(), rows[0].answer_hash);
-
-    if (match) {
-      await client.del(sessionKey);
+    if (result.verified) {
       return res.json({ success: true, verified: true });
     }
 
-    // Wrong answer
-    session.attempts += 1;
-    if (session.attempts >= 3) {
-      await client.del(sessionKey);
-      return res.status(400).json({ success: false, code: 'CHALLENGE_FAILED', message: '问答验证失败次数过多，请稍后再试' });
-    }
-
-    await client.setEx(sessionKey, CHALLENGE_SESSION_TTL, JSON.stringify(session));
-
-    // Give a new question
-    const [newRows] = await pool.execute(
-      'SELECT id, question FROM challenge_questions WHERE enabled = 1 AND id <> ? ORDER BY RAND() LIMIT 1',
-      [challenge_id]
-    );
-    if (newRows.length === 0) {
-      return res.status(400).json({ success: false, code: 'CHALLENGE_FAILED', message: '问答验证失败' });
-    }
-
-    session.question_id = newRows[0].id;
-    await client.setEx(sessionKey, CHALLENGE_SESSION_TTL, JSON.stringify(session));
-
+    // Wrong answer — return new question
     res.json({
       success: false,
-      code: 'WRONG_ANSWER',
+      code: result.code,
       message: '答案错误，请重试',
-      attempts_left: 3 - session.attempts,
-      new_challenge_id: newRows[0].id,
-      new_question: newRows[0].question,
+      attempts_left: result.attemptsLeft,
+      new_challenge_id: result.newChallenge.challenge_id,
+      new_question: result.newChallenge.question,
     });
   } catch (err) {
     console.error('[Challenge] verify error:', err);

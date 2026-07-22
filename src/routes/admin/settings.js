@@ -6,6 +6,7 @@ const { requireAdmin, requireAdminPermission } = require('../../middleware/requi
 const { getClientIp } = require('../../utils/request');
 const { logAudit } = require('../../utils/auditLog');
 const config = require('../../config');
+const runtimeConfig = require('../../modules/config/runtimeConfig');
 
 // GET /stats - Dashboard statistics
 router.get('/stats', requireAdmin, async (req, res) => {
@@ -140,6 +141,7 @@ router.put('/email-config', requireAdmin, requireAdminPermission('email_config.w
     `, [host, port, user, finalPassword, from, secure ? 1 : 0]);
 
     await logAudit({ admin_id: req.adminUser.id, action: 'config.email', target_type: 'config', ip_address: getClientIp(req) });
+    runtimeConfig.invalidate();
     res.json({ success: true, message: '配置已保存' });
   } catch (err) {
     console.error('Update email config error:', err);
@@ -233,6 +235,7 @@ router.put('/sms-config', requireAdmin, requireAdminPermission('sms_config.write
     ]);
 
     await logAudit({ admin_id: req.adminUser.id, action: 'config.sms', target_type: 'config', ip_address: getClientIp(req) });
+    runtimeConfig.invalidate();
     res.json({ success: true, message: '短信配置已保存' });
   } catch (err) {
     console.error('Update SMS config error:', err);
@@ -291,7 +294,7 @@ router.put('/config/:key', requireAdmin, requireAdminPermission('config.write'),
     const { key } = req.params;
     const { value } = req.body;
 
-    await pool.execute('UPDATE system_config SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?', [value, key]);
+    await runtimeConfig.set(key, value);
 
     await logAudit({ admin_id: req.adminUser.id, action: 'config.system', target_type: 'config', target_id: 0, details: { key, value }, ip_address: getClientIp(req) });
     res.json({ success: true, message: '配置已更新' });
