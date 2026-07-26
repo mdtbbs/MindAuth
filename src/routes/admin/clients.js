@@ -46,6 +46,29 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
   }
 });
 
+// POST /clients/:id/rotate-secret - Rotate client secret
+// Old secret is invalidated immediately; new secret is returned exactly once.
+// Audit is written inside clientRegistry.rotateSecret.
+router.post('/:id/rotate-secret', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const client = await clientRegistry.getClient(id);
+    if (!client) {
+      return res.status(404).json({ success: false, message: '客户端不存在' });
+    }
+
+    const result = await clientRegistry.rotateSecret(
+      id,
+      { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
+    );
+
+    res.json({ success: true, client_id: client.client_id, client_secret: result.client_secret });
+  } catch (err) {
+    console.error('Rotate client secret error:', err);
+    res.status(500).json({ success: false, message: '轮换密钥失败' });
+  }
+});
+
 // DELETE /clients/:id - Delete client
 router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {

@@ -95,11 +95,16 @@ function IpBansSection() {
   useEffect(() => { loadBans(); }, [loadBans]);
 
   async function handleAdd() {
-    if (!ip.trim()) { setFormError('IP 地址必填'); return; }
+    const trimmedIp = ip.trim();
+    if (!trimmedIp) { setFormError('IP 地址必填'); return; }
     const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
-    if (!ipv4Re.test(ip.trim())) { setFormError('IP 地址格式无效'); return; }
-    if (cidrPrefix && (isNaN(Number(cidrPrefix)) || Number(cidrPrefix) < 0 || Number(cidrPrefix) > 32)) {
-      setFormError('CIDR 前缀须为 0-32'); return;
+    // Loose IPv6 shape check (hex groups / '::' / optional v4-mapped tail); server does strict validation
+    const ipv6Re = /^[0-9a-fA-F:]*:[0-9a-fA-F:]*(:(\d{1,3}\.){3}\d{1,3})?$/;
+    const isIpv6 = trimmedIp.includes(':') && ipv6Re.test(trimmedIp);
+    if (!ipv4Re.test(trimmedIp) && !isIpv6) { setFormError('IP 地址格式无效（支持 IPv4 / IPv6）'); return; }
+    const maxPrefix = isIpv6 ? 128 : 32;
+    if (cidrPrefix && (isNaN(Number(cidrPrefix)) || Number(cidrPrefix) < 0 || Number(cidrPrefix) > maxPrefix)) {
+      setFormError(`CIDR 前缀须为 0-${maxPrefix}`); return;
     }
 
     setFormLoading(true);
@@ -191,8 +196,8 @@ function IpBansSection() {
         }
       >
         <div className="stack">
-          <TextField label="IP 地址" value={ip} onChange={(e) => setIp(e.target.value)} error={formError} placeholder="例如: 192.168.1.1" />
-          <TextField label="CIDR 前缀 (可选)" value={cidrPrefix} onChange={(e) => setCidrPrefix(e.target.value)} hint="0-32，留空表示单个 IP" placeholder="例如: 24" />
+          <TextField label="IP 地址" value={ip} onChange={(e) => setIp(e.target.value)} error={formError} placeholder="例如: 192.168.1.1 或 2001:db8::1" />
+          <TextField label="CIDR 前缀 (可选)" value={cidrPrefix} onChange={(e) => setCidrPrefix(e.target.value)} hint="IPv4 0-32 / IPv6 0-128，留空表示单个 IP" placeholder="例如: 24" />
           <TextField label="原因 (可选)" value={banReason} onChange={(e) => setBanReason(e.target.value)} placeholder="封禁原因" />
         </div>
       </Dialog>

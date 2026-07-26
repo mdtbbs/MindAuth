@@ -19,7 +19,9 @@ export function AdminClientsPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editClient, setEditClient] = useState<AdminOAuthClient | null>(null);
   const [deleteClient, setDeleteClient] = useState<AdminOAuthClient | null>(null);
+  const [rotateClient, setRotateClient] = useState<AdminOAuthClient | null>(null);
   const [createdSecret, setCreatedSecret] = useState<AdminCreatedClient | null>(null);
+  const [secretDialogTitle, setSecretDialogTitle] = useState('客户端创建成功');
 
   // Form state
   const [name, setName] = useState('');
@@ -85,6 +87,7 @@ export function AdminClientsPage() {
         redirect_uri: redirectUri.trim(),
         require_pkce: requirePkce,
       });
+      setSecretDialogTitle('客户端创建成功');
       setCreatedSecret(res);
       setCreateDialogOpen(false);
       resetForm();
@@ -140,6 +143,23 @@ export function AdminClientsPage() {
       toast('success', '客户端已删除');
     } catch {
       toast('error', '删除失败');
+    } finally {
+      setFormLoading(false);
+    }
+  }
+
+  async function handleRotate() {
+    if (!rotateClient) return;
+
+    setFormLoading(true);
+    try {
+      const res = await api.post<AdminCreatedClient>(`/api/admin/clients/${rotateClient.id}/rotate-secret`);
+      setRotateClient(null);
+      setSecretDialogTitle('密钥轮换成功');
+      setCreatedSecret(res);
+      toast('success', '密钥已轮换');
+    } catch {
+      toast('error', '轮换密钥失败');
     } finally {
       setFormLoading(false);
     }
@@ -219,6 +239,7 @@ export function AdminClientsPage() {
                 render: (c) => hasPermission('clients.write') ? (
                   <div className="cluster" style={{ gap: 'var(--space-1)' }}>
                     <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>编辑</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRotateClient(c)}>轮换密钥</Button>
                     <Button size="sm" variant="danger" onClick={() => setDeleteClient(c)}>删除</Button>
                   </div>
                 ) : <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>只读</span>,
@@ -326,11 +347,29 @@ export function AdminClientsPage() {
         <p>确认删除客户端 <strong>{deleteClient?.name}</strong>? 所有使用该客户端的授权将失效。</p>
       </Dialog>
 
+      {/* Rotate Secret Confirm Dialog */}
+      <Dialog
+        open={!!rotateClient}
+        onClose={() => setRotateClient(null)}
+        title="轮换客户端密钥"
+        footer={
+          <div className="cluster cluster--end">
+            <Button variant="secondary" onClick={() => setRotateClient(null)}>取消</Button>
+            <Button variant="danger" onClick={handleRotate} loading={formLoading}>确认轮换</Button>
+          </div>
+        }
+      >
+        <p>
+          确认为客户端 <strong>{rotateClient?.name}</strong> 生成新的 Client Secret?
+          旧密钥将<strong>立即失效</strong>，使用旧密钥的应用需要更新配置后才能继续换取令牌。
+        </p>
+      </Dialog>
+
       {/* One-time Secret Display */}
       <Dialog
         open={!!createdSecret}
         onClose={() => setCreatedSecret(null)}
-        title="客户端创建成功"
+        title={secretDialogTitle}
         footer={
           <Button onClick={() => setCreatedSecret(null)}>我已保存，关闭</Button>
         }

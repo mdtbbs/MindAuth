@@ -24,7 +24,7 @@ node scripts/check-redis.js    # 查看 Redis 中的 ratelimit:* 键（调试限
 npm run test:verify-routing    # 不依赖 MySQL/Redis，验证 Express 路由/SPA 静态服务
 ```
 
-> `scripts/check-servers.js` 与 `scripts/migrate-to-mysql.js` 分别是 EasyManager 遗留脚本和一次性 SQLite→MySQL 迁移脚本，新人无需使用。
+> `scripts/migrate-to-mysql.js` 是一次性 SQLite→MySQL 迁移脚本，新人无需使用。
 
 ## 首次启动
 

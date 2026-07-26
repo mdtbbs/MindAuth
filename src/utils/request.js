@@ -2,6 +2,7 @@
  * Request utility functions
  */
 
+const net = require('net');
 const config = require('../config');
 
 // Cloudflare IP ranges (as of 2024)
@@ -82,6 +83,41 @@ function isValidIpv4(ip) {
 }
 
 /**
+ * Normalize and validate an IP candidate from a proxy header.
+ * Accepts IPv4 and IPv6; strips ports and IPv6 brackets:
+ *   '1.2.3.4'            → '1.2.3.4'
+ *   '1.2.3.4:5678'       → '1.2.3.4'
+ *   '2001:db8::1'        → '2001:db8::1'
+ *   '[2001:db8::1]'      → '2001:db8::1'
+ *   '[2001:db8::1]:1234' → '2001:db8::1'
+ *   '::ffff:1.2.3.4'     → '1.2.3.4' (IPv6-mapped IPv4 normalized)
+ *
+ * @param {string} value - Raw header value (single IP entry)
+ * @returns {string|null} Normalized IP, or null if invalid
+ */
+function normalizeIpCandidate(value) {
+  if (!value || typeof value !== 'string') return null;
+  let candidate = value.trim();
+
+  // Bracketed IPv6, optionally with port: [2001:db8::1]:1234
+  const bracketMatch = /^\[([^\]]+)\](?::\d+)?$/.exec(candidate);
+  if (bracketMatch) {
+    candidate = bracketMatch[1];
+  } else if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(candidate)) {
+    // IPv4 with port: 1.2.3.4:5678
+    candidate = candidate.split(':')[0];
+  }
+
+  // Normalize IPv6-mapped IPv4 addresses (::ffff:1.2.3.4)
+  const unmapped = candidate.replace(/^::ffff:/i, '');
+  if (unmapped !== candidate && net.isIP(unmapped) === 4) {
+    candidate = unmapped;
+  }
+
+  return net.isIP(candidate) !== 0 ? candidate : null;
+}
+
+/**
  * Check if request comes from a trusted proxy
  * @param {Express.Request} req - Express request object
  * @returns {boolean} True if request is from trusted proxy
@@ -125,23 +161,23 @@ function getClientIp(req) {
   // Only read proxy headers if request comes from trusted proxy
   if (isTrustedProxy(req)) {
     // Cloudflare specific header (highest priority)
-    const cfIp = req.headers['cf-connecting-ip'];
-    if (cfIp && isValidIpv4(cfIp.trim())) {
-      return cfIp.trim();
+    const cfIp = normalizeIpCandidate(req.headers['cf-connecting-ip']);
+    if (cfIp) {
+      return cfIp;
     }
 
     // X-Real-IP header (nginx, some proxies)
-    const realIp = req.headers['x-real-ip'];
-    if (realIp && isValidIpv4(realIp.trim())) {
-      return realIp.trim();
+    const realIp = normalizeIpCandidate(req.headers['x-real-ip']);
+    if (realIp) {
+      return realIp;
     }
 
     // X-Forwarded-For header (standard proxy header)
     const forwardedFor = req.headers['x-forwarded-for'];
     if (forwardedFor) {
       // Take first IP in the chain (original client)
-      const firstIp = forwardedFor.split(',')[0].trim();
-      if (isValidIpv4(firstIp)) {
+      const firstIp = normalizeIpCandidate(forwardedFor.split(',')[0]);
+      if (firstIp) {
         return firstIp;
       }
     }
@@ -156,4 +192,4 @@ function getClientIp(req) {
   return cleanIp || 'unknown';
 }
 
-module.exports = { getClientIp, isValidIpv4, isTrustedProxy };
+module.exports = { getClientIp, isValidIpv4, isTrustedProxy, normalizeIpCandidate };

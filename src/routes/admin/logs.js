@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../../db');
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
+const oauthIssuer = require('../../modules/oauth/oauthIssuer');
 
 // GET /authorizations - Get all authorization records
 router.get('/authorizations', requireAdmin, requireAdminPermission('authorizations.read'), async (req, res) => {
@@ -27,7 +28,9 @@ router.get('/authorizations', requireAdmin, requireAdminPermission('authorizatio
     query += ' ORDER BY a.last_used_at DESC LIMIT ? OFFSET ?';
     params.push(limitNum, offset);
 
-    const [authorizations] = await pool.execute(query, params);
+    // pool.query (not execute): MySQL 8 rejects numeric LIMIT/OFFSET as
+    // prepared-statement params (ER_WRONG_ARGUMENTS); same pattern as ipBans.js
+    const [authorizations] = await pool.query(query, params);
 
     res.json({ success: true, authorizations });
   } catch (err) {
@@ -37,10 +40,26 @@ router.get('/authorizations', requireAdmin, requireAdminPermission('authorizatio
 });
 
 // DELETE /authorizations/:id - Revoke authorization
+// Also revokes all issued access tokens (Redis) and refresh tokens (MySQL)
+// for the user/client pair, via oauthIssuer.revokeAuthorization.
 router.delete('/authorizations/:id', requireAdmin, requireAdminPermission('users.write'), async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.execute('DELETE FROM authorizations WHERE id = ?', [id]);
+
+    // authorizations.client_id stores the public client_id string (see 001 schema)
+    const [rows] = await pool.execute(
+      'SELECT user_id, client_id FROM authorizations WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: '授权记录不存在' });
+    }
+
+    await oauthIssuer.revokeAuthorization({
+      userId: rows[0].user_id,
+      clientId: rows[0].client_id,
+    });
+
     res.json({ success: true, message: '授权已撤销' });
   } catch (err) {
     console.error('Delete authorization error:', err);
@@ -80,7 +99,9 @@ router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'
     query += ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?';
     params.push(limitNum, offset);
 
-    const [logs] = await pool.execute(query, params);
+    // pool.query (not execute): MySQL 8 rejects numeric LIMIT/OFFSET as
+    // prepared-statement params (ER_WRONG_ARGUMENTS); same pattern as ipBans.js
+    const [logs] = await pool.query(query, params);
 
     res.json({ success: true, logs });
   } catch (err) {

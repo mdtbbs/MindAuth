@@ -1,4 +1,5 @@
 const express = require('express');
+const net = require('net');
 const router = express.Router();
 const { pool } = require('../../db');
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
@@ -6,7 +7,28 @@ const { getClientIp } = require('../../utils/request');
 const ipBanMatcher = require('../../modules/security/ipBanMatcher');
 const auditWriter = require('../../modules/audit/auditWriter');
 
-const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+/**
+ * Validate a ban target (IPv4 or IPv6 + optional CIDR prefix).
+ * Prefix range is family-dependent: 0-32 for IPv4, 0-128 for IPv6.
+ *
+ * @param {string} ip
+ * @param {number|string|null|undefined} cidrPrefix
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateBanTarget(ip, cidrPrefix) {
+  const family = typeof ip === 'string' ? net.isIP(ip) : 0;
+  if (family === 0) {
+    return { valid: false, error: 'IP 地址格式无效' };
+  }
+  if (cidrPrefix !== undefined && cidrPrefix !== null) {
+    const maxPrefix = family === 6 ? 128 : 32;
+    const prefix = parseInt(cidrPrefix);
+    if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+      return { valid: false, error: `CIDR 前缀须为 0-${maxPrefix}` };
+    }
+  }
+  return { valid: true };
+}
 
 router.get('/', requireAdmin, requireAdminPermission('ip_bans.read'), async (req, res) => {
   try {
@@ -35,14 +57,9 @@ router.post('/', requireAdmin, requireAdminPermission('ip_bans.write'), async (r
   try {
     const { ip, cidr_prefix, reason, expires_at } = req.body;
 
-    if (!ip || !IPV4_RE.test(ip)) {
-      return res.status(400).json({ success: false, message: 'IP 地址格式无效' });
-    }
-    if (cidr_prefix !== undefined && cidr_prefix !== null) {
-      const prefix = parseInt(cidr_prefix);
-      if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
-        return res.status(400).json({ success: false, message: 'CIDR 前缀须为 0-32' });
-      }
+    const validation = validateBanTarget(ip, cidr_prefix);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, message: validation.error });
     }
 
     const [result] = await pool.execute(
@@ -110,3 +127,5 @@ router.delete('/:id', requireAdmin, requireAdminPermission('ip_bans.write'), asy
 });
 
 module.exports = router;
+// Exposed for unit testing (pure validation, no DB/Redis)
+module.exports._validateBanTarget = validateBanTarget;

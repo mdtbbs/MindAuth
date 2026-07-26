@@ -13,7 +13,6 @@
 | [check-redis.js](../../scripts/check-redis.js) | 列出所有 `ratelimit:*` 限流计数器 | Redis |
 | [test-redis.js](../../scripts/test-redis.js) | 三段式 Redis 连接诊断 | Redis |
 | [verify-routing.js](../../scripts/verify-routing.js) | 验证 Express 路由/静态资源（无需 DB/Redis） | 无（需先 `npm run build`） |
-| [check-servers.js](../../scripts/check-servers.js) | **遗留脚本，已失效** | — |
 
 ### check-redis.js
 逐个打印 `ratelimit:*` 键的当前计数与剩余 TTL（如 `ratelimit:login:1.2.3.4: value=5, ttl=280s`）。排查"用户被 429 限流"时先跑它，确认哪个 IP 命中了哪个限流前缀。
@@ -23,9 +22,6 @@
 
 ### verify-routing.js
 以 `USE_MEMORY_REDIS=1` + 假 DB 池在端口 14099 启动应用，验证用户 SPA、管理 SPA、`/api/health`、Vite 资源缓存头、OIDC Discovery 等 13 组路由。输出 `✔/✖` 与总计，失败时退出码 1。适合部署后快速验证构建产物完整。
-
-### check-servers.js
-查询 `servers` / `user_quotas` 表（属 EasyManager，MindAuth 库中不存在），且 `require('./src/db/mysql')` 路径已不存在。**勿使用**，仅存档。
 
 ## 常见故障
 
