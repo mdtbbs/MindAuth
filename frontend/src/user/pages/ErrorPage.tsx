@@ -19,9 +19,6 @@ export function ErrorPage({ status = 404, title, message }: ErrorPageProps) {
     <AuthShell
       title={title ?? defaultTitle}
       description="您仍然可以返回登录页或继续访问账户中心的主要入口。"
-      eyebrow="状态提示"
-      heroTitle="统一入口仍然可用，问题仅限当前页面。"
-      heroDescription="错误页也沿用同一套账户中心风格，避免在恢复路径上出现割裂体验。"
       footer={
         <>
           <Link to="/login" className="inline-link">

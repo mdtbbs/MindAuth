@@ -53,9 +53,6 @@ export function OAuthAuthorizePage() {
     <AuthShell
       title="应用授权"
       description={decodedClientName ? `正在准备连接 ${decodedClientName}。` : '正在准备应用授权请求。'}
-      eyebrow="OAuth 授权流程"
-      heroTitle="授权上下文已保留，验证后将自动继续。"
-      heroDescription="该页面仅负责衔接登录与授权，不会改变现有 OAuth 流程、回调地址或参数透传逻辑。"
       footer={
         <>
           <Link to="/login" className="inline-link">

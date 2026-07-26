@@ -172,6 +172,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/users/:id/ban` | POST/DELETE | Ban/unban user |
 | `/users/:id/mute` | POST | Mute user |
 | `/users/:id/unlock` | POST | Unlock locked account |
+| `/auth-background` | POST/DELETE | Upload/reset auth page background image (config.write) |
 
 ### User Endpoints (`/api`)
 | Endpoint | Method | Description | Auth |
@@ -188,6 +189,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/notifications/read-all` | PATCH | Mark all notifications as read | Session |
 | `/health` | GET | Health check (MySQL + Redis) | None |
 | `/csrf-token` | GET | Get CSRF token | None |
+| `/public/auth-page-config` | GET | Auth page config (custom background URL) | None |
 
 ## Database Tables
 
@@ -201,7 +203,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `refresh_tokens` | Long-lived tokens | user_id, client_id, token, expires_at, revoked |
 | `login_logs` | Login history | user_id, ip, device, login_type (web/oauth) |
 | `email_config` | SMTP settings | host, port, user, password, from (single row id=1) |
-| `system_config` | Runtime config | key, value (session_lifetime, password_rules, etc.) |
+| `system_config` | Runtime config | key, value (session_lifetime, password_rules, auth_background_url, etc.) |
 | `user_sessions` | Active session tracking | user_id, session_token (SHA-256 hash), ip_address, device_info, expires_at, last_active_at |
 | `challenge_questions` | Challenge Q&A bank | question, answer_hash (bcrypt), enabled |
 | `ip_bans` | IP blacklist | ip_address, cidr_prefix, reason, expires_at |
@@ -211,7 +213,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `admin_audit_logs` | Admin action audit trail | admin_id, action, target_type, target_id, details (JSON) |
 | `sms_audit_logs` | SMS audit trail | user_id, action, phone_masked, success, code, ip_address |
 
-Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`.
+Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`. Migration `003_auth_background_config.sql` seeds the `auth_background_url` key (`runtimeConfig.set` is UPDATE-only, so config keys must be seeded by migration).
 
 ### Redis Keys
 
@@ -267,7 +269,8 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - Multer file upload
 - Avatars: 2MB (JPEG/PNG/GIF/WebP)
 - Banners: 5MB
-- Path: `public/uploads/{avatars,banners}/`
+- Auth page backgrounds: 5MB (JPEG/PNG/WebP, no GIF; admin-uploaded)
+- Path: `public/uploads/{avatars,banners,backgrounds}/`
 
 ## Utilities (`src/utils/`)
 

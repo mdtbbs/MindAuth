@@ -59,9 +59,6 @@ export function VerifyEmailPage() {
     <AuthShell
       title="邮箱验证"
       description="验证状态会实时显示在当前页面。"
-      eyebrow="账户验证"
-      heroTitle="让您的账户联系信息保持可信。"
-      heroDescription="完成邮箱验证后，账户恢复、通知送达和安全确认流程都会更加顺畅。"
       footer={
         <>
           <Link to="/dashboard" className="inline-link">

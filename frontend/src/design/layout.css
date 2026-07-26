@@ -135,12 +135,15 @@
   color: var(--color-text-secondary);
 }
 
+/* Auth 页整屏背景：默认为浅蓝方格网格；管理端可上传自定义背景图
+   （AuthShell 注入内联 background-image 并加 .auth-shell--custom-bg） */
 .page--auth {
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at top left, rgba(255, 107, 53, 0.14), transparent 28%),
-    radial-gradient(circle at right center, rgba(37, 99, 235, 0.1), transparent 24%),
-    var(--color-bg);
+  background-color: var(--auth-bg);
+  background-image:
+    linear-gradient(var(--auth-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--auth-grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 .auth-shell {
@@ -149,10 +152,27 @@
   flex-direction: column;
 }
 
+.auth-shell--custom-bg {
+  position: relative;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 自定义背景图上的可读性遮罩；header/main 定位在遮罩之上 */
+.auth-shell--custom-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--auth-scrim);
+  pointer-events: none;
+}
+
 .auth-shell__header {
   height: var(--header-height);
   display: flex;
   align-items: center;
+  position: relative;
 }
 
 .auth-shell__header-inner {
@@ -171,85 +191,22 @@
   display: flex;
   align-items: center;
   padding: var(--space-6) var(--space-4) var(--space-8);
+  position: relative;
 }
 
+/* 居中卡片布局（仿阿里云）：单列、卡片居中 */
 .auth-shell__content {
   width: 100%;
-  max-width: var(--max-width-auth);
   margin-inline: auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(22rem, 28rem);
-  gap: var(--space-8);
-  align-items: stretch;
-}
-
-.auth-shell__hero {
   display: flex;
-  flex-direction: column;
   justify-content: center;
-  gap: var(--space-6);
-  padding: var(--space-8);
-  border-radius: var(--radius-2xl);
-  background: var(--color-glass-bg);
-  border: 1px solid var(--color-glass-border);
-  box-shadow: var(--shadow-lg);
-  backdrop-filter: blur(16px);
-}
-
-.auth-shell__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  min-height: 2rem;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-full);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.auth-shell__title {
-  font-size: clamp(2rem, 4vw, 3.5rem);
-  line-height: 1.08;
-  font-weight: var(--weight-bold);
-  letter-spacing: -0.03em;
-}
-
-.auth-shell__description {
-  max-width: 36rem;
-  font-size: var(--text-base);
-  line-height: var(--leading-relaxed);
-  color: var(--color-text-secondary);
-}
-
-.auth-shell__features {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-
-.auth-shell__feature {
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--color-glass-bg-strong);
-  border: 1px solid var(--color-border-soft);
-}
-
-.auth-shell__feature-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-}
-
-.auth-shell__feature-text {
-  margin-top: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
 }
 
 .auth-shell__panel {
   display: flex;
   align-items: center;
+  width: 100%;
+  max-width: 27.5rem;
 }
 
 .auth-shell__panel .card {
@@ -288,15 +245,6 @@
   justify-content: center;
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
-}
-
-.auth-panel__meta {
-  margin-top: var(--space-5);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--color-border-soft);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  text-align: center;
 }
 
 .account-shell {
@@ -751,7 +699,6 @@
 .text-secondary { color: var(--color-text-secondary); }
 
 @media (max-width: 1100px) {
-  .auth-shell__content,
   .account-shell__layout,
   .settings-layout,
   .account-card-grid,
@@ -778,20 +725,6 @@
 }
 
 @media (max-width: 900px) {
-  .auth-shell__content {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-shell__hero {
-    order: 2;
-    padding: var(--space-6);
-  }
-
-  .auth-shell__panel {
-    order: 1;
-  }
-
-  .auth-shell__features,
   .settings-meta-grid {
     grid-template-columns: 1fr;
   }
@@ -840,12 +773,10 @@
   }
 
   .auth-shell__panel .card,
-  .auth-shell__hero,
   .account-page__hero {
     padding: var(--space-5);
   }
 
-  .auth-shell__title,
   .account-page__hero-title {
     font-size: var(--text-2xl);
   }

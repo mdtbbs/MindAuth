@@ -172,6 +172,7 @@ function createApp(deps = {}) {
   app.use('/api/challenge', challengeRoutes);
   app.use('/api/sessions', sessionsRoutes);
   app.use('/api/notifications', notificationsRoutes);
+  app.use('/api/public', require('./routes/public'));
 
   // OIDC Discovery (RFC 8414 / OpenID Connect Discovery 1.0).
   // Exposes endpoint metadata so third-party clients can auto-discover MindAuth
@@ -298,9 +299,9 @@ function createApp(deps = {}) {
     // Handle multer file size errors
     if (err.code === 'LIMIT_FILE_SIZE') {
       // Determine which upload limit based on route
-      const isAvatar = req.path.includes('/avatar');
       const isBanner = req.path.includes('/banner');
-      const limit = isBanner ? '5MB' : '2MB';
+      const isBackground = req.path.includes('/auth-background');
+      const limit = (isBanner || isBackground) ? '5MB' : '2MB';
       return res.status(400).json({ success: false, message: `图片大小不能超过 ${limit}` });
     }
 

@@ -101,11 +101,6 @@ export function LoginPage() {
     <AuthShell
       title={title}
       description={description}
-      eyebrow={isOAuthFlow ? 'OAuth 应用授权' : 'MindAuth 统一登录'}
-      heroTitle={isOAuthFlow ? '先完成账户验证，再继续应用授权。' : '欢迎回来，集中管理您的账户与安全状态。'}
-      heroDescription={isOAuthFlow
-        ? '当前授权请求会保留原始参数，登录成功后将自动返回应用继续授权。'
-        : '统一的账号入口，用于登录、查看通知、管理安全设置以及维护授权应用。'}
       footer={
         <>
           <Link to={registerHref} className="inline-link">

@@ -36,9 +36,6 @@ export function ResetRequestPage() {
     <AuthShell
       title="找回密码"
       description="输入您注册时使用的邮箱，我们会发送重置链接。"
-      eyebrow="账户恢复"
-      heroTitle="快速恢复账户访问权限。"
-      heroDescription="重置流程不会改变现有账户数据，仅用于重新设置登录密码。请优先使用您已验证的邮箱地址。"
       footer={
         <Link to="/login" className="inline-link">
           返回登录

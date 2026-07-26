@@ -156,11 +156,6 @@ export function RegisterPage() {
       description={clientId && decodedClientName
         ? `创建账户后将继续跳转到 ${decodedClientName} 完成授权。`
         : '注册后即可统一管理账户资料、会话状态和授权应用。'}
-      eyebrow={clientId ? 'OAuth 注册授权' : 'MindAuth 账户注册'}
-      heroTitle={clientId ? '先创建账户，再继续应用授权。' : '创建一个可靠的统一账户入口。'}
-      heroDescription={clientId
-        ? '注册完成后会自动登录，并保留当前 OAuth 上下文继续返回应用。'
-        : '统一入口用于管理邮箱验证、会话记录、通知与安全能力，适配社区与开发者场景。'}
       footer={
         <Link to="/login" className="inline-link">
           已有账号？登录

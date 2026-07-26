@@ -13,6 +13,8 @@ const testSmsLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 10 * 60 * 1
 const config = require('../../config');
 const runtimeConfig = require('../../modules/config/runtimeConfig');
 const auditWriter = require('../../modules/audit/auditWriter');
+const { backgroundUpload } = require('../../middleware/upload');
+const { tryRemovePublicFile } = require('../../utils/publicFiles');
 
 // GET /stats - Dashboard statistics
 router.get('/stats', requireAdmin, async (req, res) => {
@@ -289,6 +291,45 @@ router.get('/config', requireAdmin, requireAdminPermission('config.read'), async
   } catch (err) {
     console.error('Get config error:', err);
     res.status(500).json({ success: false, message: '获取配置失败' });
+  }
+});
+
+// POST /auth-background - Upload the auth page custom background image
+router.post('/auth-background', requireAdmin, requireAdminPermission('config.write'), backgroundUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: '请选择要上传的图片' });
+    }
+
+    const backgroundUrl = `/uploads/backgrounds/${req.file.filename}`;
+
+    // Remove the previous background file (if any) before switching
+    const oldUrl = await runtimeConfig.get('auth_background_url');
+    if (oldUrl) tryRemovePublicFile(oldUrl);
+
+    await runtimeConfig.set('auth_background_url', backgroundUrl);
+
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'config.system', 'config', 0, { key: 'auth_background_url', value: backgroundUrl }, getClientIp(req));
+    res.json({ success: true, background_url: backgroundUrl, message: '登录页背景已更新' });
+  } catch (err) {
+    console.error('Upload auth background error:', err);
+    res.status(500).json({ success: false, message: '背景上传失败' });
+  }
+});
+
+// DELETE /auth-background - Reset the auth page background to the default grid
+router.delete('/auth-background', requireAdmin, requireAdminPermission('config.write'), async (req, res) => {
+  try {
+    const oldUrl = await runtimeConfig.get('auth_background_url');
+    if (oldUrl) tryRemovePublicFile(oldUrl);
+
+    await runtimeConfig.set('auth_background_url', '');
+
+    await auditWriter.writeAdminAudit(req.adminUser.id, 'config.system', 'config', 0, { key: 'auth_background_url', value: '' }, getClientIp(req));
+    res.json({ success: true, message: '已恢复默认背景' });
+  } catch (err) {
+    console.error('Reset auth background error:', err);
+    res.status(500).json({ success: false, message: '恢复默认背景失败' });
   }
 });
 

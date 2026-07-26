@@ -97,6 +97,12 @@
   --z-modal: 400;
   --z-toast: 500;
 
+  /* Auth 页整屏背景：浅蓝方格网格（未配置自定义背景图时的默认打底） */
+  --auth-bg: #f0f4f9;
+  --auth-grid-line: rgba(37, 99, 235, 0.07);
+  /* 自定义背景图上的可读性遮罩 */
+  --auth-scrim: rgba(255, 255, 255, 0.18);
+
   --max-width-content: 72rem;
   --max-width-auth: 76rem;
   --max-width-account: 84rem;
@@ -142,6 +148,10 @@
     --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.32);
     --shadow-lg: 0 24px 50px rgba(0, 0, 0, 0.38);
     --shadow-xl: 0 32px 64px rgba(0, 0, 0, 0.42);
+
+    --auth-bg: #0f172a;
+    --auth-grid-line: rgba(148, 163, 184, 0.07);
+    --auth-scrim: rgba(2, 6, 23, 0.45);
   }
 }
 

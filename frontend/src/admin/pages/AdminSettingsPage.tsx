@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/api/client';
 import { useAdminAuth } from '../AdminAuthProvider';
 import { useToast } from '@/shared/ToastProvider';
@@ -8,7 +8,7 @@ import { TextField } from '@/shared/TextField';
 import { LoadingState } from '@/shared/LoadingState';
 import type { EmailConfigData, SmsConfigData, SystemConfigItem } from '@/api/types';
 
-type SettingsTab = 'email' | 'sms' | 'system';
+type SettingsTab = 'email' | 'sms' | 'system' | 'appearance';
 
 export function AdminSettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('email');
@@ -18,6 +18,7 @@ export function AdminSettingsPage() {
     { id: 'email', label: '邮件配置', perm: 'email_config.read' },
     { id: 'sms', label: '短信配置', perm: 'sms_config.read' },
     { id: 'system', label: '系统配置', perm: 'config.read' },
+    { id: 'appearance', label: '登录页外观', perm: 'config.read' },
   ];
 
   const visibleTabs = tabs.filter((t) => hasPermission(t.perm));
@@ -53,7 +54,109 @@ export function AdminSettingsPage() {
       {activeTab === 'email' && <EmailConfigSection />}
       {activeTab === 'sms' && <SmsConfigSection />}
       {activeTab === 'system' && <SystemConfigSection />}
+      {activeTab === 'appearance' && <AppearanceSection />}
     </div>
+  );
+}
+
+/* ─── Appearance Section (auth page background) ─────────────────────────────── */
+
+function AppearanceSection() {
+  const { hasPermission } = useAdminAuth();
+  const { toast } = useToast();
+  const canWrite = hasPermission('config.write');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const loadBackground = useCallback(async () => {
+    try {
+      const res = await api.get<{ success: boolean; background_url: string | null }>('/api/public/auth-page-config');
+      setBackgroundUrl(res.background_url);
+    } catch { toast('error', '获取登录页背景配置失败'); }
+    finally { setLoading(false); }
+  }, [toast]);
+
+  useEffect(() => { loadBackground(); }, [loadBackground]);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast('error', '图片大小不能超过 5MB');
+      return;
+    }
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.postForm<{ success: boolean; background_url: string }>('/api/admin/auth-background', formData);
+      setBackgroundUrl(res.background_url);
+      toast('success', '登录页背景已更新');
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '上传失败');
+    } finally {
+      setBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  async function handleReset() {
+    setBusy(true);
+    try {
+      await api.del('/api/admin/auth-background');
+      setBackgroundUrl(null);
+      toast('success', '已恢复默认背景');
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) return <LoadingState />;
+
+  return (
+    <Card>
+      <CardTitle>登录页背景</CardTitle>
+      <p className="section-description" style={{ marginBottom: 'var(--space-4)' }}>
+        自定义登录、注册等认证页面的整屏背景图（JPEG/PNG/WebP，5MB 以内）。未设置时使用默认网格背景。
+      </p>
+      <div
+        style={{
+          height: '10rem',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--color-border-soft)',
+          marginBottom: 'var(--space-4)',
+          backgroundColor: 'var(--auth-bg)',
+          backgroundImage: backgroundUrl
+            ? `url(${backgroundUrl})`
+            : 'linear-gradient(var(--auth-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--auth-grid-line) 1px, transparent 1px)',
+          backgroundSize: backgroundUrl ? 'cover' : '24px 24px',
+          backgroundPosition: backgroundUrl ? 'center' : undefined,
+        }}
+        role="img"
+        aria-label={backgroundUrl ? '当前自定义背景预览' : '默认网格背景预览'}
+      />
+      <div className="cluster">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: 'none' }}
+          onChange={handleUpload}
+        />
+        <Button onClick={() => fileInputRef.current?.click()} loading={busy} disabled={!canWrite}>
+          上传背景图
+        </Button>
+        {backgroundUrl ? (
+          <Button variant="secondary" onClick={handleReset} disabled={!canWrite || busy}>
+            恢复默认背景
+          </Button>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
@@ -299,7 +402,8 @@ function SystemConfigSection() {
   const loadConfigs = useCallback(async () => {
     try {
       const res = await api.get<{ success: boolean; system: SystemConfigItem[] }>('/api/admin/config');
-      setConfigs(res.system || []);
+      // auth_background_url 由「登录页外观」tab 专管（含旧文件清理），此处隐藏避免双入口
+      setConfigs((res.system || []).filter((c) => c.key !== 'auth_background_url'));
     } catch { toast('error', '获取系统配置失败'); }
     finally { setLoading(false); }
   }, [toast]);

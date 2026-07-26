@@ -56,9 +56,6 @@ export function ResetPasswordPage() {
     <AuthShell
       title="设置新密码"
       description="为您的 MindAuth 账户设置一个新的登录密码。"
-      eyebrow="密码重置"
-      heroTitle="重设密码，同时保留原有账户与授权数据。"
-      heroDescription="完成重置后，您可以继续使用原账户查看账户中心、通知、安全设置和 OAuth 授权记录。"
       footer={
         <Link to="/login" className="inline-link">
           返回登录

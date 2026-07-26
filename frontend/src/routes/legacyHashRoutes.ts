@@ -41,13 +41,14 @@ export function normalizeLegacyHashRoutes(): boolean {
   const hash = window.location.hash;
   if (!hash || hash === '#') return false;
 
-  // Strip query string from hash for matching
+  // Strip query string from hash for matching; the legacy SPA used both
+  // "#login" and "#/login" forms, so the leading slash is optional
   const [hashPath, hashQuery] = hash.split('?');
-  const normalisedHash = hashPath.replace(/^#/, '');
+  const normalisedHash = hashPath.replace(/^#\/?/, '');
 
   for (const mapping of ROUTE_MAP) {
-    const mappingPath = mapping.hash.replace(/^#/, '');
-    if (normalisedHash === mappingPath || normalisedHash === mapping.hash) {
+    const mappingPath = mapping.path.replace(/^\//, '');
+    if (normalisedHash === mappingPath) {
       const newPath = hashQuery
         ? `${mapping.path}?${hashQuery}`
         : mapping.path;

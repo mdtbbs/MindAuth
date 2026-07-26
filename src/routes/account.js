@@ -11,31 +11,12 @@ const { avatarUpload, bannerUpload } = require('../middleware/upload');
 const notificationCenter = require('../modules/notifications/notificationCenter');
 const { getClientIp } = require('../utils/request');
 const { getUserAuditLogs, logUserAudit } = require('../utils/userAudit');
-const path = require('path');
-const fs = require('fs');
 const sessionManager = require('../modules/sessions/sessionManager');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
 
-// Ensure a resolved path stays under public/ to prevent path traversal
-const PUBLIC_ROOT = path.resolve(__dirname, '../../public');
-function safePublicPath(relative) {
-  if (!relative || typeof relative !== 'string') return null;
-  const resolved = path.resolve(PUBLIC_ROOT, '.' + relative);
-  if (!resolved.startsWith(PUBLIC_ROOT + path.sep) && resolved !== PUBLIC_ROOT) return null;
-  return resolved;
-}
-
-function tryRemovePublicFile(relative) {
-  const abs = safePublicPath(relative);
-  if (!abs) return;
-  try {
-    if (fs.existsSync(abs)) fs.unlinkSync(abs);
-  } catch (err) {
-    console.warn('[Account] failed to remove old file:', relative, err.message);
-  }
-}
+const { safePublicPath, tryRemovePublicFile } = require('../utils/publicFiles');
 
 // POST /change-password - Change password
 router.post('/change-password', requireAuth, async (req, res) => {

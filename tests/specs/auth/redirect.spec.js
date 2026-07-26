@@ -20,7 +20,7 @@ test.describe('已登录用户自动跳转', () => {
   });
 
   test('已登录用户访问登录页应跳转到Dashboard', async ({ page }) => {
-    // 先注册并登录一个用户
+    // 注册（注册成功后自动登录并进入 dashboard）
     const testUser = `redirect_test_${Date.now()}`;
     await page.goto('/#register');
     await page.waitForSelector('#register-form', { timeout: 5000 });
@@ -29,27 +29,14 @@ test.describe('已登录用户自动跳转', () => {
     await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
 
-    // 等待注册成功并跳转到登录页
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('注册成功');
+    await expect(page.locator('.toast', { hasText: '注册成功' }).first()).toBeVisible({ timeout: 5000 });
+    await page.waitForURL('**/dashboard', { timeout: 5000 });
 
-    // 等待跳转到登录页
-    await page.waitForSelector('#login-form', { timeout: 5000 });
-
-    // 登录
-    await page.fill('#username', testUser);
-    await page.fill('#password', 'TestPass123');
-    await page.click('#login-form button[type="submit"]');
-
-    // 等待跳转到 dashboard
-    await page.waitForSelector('.auth-shell', { timeout: 5000 });
-
-    // 现在访问登录页 - 应自动跳转到 dashboard
+    // 现在访问登录页 - 应自动跳转回 dashboard
     await page.goto('/#login');
-    await page.waitForSelector('.auth-shell', { timeout: 3000 });
+    await page.waitForURL('**/dashboard', { timeout: 5000 });
 
-    // 验证确实在 dashboard 页面
-    expect(page.url()).toContain('#dashboard');
+    expect(page.url()).toContain('/dashboard');
   });
 
   test('已登录用户访问首页应跳转到Dashboard', async ({ page }) => {
@@ -60,20 +47,13 @@ test.describe('已登录用户自动跳转', () => {
     await page.fill('#email', `${testUser}@test.com`);
     await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
+    await page.waitForURL('**/dashboard', { timeout: 8000 });
 
-    // 等待跳转到登录页并登录
-    await page.waitForSelector('#login-form', { timeout: 5000 });
-    await page.fill('#username', testUser);
-    await page.fill('#password', 'TestPass123');
-    await page.click('#login-form button[type="submit"]');
-    await page.waitForSelector('.auth-shell', { timeout: 5000 });
-
-    // 访问首页（无hash）- 应跳转到 dashboard
+    // 访问首页 - 已登录应跳转到 dashboard
     await page.goto('/');
-    await page.waitForSelector('.auth-shell', { timeout: 3000 });
+    await page.waitForURL('**/dashboard', { timeout: 5000 });
 
-    expect(page.url()).toContain('#dashboard');
+    expect(page.url()).toContain('/dashboard');
   });
 
   test('已登录用户访问注册页应跳转到Dashboard', async ({ page }) => {
@@ -84,30 +64,24 @@ test.describe('已登录用户自动跳转', () => {
     await page.fill('#email', `${testUser}@test.com`);
     await page.fill('#password', 'TestPass123');
     await page.click('#register-form button[type="submit"]');
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
+    await page.waitForURL('**/dashboard', { timeout: 8000 });
 
-    // 登录
-    await page.waitForSelector('#login-form', { timeout: 5000 });
-    await page.fill('#username', testUser);
-    await page.fill('#password', 'TestPass123');
-    await page.click('#login-form button[type="submit"]');
-    await page.waitForSelector('.auth-shell', { timeout: 5000 });
-
-    // 访问注册页 - 应跳转到 dashboard
+    // 访问注册页 - 已登录应跳转到 dashboard
     await page.goto('/#register');
-    await page.waitForSelector('.auth-shell', { timeout: 3000 });
+    await page.waitForURL('**/dashboard', { timeout: 5000 });
 
-    expect(page.url()).toContain('#dashboard');
+    expect(page.url()).toContain('/dashboard');
   });
 
   test('未登录用户访问登录页应正常显示', async ({ page }) => {
     await page.goto('/#login');
 
-    // 等待页面加载，应该停留在登录页
+    // 等待页面加载，应该停留在登录页（旧 hash 链接归一化为路径路由）
+    await page.waitForSelector('.auth-shell', { timeout: 3000 });
     await page.waitForSelector('#login-form', { timeout: 3000 });
 
     // 验证在登录页
-    expect(page.url()).toContain('#login');
+    expect(page.url()).toContain('/login');
     expect(await page.isVisible('#username')).toBe(true);
     expect(await page.isVisible('#password')).toBe(true);
   });
