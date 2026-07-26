@@ -307,6 +307,10 @@ img {
   animation: fade-in var(--duration-normal) var(--ease-default);
 }
 
+.dialog-overlay--closing {
+  animation: fade-out var(--duration-normal) var(--ease-default) forwards;
+}
+
 .dialog {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-soft);
@@ -317,6 +321,15 @@ img {
   max-height: 90dvh;
   overflow-y: auto;
   animation: slide-up var(--duration-normal) var(--ease-default);
+}
+
+.dialog-overlay--closing .dialog {
+  animation: slide-out-down var(--duration-normal) var(--ease-default) forwards;
+}
+
+@keyframes slide-out-down {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
 }
 
 .dialog__header {
@@ -393,6 +406,10 @@ img {
   pointer-events: auto;
   border: 1px solid transparent;
   animation: slide-in-right var(--duration-normal) var(--ease-default);
+}
+
+.toast--leaving {
+  animation: slide-out-right var(--duration-normal) var(--ease-default) forwards;
 }
 
 .toast--success {
@@ -892,6 +909,40 @@ img {
 .loading-state .spinner {
   font-size: 1.25rem;
   color: var(--color-primary);
+}
+
+/* ─── Password strength meter ──────────────────────────────────── */
+.password-strength {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.password-strength__track {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-sunken);
+  overflow: hidden;
+}
+
+.password-strength__bar {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--duration-normal) var(--ease-default),
+    background var(--duration-normal) var(--ease-default);
+}
+
+.password-strength__bar--0,
+.password-strength__bar--1 { background: var(--color-error); }
+.password-strength__bar--2 { background: var(--color-warning); }
+.password-strength__bar--3 { background: var(--color-info); }
+.password-strength__bar--4 { background: var(--color-success); }
+
+.password-strength__label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 /* ─── Skeleton ─────────────────────────────────────────────────── */

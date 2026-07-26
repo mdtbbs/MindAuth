@@ -1,15 +1,18 @@
+import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AdminAuthProvider, useAdminAuth } from './AdminAuthProvider';
 import { ToastProvider } from '@/shared/ToastProvider';
 import { LoadingState } from '@/shared/LoadingState';
 import { AdminShell } from './components/AdminShell';
 import { AdminLoginPage } from './pages/AdminLoginPage';
-import { AdminDashboardPage } from './pages/AdminDashboardPage';
-import { AdminUsersPage } from './pages/AdminUsersPage';
-import { AdminClientsPage } from './pages/AdminClientsPage';
-import { AdminSecurityPage } from './pages/AdminSecurityPage';
-import { AdminSettingsPage } from './pages/AdminSettingsPage';
-import { AdminLogsPage } from './pages/AdminLogsPage';
+
+// Authenticated pages are code-split — each becomes its own chunk loaded on demand
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })));
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage').then((m) => ({ default: m.AdminUsersPage })));
+const AdminClientsPage = lazy(() => import('./pages/AdminClientsPage').then((m) => ({ default: m.AdminClientsPage })));
+const AdminSecurityPage = lazy(() => import('./pages/AdminSecurityPage').then((m) => ({ default: m.AdminSecurityPage })));
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
+const AdminLogsPage = lazy(() => import('./pages/AdminLogsPage').then((m) => ({ default: m.AdminLogsPage })));
 
 /**
  * Inner router component that has access to useNavigate/useLocation.
@@ -54,16 +57,18 @@ function AdminRouter() {
   // Render admin shell with current page
   return (
     <AdminShell currentPage={currentPage} onNavigate={handleNavigate}>
-      <Routes>
-        <Route path="/" element={<AdminDashboardPage />} />
-        <Route path="/dashboard" element={<AdminDashboardPage />} />
-        <Route path="/users" element={<AdminUsersPage />} />
-        <Route path="/clients" element={<AdminClientsPage />} />
-        <Route path="/security" element={<AdminSecurityPage />} />
-        <Route path="/settings" element={<AdminSettingsPage />} />
-        <Route path="/logs" element={<AdminLogsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<LoadingState />}>
+        <Routes>
+          <Route path="/" element={<AdminDashboardPage />} />
+          <Route path="/dashboard" element={<AdminDashboardPage />} />
+          <Route path="/users" element={<AdminUsersPage />} />
+          <Route path="/clients" element={<AdminClientsPage />} />
+          <Route path="/security" element={<AdminSecurityPage />} />
+          <Route path="/settings" element={<AdminSettingsPage />} />
+          <Route path="/logs" element={<AdminLogsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </AdminShell>
   );
 }

@@ -204,15 +204,19 @@ export function AccountSettingsPage() {
     show_activity: true,
   });
   const [privacyLoading, setPrivacyLoading] = useState(false);
+  const privacyLoaded = useRef(false);
 
+  // Defer until the user actually opens the "隐私" tab (load once)
   useEffect(() => {
+    if (activeSection !== 'privacy' || privacyLoaded.current) return;
+    privacyLoaded.current = true;
     api
       .get<{ success: boolean; settings: PrivacySettings }>('/api/account/privacy')
       .then((res) => {
         if (res.settings) setPrivacy(res.settings);
       })
       .catch(() => {});
-  }, []);
+  }, [activeSection]);
 
   async function handleSavePrivacy() {
     setPrivacyLoading(true);
@@ -230,8 +234,12 @@ export function AccountSettingsPage() {
   const [fieldDefs, setFieldDefs] = useState<UserFieldDef[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<number, string>>({});
   const [fieldsLoading, setFieldsLoading] = useState(false);
+  const fieldsLoaded = useRef(false);
 
+  // Defer until the user opens the "自定义字段" tab (load once)
   useEffect(() => {
+    if (activeSection !== 'fields' || fieldsLoaded.current) return;
+    fieldsLoaded.current = true;
     async function loadFields() {
       try {
         const [defsRes, valsRes] = await Promise.allSettled([
@@ -251,7 +259,7 @@ export function AccountSettingsPage() {
       } catch {}
     }
     loadFields();
-  }, []);
+  }, [activeSection]);
 
   async function handleSaveFields() {
     setFieldsLoading(true);
@@ -353,7 +361,7 @@ export function AccountSettingsPage() {
                   <CardDescription>管理头像、横幅和基础展示信息。</CardDescription>
                   <div className="stack stack--lg" style={{ marginTop: 'var(--space-5)' }}>
                     <div className="settings-banner">
-                      {user.banner_url ? <img src={user.banner_url} alt="Banner" /> : null}
+                      {user.banner_url ? <img src={user.banner_url} alt="个人横幅" /> : null}
                       <div className="settings-banner__overlay">
                         <div>
                           <div className="settings-banner__title">个人横幅</div>

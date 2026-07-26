@@ -2,9 +2,12 @@ import {
   type ReactNode,
   useEffect,
   useRef,
+  useState,
   useCallback,
 } from 'react';
 import { createPortal } from 'react-dom';
+
+const EXIT_MS = 200;
 
 interface DialogProps {
   open: boolean;
@@ -24,6 +27,26 @@ interface DialogProps {
 export function Dialog({ open, onClose, title, children, footer }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Keep the dialog mounted through its exit animation, then unmount
+  const [rendered, setRendered] = useState(open);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      setClosing(false);
+      return;
+    }
+    if (rendered) {
+      setClosing(true);
+      const t = setTimeout(() => {
+        setRendered(false);
+        setClosing(false);
+      }, EXIT_MS);
+      return () => clearTimeout(t);
+    }
+  }, [open, rendered]);
 
   // Capture focus trigger and restore on close
   useEffect(() => {
@@ -88,11 +111,11 @@ export function Dialog({ open, onClose, title, children, footer }: DialogProps) 
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!rendered) return null;
 
   return createPortal(
     <div
-      className="dialog-overlay"
+      className={`dialog-overlay${closing ? ' dialog-overlay--closing' : ''}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

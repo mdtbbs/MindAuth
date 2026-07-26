@@ -14,7 +14,6 @@ import type {
   Notification,
   LoginLog,
   Authorization,
-  UnreadCount,
 } from '@/api/types';
 
 const DASHBOARD_NAV = [
@@ -37,7 +36,6 @@ export function DashboardPage() {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [loginLogs, setLoginLogs] = useState<LoginLog[]>([]);
   const [authorizations, setAuthorizations] = useState<Authorization[]>([]);
   const [phoneStatus, setPhoneStatus] = useState<{ phone: string | null; verified: boolean }>({
@@ -57,22 +55,21 @@ export function DashboardPage() {
     }
   }, [user, authLoading, navigate, toast]);
 
-  const loadDashboardData = useCallback(async () => {
-    try {
-      const [sessRes, notifsRes, logsRes, authsRes, unreadRes] = await Promise.allSettled([
-        api.get<{ success: boolean; sessions: Session[] }>('/api/sessions'),
-        api.get<{ success: boolean; notifications: Notification[] }>('/api/notifications'),
-        api.get<{ success: boolean; logs: LoginLog[] }>('/api/login-logs'),
-        api.get<{ success: boolean; authorizations: Authorization[] }>('/api/authorizations'),
-        api.get<UnreadCount>('/api/notifications/unread-count'),
-      ]);
+  // Unread count is derived from the notifications list — no separate request
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
 
-      if (sessRes.status === 'fulfilled') setSessions(sessRes.value.sessions || []);
-      if (notifsRes.status === 'fulfilled') setNotifications(notifsRes.value.notifications || []);
-      if (logsRes.status === 'fulfilled') setLoginLogs(logsRes.value.logs || []);
-      if (unreadRes.status === 'fulfilled') setUnreadCount(unreadRes.value.count || 0);
-      if (authsRes.status === 'fulfilled') setAuthorizations(authsRes.value.authorizations || []);
-    } catch {}
+  const loadDashboardData = useCallback(async () => {
+    const [sessRes, notifsRes, logsRes, authsRes] = await Promise.allSettled([
+      api.get<{ success: boolean; sessions: Session[] }>('/api/sessions'),
+      api.get<{ success: boolean; notifications: Notification[] }>('/api/notifications'),
+      api.get<{ success: boolean; logs: LoginLog[] }>('/api/login-logs'),
+      api.get<{ success: boolean; authorizations: Authorization[] }>('/api/authorizations'),
+    ]);
+
+    if (sessRes.status === 'fulfilled') setSessions(sessRes.value.sessions || []);
+    if (notifsRes.status === 'fulfilled') setNotifications(notifsRes.value.notifications || []);
+    if (logsRes.status === 'fulfilled') setLoginLogs(logsRes.value.logs || []);
+    if (authsRes.status === 'fulfilled') setAuthorizations(authsRes.value.authorizations || []);
   }, []);
 
   useEffect(() => {
@@ -140,7 +137,6 @@ export function DashboardPage() {
     try {
       await api.patch(`/api/notifications/${id}/read`);
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-      setUnreadCount((c) => Math.max(0, c - 1));
     } catch {
       toast('error', '操作失败');
     }
@@ -150,7 +146,6 @@ export function DashboardPage() {
     try {
       await api.patch('/api/notifications/read-all');
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      setUnreadCount(0);
       toast('success', '已标记全部已读');
     } catch {
       toast('error', '操作失败');

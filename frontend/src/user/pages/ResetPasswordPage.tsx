@@ -96,7 +96,7 @@ export function ResetPasswordPage() {
               name="confirmPassword"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
-              error={error}
+              error={error || (confirm && confirm !== password ? '两次输入的密码不一致' : undefined)}
               placeholder="再次输入新密码"
               autoComplete="new-password"
             />

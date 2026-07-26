@@ -16,6 +16,13 @@ export default defineConfig({
         main: resolve(__dirname, 'frontend/index.html'),
         admin: resolve(__dirname, 'frontend/admin.html'),
       },
+      output: {
+        // Split the stable React runtime into its own long-cached chunk so
+        // business-code changes don't invalidate it
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
     },
   },
   resolve: {

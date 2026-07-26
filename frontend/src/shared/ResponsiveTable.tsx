@@ -27,7 +27,7 @@ export function ResponsiveTable<T>({
   columns,
   data,
   keyExtractor,
-  emptyMessage = 'No data',
+  emptyMessage = '暂无数据',
 }: ResponsiveTableProps<T>) {
   if (data.length === 0) {
     return (
