@@ -63,7 +63,7 @@ router.post('/create', adminCreateRateLimiter, async (req, res) => {
       return res.status(409).json({ success: false, message: '用户名或邮箱已存在' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
     const [result] = await pool.execute('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email, passwordHash, 'super_admin']);
 
     logAudit({

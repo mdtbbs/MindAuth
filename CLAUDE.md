@@ -221,8 +221,8 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `admin_session:{hash}` | 24h | Admin session |
 | `authcode:{code}` | 5min | OAuth authorization code |
 | `accesstoken:{token}` | 1h | OAuth access token |
-| `verify:{token}` | 1h | Email verification token |
-| `reset:{token}` | 1h | Password reset token |
+| `verify:{sha256(token)}` | 1h | Email verification token (hashed at rest) |
+| `reset:{sha256(token)}` | 1h | Password reset token (hashed at rest) |
 | `ratelimit:{ip}` | Variable | Rate limit counter |
 | `sms:code:{phone}` | 5min | SMS verification code (dysmsapi) |
 | `sms:send:ip:{ip}` | 1h | SMS send rate limit per IP |
@@ -350,18 +350,26 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 
 ## Security Features
 
-- bcrypt password hashing (cost=10)
+- bcrypt password hashing (cost=12; login still verifies older cost-10 hashes)
 - Session tokens: SHA-256 hashed in DB, raw only in cookies
-- CSRF double-submit cookie
-- Rate limiting (Redis + memory fallback)
-- Timing-safe secret comparison
-- Trusted proxy IP validation
+- OAuth access/refresh tokens: SHA-256 hashed at rest (Redis/MySQL)
+- Password-reset & email-verification tokens: SHA-256 hashed at rest; raw value only in the emailed link
+- Failed-login lockout is **always temporary** (15min → 1h → 2h cap, auto-expires); a hard indefinite block is only ever applied by an admin via `ban_status` — a single IP cannot permanently lock an account
+- CSRF signed double-submit cookie (HMAC of a random nonce)
+- Rate limiting (Redis + memory fallback); every limiter has a unique keyPrefix; OAuth `/token` `/refresh` `/authorize` `/introspect` `/revoke` are rate-limited
+- Timing-safe secret comparison (incl. client_secret)
+- Trusted proxy IP validation (proxy headers untrusted by default)
 - PKCE S256 support (OAuth)
-- Replay attack detection (OAuth)
+- Replay attack detection (OAuth); `/introspect` and `/revoke` are bound to the requesting client (a client cannot probe/revoke another client's tokens)
 - SSRF protection (private IP redirect_uri blocked in clientRegistry)
-- IP ban matching with CIDR support
-- Helmet CSP headers
-- Config validation on startup (strict in production)
+- IP ban matching with CIDR support for **IPv4 and IPv6** (128-bit via BigInt)
+- Admin RBAC with last-super-admin / self-demotion protection on delete, ban, and role change
+- Helmet CSP headers (note: `script-src` still allows `'unsafe-inline'` — legacy static error/docs pages use inline scripts; tightening requires externalizing them first)
+- Config validation on startup (strict in production; blocks memory Redis, wildcard CORS, short ADMIN_SECRET)
+
+### Known deferred (need migration / external coordination)
+- `client_secret` stored plaintext at rest (compared timing-safe; the credential index was dropped in migration 002). Full hashing requires re-issuing third-party client secrets.
+- SMTP password / Aliyun SMS access-key-secret stored plaintext at rest (回显已脱敏). Encrypting at rest needs app-level key management.
 
 ---
 *Last updated: 2026-07-26*

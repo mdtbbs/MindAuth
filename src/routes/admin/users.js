@@ -238,7 +238,7 @@ router.post('/:id/reset-password', requireAdmin, requireAdminPermission('users.r
     }
 
     const tempPassword = crypto.randomBytes(8).toString('hex');
-    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
     await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashedPassword, id]);
     await pool.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [id]);
@@ -317,6 +317,21 @@ router.put('/:id', requireAdmin, requireAdminPermission('users.write'), async (r
 
     if (role && (isAdminRole(role) || isAdminRole(currentRole)) && !isSuperAdmin(req)) {
       return res.status(403).json({ success: false, message: '只有超级管理员可以调整管理员角色' });
+    }
+
+    // Guard against demoting the last super admin (or yourself) out of the
+    // super-admin role, which would lock the system out of super access.
+    const demotingAdmin = role && isAdminRole(currentRole) && !isAdminRole(role);
+    if (demotingAdmin) {
+      if (parseInt(id) === req.adminUser.id) {
+        return res.status(400).json({ success: false, message: '不能降级自己的管理员角色' });
+      }
+      if (currentRole === 'super_admin' || currentRole === 'admin') {
+        const [cnt] = await pool.execute("SELECT COUNT(*) AS n FROM users WHERE role IN ('super_admin', 'admin')");
+        if (cnt[0].n <= 1) {
+          return res.status(403).json({ success: false, message: '不能降级最后一个超级管理员' });
+        }
+      }
     }
 
     const updates = [];

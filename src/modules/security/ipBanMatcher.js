@@ -7,7 +7,8 @@
  * Design invariants:
  *   - Cache lives in Redis (shared across processes) with a 5-min TTL.
  *   - Expired bans (expires_at in the past) are skipped at match time.
- *   - CIDR matching uses bitwise operations on IPv4 addresses only.
+ *   - CIDR + exact matching support BOTH IPv4 and IPv6 (128-bit via BigInt).
+ *   - Cross-family comparisons never match (v4 client vs v6 ban → false).
  *   - All failures are caught and logged — ban check must never crash
  *     the request pipeline.
  *
@@ -27,18 +28,85 @@ const CACHE_TTL = 300; // 5 minutes
 
 /**
  * Convert dotted-quad IPv4 to 32-bit unsigned integer.
+ * Retained for backward compatibility / tests. Returns 0 on malformed input.
  * @param {string} ip
  * @returns {number}
  */
 function ipToLong(ip) {
-  return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+  const n = ipv4ToBigInt(ip);
+  return n === null ? 0 : Number(n);
+}
+
+/** Parse dotted-quad IPv4 → BigInt (32-bit), or null if invalid. */
+function ipv4ToBigInt(ip) {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let n = 0n;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const o = Number(p);
+    if (o > 255) return null;
+    n = (n << 8n) + BigInt(o);
+  }
+  return n;
+}
+
+/** Parse IPv6 (incl. `::` compression and embedded IPv4) → BigInt (128-bit), or null. */
+function ipv6ToBigInt(ip) {
+  ip = ip.split('%')[0]; // drop zone id (e.g. fe80::1%eth0)
+
+  // Convert a trailing embedded IPv4 (e.g. ::ffff:192.168.0.1) into two hextets
+  const v4 = ip.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4) {
+    const v4n = ipv4ToBigInt(v4[1]);
+    if (v4n === null) return null;
+    const hi = (v4n >> 16n) & 0xffffn;
+    const lo = v4n & 0xffffn;
+    ip = ip.slice(0, v4.index) + hi.toString(16) + ':' + lo.toString(16);
+  }
+
+  const halves = ip.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+
+  let groups;
+  if (halves.length === 2) {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array(missing).fill('0'), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return null;
+
+  let n = 0n;
+  for (const g of groups) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+    n = (n << 16n) + BigInt(parseInt(g, 16));
+  }
+  return n;
+}
+
+/** Parse any IP → { fam: 4|6, n: BigInt } or null. */
+function parseIp(ip) {
+  if (typeof ip !== 'string') return null;
+  if (ip.includes(':')) {
+    const n = ipv6ToBigInt(ip);
+    return n === null ? null : { fam: 6, n };
+  }
+  if (ip.includes('.')) {
+    const n = ipv4ToBigInt(ip);
+    return n === null ? null : { fam: 4, n };
+  }
+  return null;
 }
 
 /**
  * Check whether `clientIp` falls within the subnet defined by
- * `networkIp` + `prefix` (CIDR notation).
- *
+ * `networkIp` + `prefix` (CIDR notation). Supports IPv4 and IPv6.
  * When prefix is null/undefined the match is exact (single host).
+ * Different address families never match; unparseable input never matches.
  *
  * @param {string} clientIp
  * @param {string} networkIp
@@ -46,11 +114,19 @@ function ipToLong(ip) {
  * @returns {boolean}
  */
 function isInSubnet(clientIp, networkIp, prefix) {
+  const c = parseIp(clientIp);
+  const net = parseIp(networkIp);
+  if (!c || !net || c.fam !== net.fam) return false;
+
   if (prefix === null || prefix === undefined) {
-    return clientIp === networkIp;
+    return c.n === net.n; // normalized exact match (e.g. ::1 === 0:0:...:1)
   }
-  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
-  return (ipToLong(clientIp) & mask) === (ipToLong(networkIp) & mask);
+
+  const bits = c.fam === 4 ? 32 : 128;
+  const p = Number(prefix);
+  if (!Number.isInteger(p) || p < 0 || p > bits) return false;
+  const mask = p === 0 ? 0n : (((1n << BigInt(p)) - 1n) << BigInt(bits - p));
+  return (c.n & mask) === (net.n & mask);
 }
 
 /**

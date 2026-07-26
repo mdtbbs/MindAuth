@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { pool } = require('../db');
 const { client } = require('../redis');
-const { generateToken } = require('../utils/token');
+const { generateToken, hashToken } = require('../utils/token');
 const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/email');
 const { createRateLimiter } = require('../middleware/rateLimit');
@@ -35,11 +35,11 @@ router.post('/reset-request', resetRateLimiter, async (req, res) => {
       return res.json({ success: true, message: '如果邮箱存在且已验证，重置链接已发送' });
     }
 
-    // Generate reset token
+    // Generate reset token — only the hash is stored server-side; the raw
+    // token goes into the emailed link
     const token = generateToken();
 
-    // Store reset token in Redis
-    await client.setEx(`reset:${token}`, RESET_TOKEN_TTL, JSON.stringify({
+    await client.setEx(`reset:${hashToken(token)}`, RESET_TOKEN_TTL, JSON.stringify({
       user_id: user.id
     }));
 
@@ -67,8 +67,9 @@ router.post('/reset', resetExecLimiter, async (req, res) => {
   }
 
   try {
-    // Get token from Redis
-    const tokenData = await client.get(`reset:${token}`);
+    // Look up by hash of the presented token
+    const tokenKey = `reset:${hashToken(token)}`;
+    const tokenData = await client.get(tokenKey);
 
     if (!tokenData) {
       return res.status(400).json({ success: false, message: '链接无效或已过期' });
@@ -84,16 +85,16 @@ router.post('/reset', resetExecLimiter, async (req, res) => {
       [parsed.user_id]
     );
     if (!userRows[0] || userRows[0].email_verified !== 1) {
-      await client.del(`reset:${token}`);
+      await client.del(tokenKey);
       return res.status(400).json({ success: false, message: '邮箱未验证或用户不存在' });
     }
 
     // Update password
-    const passwordHash = await bcrypt.hash(new_password, 10);
+    const passwordHash = await bcrypt.hash(new_password, 12);
     await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, parsed.user_id]);
 
     // Delete token (single-use)
-    await client.del(`reset:${token}`);
+    await client.del(tokenKey);
 
     // Security: Revoke all OAuth refresh tokens for this user.
     // Otherwise an OAuth client holding a refresh token could keep issuing

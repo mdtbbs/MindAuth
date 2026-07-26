@@ -25,6 +25,14 @@ const verifyEndpointLimiter = createRateLimiter({
   keyPrefix: 'ratelimit:verify_api'
 });
 
+// Per-IP limiters for the OAuth protocol endpoints. Credentials/codes are
+// high-entropy so brute force is impractical, but these cap abuse and probing.
+const authorizeLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_authorize' });
+const tokenLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_token' });
+const refreshLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_refresh' });
+const introspectLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_introspect' });
+const revokeLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_revoke' });
+
 // Standard RFC 6749 error response
 function oauthError(res, statusCode, error, description) {
   return res.status(statusCode).json({
@@ -43,7 +51,7 @@ function handleOAuthError(res, err, context) {
 }
 
 // GET /authorize - Authorization endpoint for third-party redirect
-router.get('/authorize', async (req, res) => {
+router.get('/authorize', authorizeLimiter, async (req, res) => {
   try {
     const {
       redirect_uri, client_id, state, scope, response_type,
@@ -92,7 +100,7 @@ router.get('/authorize', async (req, res) => {
 });
 
 // POST /token - Token exchange (third-party backend calls this)
-router.post('/token', async (req, res) => {
+router.post('/token', tokenLimiter, async (req, res) => {
   try {
     const { code, client_id, client_secret, grant_type, code_verifier } = req.body;
 
@@ -118,7 +126,7 @@ router.post('/token', async (req, res) => {
 });
 
 // POST /refresh - Refresh access token
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', refreshLimiter, async (req, res) => {
   try {
     const { refresh_token, client_id, client_secret, grant_type } = req.body;
 
@@ -143,7 +151,7 @@ router.post('/refresh', async (req, res) => {
 });
 
 // POST /introspect - Token introspection endpoint (RFC 7662)
-router.post('/introspect', async (req, res) => {
+router.post('/introspect', introspectLimiter, async (req, res) => {
   try {
     const { token, client_id, client_secret } = req.body;
 
@@ -199,7 +207,7 @@ router.get('/user', verifyEndpointLimiter, async (req, res) => {
 });
 
 // POST /revoke - Token revocation endpoint (RFC 7009)
-router.post('/revoke', async (req, res) => {
+router.post('/revoke', revokeLimiter, async (req, res) => {
   try {
     const { token, token_type_hint, client_id, client_secret } = req.body;
 

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { client } = require('../redis');
-const { generateToken } = require('../utils/token');
+const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter } = require('../middleware/rateLimit');
@@ -43,15 +43,17 @@ router.post('/send', requireAuth, sendRateLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: '邮箱已验证' });
     }
 
-    // Generate verification token
+    // Generate verification token — store only its hash server-side; the raw
+    // token goes into the emailed link
     const token = generateToken();
+    const tokenHash = hashToken(token);
 
-    // Store verification token in Redis (primary) and MySQL (fallback)
-    await client.setEx(`verify:${token}`, TOKEN_TTL, JSON.stringify({
+    // Store verification token hash in Redis (primary) and MySQL (fallback)
+    await client.setEx(`verify:${tokenHash}`, TOKEN_TTL, JSON.stringify({
       user_id: user.id,
       email: user.email
     }));
-    await persistTokenToMysql(token, user.id, user.email, TOKEN_TTL);
+    await persistTokenToMysql(tokenHash, user.id, user.email, TOKEN_TTL);
 
     // Send verification email
     const verifyLink = `${BASE_URL}/#/verify-email?token=${token}`;
@@ -73,16 +75,17 @@ router.post('/verify', async (req, res) => {
       return res.status(400).json({ success: false, message: '缺少验证令牌' });
     }
 
-    // Get token from Redis (primary)
+    // Look up by hash of the presented token
+    const tokenHash = hashToken(token);
     let record = null;
-    const tokenData = await client.get(`verify:${token}`);
+    const tokenData = await client.get(`verify:${tokenHash}`);
     if (tokenData) {
       record = JSON.parse(tokenData);
     } else {
       // Fallback to MySQL — Redis may have lost data after a restart.
       const [rows] = await pool.execute(
         'SELECT user_id, email, expires_at FROM email_verification_tokens WHERE token = ?',
-        [token]
+        [tokenHash]
       );
       if (rows[0] && new Date(rows[0].expires_at) > new Date()) {
         record = { user_id: rows[0].user_id, email: rows[0].email };
@@ -97,8 +100,8 @@ router.post('/verify', async (req, res) => {
     await pool.execute('UPDATE users SET email_verified = 1, email = ? WHERE id = ?', [record.email, record.user_id]);
 
     // Delete token (single-use) — from both Redis and MySQL
-    await client.del(`verify:${token}`);
-    await removeTokenFromMysql(token);
+    await client.del(`verify:${tokenHash}`);
+    await removeTokenFromMysql(tokenHash);
 
     // Audit: email changed / verified
     const { logUserAudit } = require('../utils/userAudit');

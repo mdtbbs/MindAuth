@@ -485,9 +485,11 @@ async function introspect({ token, clientId, clientSecret }) {
   // 1. Verify client credentials (constant-time, shared with all endpoints)
   await verifyClient(clientId, clientSecret);
 
-  // 2. Check if it's an access token (Redis)
+  // 2. Check if it's an access token (Redis). RFC 7662: only reveal tokens
+  // that belong to the requesting client — otherwise a client could probe
+  // other clients' tokens.
   const tokenData = await tokenStore.getAccessToken(token);
-  if (tokenData) {
+  if (tokenData && tokenData.client_id === clientId) {
     const ttl = await tokenStore.getAccessTokenTtl(token);
     return {
       active: true,
@@ -499,10 +501,10 @@ async function introspect({ token, clientId, clientSecret }) {
     };
   }
 
-  // 3. Check if it's a refresh token (MySQL, stored hashed)
+  // 3. Check if it's a refresh token belonging to this client (MySQL, hashed)
   const [refreshRows] = await pool.execute(
-    'SELECT * FROM refresh_tokens WHERE token = ? AND revoked = 0 AND expires_at > ?',
-    [hashRefreshToken(token), formatMySQLDateTime()]
+    'SELECT * FROM refresh_tokens WHERE token = ? AND client_id = ? AND revoked = 0 AND expires_at > ?',
+    [hashRefreshToken(token), clientId, formatMySQLDateTime()]
   );
   const refreshToken = refreshRows[0];
   if (refreshToken) {
@@ -536,10 +538,14 @@ async function revoke({ token, tokenTypeHint, clientId, clientSecret }) {
   // 1. Verify client credentials (constant-time, shared with all endpoints)
   await verifyClient(clientId, clientSecret);
 
-  // 2. Try to revoke access token (Redis)
+  // 2. Try to revoke access token (Redis) — only if it belongs to this client,
+  // so a client cannot revoke another client's tokens (RFC 7009 §2.1)
   const accessTokenData = await tokenStore.getAccessToken(token);
   if (accessTokenData) {
-    await tokenStore.revokeAccessToken(token);
+    if (accessTokenData.client_id === clientId) {
+      await tokenStore.revokeAccessToken(token);
+    }
+    // Per RFC 7009 always return success, even when we decline to revoke
     return { success: true };
   }
 

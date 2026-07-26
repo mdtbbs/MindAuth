@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const { pool, transaction, isDuplicateError, getDuplicateField } = require('../db');
+const { pool, transaction, isDuplicateError } = require('../db');
 const { client } = require('../redis');
-const { generateToken } = require('../utils/token');
+const { generateToken, hashToken } = require('../utils/token');
 const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
@@ -77,7 +77,7 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   }
 
   try {
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
     const verifyToken = generateToken();
 
     // Use transaction for atomicity
@@ -88,8 +88,8 @@ router.post('/register', registerRateLimiter, async (req, res) => {
       );
       const userId = userResult.insertId;
 
-      // Store verification token in Redis
-      await client.setEx(`verify:${verifyToken}`, TOKEN_EXPIRY, JSON.stringify({
+      // Store verification token hash in Redis (raw token goes in the link)
+      await client.setEx(`verify:${hashToken(verifyToken)}`, TOKEN_EXPIRY, JSON.stringify({
         user_id: userId,
         email: email
       }));
@@ -103,14 +103,9 @@ router.post('/register', registerRateLimiter, async (req, res) => {
     res.status(201).json({ success: true, message: '注册成功，验证邮件已发送到您的邮箱' });
   } catch (err) {
     if (isDuplicateError(err)) {
-      const field = getDuplicateField(err);
-      if (field === 'username') {
-        return res.status(409).json({ success: false, message: '用户名已存在' });
-      }
-      if (field === 'email') {
-        return res.status(409).json({ success: false, message: '邮箱已被注册' });
-      }
-      return res.status(409).json({ success: false, message: '用户名或邮箱已存在' });
+      // Generic message — do not reveal WHICH field is taken, to avoid
+      // username/email enumeration (consistent with login/reset responses)
+      return res.status(409).json({ success: false, message: '用户名或邮箱已被使用' });
     }
     console.error('Register error:', err);
     res.status(500).json({ success: false, message: '注册失败' });
@@ -165,13 +160,11 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       }
       // Lock expired, clear it
       await pool.execute('UPDATE users SET locked_until = NULL WHERE id = ?', [user.id]);
-    } else if (user.lock_level >= 3) {
-      return res.status(423).json({
-        success: false,
-        code: 'ACCOUNT_PERMANENTLY_LOCKED',
-        message: '账号已被永久锁定，请联系管理员解锁',
-      });
     }
+    // Note: failed-login lockouts are always temporary (see below). A hard,
+    // indefinite block is only ever applied by an admin via ban_status —
+    // this prevents an attacker who knows a username from permanently
+    // locking the account out from a single IP.
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
@@ -193,10 +186,14 @@ router.post('/login', loginRateLimiter, async (req, res) => {
 
       if (failCount >= 5) {
         const newLevel = (user.lock_level || 0) + 1;
-        let lockedUntil = null;
-        if (newLevel === 1) lockedUntil = new Date(Date.now() + 30 * 60 * 1000);
-        else if (newLevel === 2) lockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        // newLevel >= 3: lockedUntil stays null (permanent)
+        // Escalating but ALWAYS finite lockout — never permanent. Caps at 2h
+        // so a single IP can, at worst, temporarily lock an account that
+        // auto-recovers, rather than locking it out forever.
+        let lockMinutes;
+        if (newLevel === 1) lockMinutes = 15;
+        else if (newLevel === 2) lockMinutes = 60;
+        else lockMinutes = 120;
+        const lockedUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
 
         await pool.execute(
           'UPDATE users SET lock_level = ?, locked_until = ? WHERE id = ?',
@@ -204,7 +201,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         );
         await client.del(failKey);
 
-        const lockMsg = newLevel >= 3 ? '永久锁定' : `锁定${newLevel === 1 ? '30分钟' : '24小时'}`;
+        const lockMsg = lockMinutes >= 60 ? `锁定${lockMinutes / 60}小时` : `锁定${lockMinutes}分钟`;
         await notificationCenter.create({
           user_id: user.id, type: 'account_locked', title: '账号已被锁定',
           content: `连续登录失败次数过多，账号已被${lockMsg}`, sendEmail: true,

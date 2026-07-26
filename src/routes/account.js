@@ -68,15 +68,17 @@ router.post('/change-password', requireAuth, async (req, res) => {
     }
 
     // Update password and revoke all sessions
-    const newPasswordHash = await bcrypt.hash(new_password, 10);
+    const newPasswordHash = await bcrypt.hash(new_password, 12);
 
     await transaction(async (conn) => {
       await conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', [newPasswordHash, user.id]);
       // Note: user_sessions deleted via sessionManager below (outside transaction)
     });
 
-    // Revoke all user sessions via sessionManager (clears MySQL, Redis, index sets)
+    // Revoke all sessions — user AND admin — so a password change fully logs
+    // the account out everywhere (an admin's admin_session must not survive)
     await sessionManager.revokeAllUserSessions(user.id);
+    await sessionManager.revokeAdminSessionsForUser(user.id);
 
     // Password change notification
     await notificationCenter.create({
