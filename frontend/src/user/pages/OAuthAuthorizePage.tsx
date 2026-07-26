@@ -1,19 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
-import { Card, CardTitle } from '@/shared/Card';
 import { Button } from '@/shared/Button';
+import { AuthShell } from '@/user/components/AuthShell';
 
-/**
- * OAuth authorization/consent page.
- *
- * Currently, MindAuth auto-authorizes after login (no consent step).
- * This page is a placeholder for future consent flows and handles
- * error states when OAuth params are invalid.
- *
- * If the user is logged in, they are automatically redirected to the
- * authorize endpoint which generates the code and redirects back.
- */
 export function OAuthAuthorizePage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -23,10 +13,11 @@ export function OAuthAuthorizePage() {
   const redirectUri = params.get('redirect_uri') || '';
   const state = params.get('state') || '';
   const scope = params.get('scope') || '';
+  const clientName = params.get('client_name') || '';
+  const decodedClientName = clientName ? decodeURIComponent(clientName) : '';
 
   const [error, setError] = useState('');
 
-  // If logged in, auto-authorize by hitting the authorize endpoint
   useEffect(() => {
     if (user && !authLoading && clientId && redirectUri) {
       const oauthParams = new URLSearchParams({
@@ -39,7 +30,6 @@ export function OAuthAuthorizePage() {
     }
   }, [user, authLoading, clientId, redirectUri, state, scope]);
 
-  // If not logged in, redirect to login
   useEffect(() => {
     if (!authLoading && !user) {
       const loginParams = new URLSearchParams({
@@ -47,48 +37,60 @@ export function OAuthAuthorizePage() {
         ...(redirectUri && { redirect_uri: redirectUri }),
         ...(state && { state }),
         ...(scope && { scope }),
+        ...(clientName && { client_name: clientName }),
       });
       navigate(`/login?${loginParams.toString()}`, { replace: true });
     }
-  }, [user, authLoading, clientId, redirectUri, state, scope, navigate]);
+  }, [user, authLoading, clientId, redirectUri, state, scope, clientName, navigate]);
 
-  // Validate required params
   useEffect(() => {
     if (!clientId || !redirectUri) {
       setError('缺少必需的 OAuth 参数 (client_id, redirect_uri)');
     }
   }, [clientId, redirectUri]);
 
-  if (error) {
-    return (
-      <div className="page--auth">
-        <Card padding="lg">
-          <CardTitle>授权错误</CardTitle>
-          <p style={{ color: 'var(--color-error)', marginBlock: 'var(--space-4)' }}>
-            {error}
-          </p>
-          <Button variant="primary" onClick={() => navigate('/login')}>
+  return (
+    <AuthShell
+      title="应用授权"
+      description={decodedClientName ? `正在准备连接 ${decodedClientName}。` : '正在准备应用授权请求。'}
+      eyebrow="OAuth 授权流程"
+      heroTitle="授权上下文已保留，验证后将自动继续。"
+      heroDescription="该页面仅负责衔接登录与授权，不会改变现有 OAuth 流程、回调地址或参数透传逻辑。"
+      footer={
+        <>
+          <Link to="/login" className="inline-link">
+            返回登录
+          </Link>
+          <span className="text-muted">/</span>
+          <Link to="/register" className="inline-link">
+            创建账户
+          </Link>
+        </>
+      }
+    >
+      {error ? (
+        <div className="stack">
+          <div className="status-badge status-badge--danger">授权参数错误</div>
+          <p className="section-description">{error}</p>
+          <Button variant="primary" fullWidth onClick={() => navigate('/login')}>
             返回登录
           </Button>
-        </Card>
-      </div>
-    );
-  }
-
-  // Loading while auto-redirect happens
-  return (
-    <div className="page--auth">
-      <Card padding="lg">
-        <CardTitle>授权中...</CardTitle>
-        <p style={{ color: 'var(--color-text-secondary)', marginBlock: 'var(--space-4)' }}>
-          正在处理授权请求...
-        </p>
-        <div style={{ marginTop: 'var(--space-4)' }}>
-          <Button variant="secondary" onClick={() => navigate('/login')}>
-            取消
+        </div>
+      ) : (
+        <div className="stack">
+          <div className="status-badge status-badge--info">
+            {decodedClientName ? `正在连接应用：${decodedClientName}` : '正在处理授权请求'}
+          </div>
+          <p className="section-description">
+            {authLoading
+              ? '正在确认账户状态，请稍候。'
+              : '授权请求会在登录确认后自动继续，无需重复输入参数。'}
+          </p>
+          <Button variant="secondary" fullWidth onClick={() => navigate('/login')}>
+            取消并返回登录
           </Button>
         </div>
-      </Card>
-    </div>
+      )}
+    </AuthShell>
   );
 }

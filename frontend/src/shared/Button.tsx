@@ -1,7 +1,5 @@
 import { type ButtonHTMLAttributes, forwardRef } from 'react';
 
-// ─── Variants ────────────────────────────────────────────────────────────────
-
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
@@ -50,7 +48,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
     return (
       <button ref={ref} className={classes} disabled={disabled || loading} {...rest}>
-        {loading && <span aria-hidden="true">...</span>}
+        {loading && <span className="btn__loader" aria-hidden="true">...</span>}
         {children}
       </button>
     );

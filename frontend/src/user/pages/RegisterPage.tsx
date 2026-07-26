@@ -3,9 +3,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
-import { Card, CardTitle } from '@/shared/Card';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
+import { AuthShell } from '@/user/components/AuthShell';
 
 interface ChallengeQuestion {
   id: number;
@@ -13,20 +13,17 @@ interface ChallengeQuestion {
   csrf: string;
 }
 
-/**
- * Registration page with optional challenge question support.
- */
 export function RegisterPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { user, login } = useAuth();
   const { toast } = useToast();
 
-  // OAuth redirect params (preserve for redirect after registration)
   const redirectUri = params.get('redirect_uri') || '';
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
   const stateParam = params.get('state') || '';
+  const decodedClientName = clientName ? decodeURIComponent(clientName) : '';
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -34,19 +31,16 @@ export function RegisterPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Challenge question state
   const [challenge, setChallenge] = useState<ChallengeQuestion | null>(null);
   const [challengeAnswer, setChallengeAnswer] = useState('');
   const [challengeError, setChallengeError] = useState('');
 
-  // Redirect to dashboard if already logged in
   useEffect(() => {
     if (user) {
       navigate('/dashboard', { replace: true });
     }
   }, [user, navigate]);
 
-  // Fetch challenge question on mount
   useEffect(() => {
     api
       .get<{ success: boolean; challenge?: ChallengeQuestion }>('/api/challenge/random')
@@ -55,9 +49,7 @@ export function RegisterPage() {
           setChallenge(res.challenge);
         }
       })
-      .catch(() => {
-        // Challenge not required or not available
-      });
+      .catch(() => {});
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -71,7 +63,6 @@ export function RegisterPage() {
 
     setLoading(true);
     try {
-      // Verify challenge if present
       if (challenge) {
         try {
           await api.post('/api/challenge/verify', {
@@ -85,7 +76,6 @@ export function RegisterPage() {
         }
       }
 
-      // Register
       const res = await api.post<{ success: boolean; message: string }>('/api/register', {
         username: username.trim(),
         email: email.trim(),
@@ -95,7 +85,6 @@ export function RegisterPage() {
       if (res.success) {
         toast('success', res.message || '注册成功');
 
-        // Auto-login after registration
         try {
           await login(username.trim(), password);
 
@@ -123,80 +112,79 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="page--auth">
-      <Card padding="lg">
-        <CardTitle>
-          {clientId && clientName
-            ? `注册 ${decodeURIComponent(clientName)}`
-            : '注册 MindAuth'}
-        </CardTitle>
+    <AuthShell
+      title={clientId && decodedClientName ? `注册 ${decodedClientName}` : '创建 MindAuth 账户'}
+      description={clientId && decodedClientName
+        ? `创建账户后将继续跳转到 ${decodedClientName} 完成授权。`
+        : '注册后即可统一管理账户资料、会话状态和授权应用。'}
+      eyebrow={clientId ? 'OAuth 注册授权' : 'MindAuth 账户注册'}
+      heroTitle={clientId ? '先创建账户，再继续应用授权。' : '创建一个可靠的统一账户入口。'}
+      heroDescription={clientId
+        ? '注册完成后会自动登录，并保留当前 OAuth 上下文继续返回应用。'
+        : '统一入口用于管理邮箱验证、会话记录、通知与安全能力，适配社区与开发者场景。'}
+      footer={
+        <Link to="/login" className="inline-link">
+          已有账号？登录
+        </Link>
+      }
+    >
+      <form id="register-form" onSubmit={handleSubmit} data-testid="register-form">
+        <div className="stack">
+          {clientId && decodedClientName ? (
+            <div className="status-badge status-badge--info">注册后将继续连接：{decodedClientName}</div>
+          ) : null}
+          <TextField
+            id="username"
+            label="用户名"
+            name="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            error={error}
+            placeholder="至少 3 个字符"
+            autoComplete="username"
+            autoFocus
+          />
+          <TextField
+            id="email"
+            label="邮箱"
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="请输入邮箱地址"
+            autoComplete="email"
+          />
+          <TextField
+            id="password"
+            label="密码"
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            hint="至少 8 个字符，包含大小写字母和数字"
+            placeholder="请输入密码"
+            autoComplete="new-password"
+          />
 
-        <form
-          id="register-form"
-          onSubmit={handleSubmit}
-          style={{ marginTop: 'var(--space-4)' }}
-          data-testid="register-form"
-        >
-          <div className="stack">
+          {challenge ? (
             <TextField
-              id="username"
-              label="用户名"
-              name="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              error={error}
-              placeholder="至少3个字符"
-              autoComplete="username"
-              autoFocus
+              label={`验证问题：${challenge.question}`}
+              name="challenge"
+              value={challengeAnswer}
+              onChange={(e) => {
+                setChallengeAnswer(e.target.value);
+                setChallengeError('');
+              }}
+              error={challengeError}
+              placeholder="请输入答案"
             />
-            <TextField
-              id="email"
-              label="邮箱"
-              type="email"
-              name="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="请输入邮箱地址"
-              autoComplete="email"
-            />
-            <TextField
-              id="password"
-              label="密码"
-              type="password"
-              name="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              hint="至少8个字符，包含大小写字母和数字"
-              placeholder="请输入密码"
-              autoComplete="new-password"
-            />
+          ) : null}
 
-            {challenge && (
-              <TextField
-                label={`验证问题: ${challenge.question}`}
-                name="challenge"
-                value={challengeAnswer}
-                onChange={(e) => {
-                  setChallengeAnswer(e.target.value);
-                  setChallengeError('');
-                }}
-                error={challengeError}
-                placeholder="请输入答案"
-              />
-            )}
-
-            <Button type="submit" fullWidth loading={loading} data-testid="register-submit">
-              注册
-            </Button>
-          </div>
-        </form>
-
-        <div style={{ marginTop: 'var(--space-4)', textAlign: 'center' }}>
-          <Link to="/login" style={{ color: 'var(--color-primary)', fontSize: 'var(--text-sm)' }}>
-            已有账号？登录
-          </Link>
+          <Button type="submit" fullWidth size="lg" loading={loading} data-testid="register-submit">
+            注册并继续
+          </Button>
         </div>
-      </Card>
-    </div>
+      </form>
+    </AuthShell>
   );
 }

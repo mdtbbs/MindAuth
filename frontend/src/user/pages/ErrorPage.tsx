@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
-import { Card, CardTitle } from '@/shared/Card';
 import { Button } from '@/shared/Button';
+import { AuthShell } from '@/user/components/AuthShell';
 
 interface ErrorPageProps {
   status?: number;
@@ -8,32 +8,46 @@ interface ErrorPageProps {
   message?: string;
 }
 
-/**
- * Generic error page shown for 404s and unexpected errors.
- */
 export function ErrorPage({ status = 404, title, message }: ErrorPageProps) {
-  const defaultTitle = status === 404 ? 'Page Not Found' : 'Error';
+  const defaultTitle = status === 404 ? '页面未找到' : '页面发生错误';
   const defaultMessage =
     status === 404
-      ? 'The page you are looking for does not exist.'
-      : 'Something went wrong. Please try again later.';
+      ? '您访问的页面不存在，可能已被移动或删除。'
+      : '系统暂时无法完成当前操作，请稍后再试。';
 
   return (
-    <div className="page--auth">
-      <Card padding="lg">
-        <CardTitle>{title ?? defaultTitle}</CardTitle>
-        <p style={{ color: 'var(--color-text-secondary)', marginBlock: 'var(--space-4)' }}>
-          {message ?? defaultMessage}
-        </p>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-6)' }}>
+    <AuthShell
+      title={title ?? defaultTitle}
+      description="您仍然可以返回登录页或继续访问账户中心的主要入口。"
+      eyebrow="状态提示"
+      heroTitle="统一入口仍然可用，问题仅限当前页面。"
+      heroDescription="错误页也沿用同一套账户中心风格，避免在恢复路径上出现割裂体验。"
+      footer={
+        <>
+          <Link to="/login" className="inline-link">
+            返回登录
+          </Link>
+          <span className="text-muted">/</span>
+          <Link to="/dashboard" className="inline-link">
+            前往 Dashboard
+          </Link>
+        </>
+      }
+    >
+      <div className="stack">
+        <div className={status === 404 ? 'status-badge status-badge--warning' : 'status-badge status-badge--danger'}>
+          HTTP {status}
+        </div>
+        <p className="section-description">{message ?? defaultMessage}</p>
+        <div className="cluster">
           <Link to="/login">
-            <Button variant="primary">Go to Login</Button>
+            <Button variant="primary">前往登录</Button>
           </Link>
           <Link to="/dashboard">
-            <Button variant="secondary">Dashboard</Button>
+            <Button variant="secondary">打开 Dashboard</Button>
           </Link>
         </div>
-      </Card>
-    </div>
+      </div>
+    </AuthShell>
   );
 }

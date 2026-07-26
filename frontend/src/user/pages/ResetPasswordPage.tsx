@@ -1,14 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import api from '@/api/client';
-import { Card, CardTitle } from '@/shared/Card';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
+import { AuthShell } from '@/user/components/AuthShell';
 
-/**
- * Password reset page with token from email link.
- * Visited via: /reset-password?token=xxx
- */
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
   const token = params.get('token') || '';
@@ -22,7 +18,7 @@ export function ResetPasswordPage() {
     e.preventDefault();
 
     if (!password || password.length < 8) {
-      setError('密码至少需要8个字符');
+      setError('密码至少需要 8 个字符');
       return;
     }
     if (password !== confirm) {
@@ -44,65 +40,72 @@ export function ResetPasswordPage() {
     }
   }
 
-  if (!token) {
-    return (
-      <div className="page--auth">
-        <Card padding="lg">
-          <CardTitle>重置密码</CardTitle>
-          <p style={{ color: 'var(--color-error)', marginBlock: 'var(--space-4)' }}>
-            缺少重置令牌。请检查您的邮件中的重置链接。
-          </p>
-          <Link to="/reset-request">
-            <Button variant="primary">重新请求</Button>
-          </Link>
-        </Card>
-      </div>
-    );
-  }
+  const missingTokenContent = (
+    <div className="stack">
+      <div className="status-badge status-badge--danger">缺少重置令牌</div>
+      <p className="section-description">请重新打开邮件中的完整链接，或重新申请密码重置。</p>
+      <Link to="/reset-request">
+        <Button variant="primary" fullWidth>
+          重新申请重置
+        </Button>
+      </Link>
+    </div>
+  );
 
   return (
-    <div className="page--auth">
-      <Card padding="lg">
-        <CardTitle>设置新密码</CardTitle>
-
-        {success ? (
-          <div style={{ marginTop: 'var(--space-4)' }}>
-            <p style={{ color: 'var(--color-success)', marginBottom: 'var(--space-4)' }}>
-              密码已重置成功！
-            </p>
-            <Link to="/login">
-              <Button variant="primary">前往登录</Button>
-            </Link>
+    <AuthShell
+      title="设置新密码"
+      description="为您的 MindAuth 账户设置一个新的登录密码。"
+      eyebrow="密码重置"
+      heroTitle="重设密码，同时保留原有账户与授权数据。"
+      heroDescription="完成重置后，您可以继续使用原账户查看账户中心、通知、安全设置和 OAuth 授权记录。"
+      footer={
+        <Link to="/login" className="inline-link">
+          返回登录
+        </Link>
+      }
+    >
+      {!token ? (
+        missingTokenContent
+      ) : success ? (
+        <div className="stack">
+          <div className="status-badge status-badge--success">密码已重置成功</div>
+          <p className="section-description">新密码已生效，您现在可以返回登录页继续访问账户中心。</p>
+          <Link to="/login">
+            <Button variant="primary" fullWidth>
+              前往登录
+            </Button>
+          </Link>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          <div className="stack">
+            <TextField
+              label="新密码"
+              type="password"
+              name="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="至少 8 个字符"
+              autoComplete="new-password"
+              autoFocus
+            />
+            <TextField
+              label="确认新密码"
+              type="password"
+              name="confirmPassword"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              error={error}
+              placeholder="再次输入新密码"
+              autoComplete="new-password"
+            />
+            <Button type="submit" fullWidth size="lg" loading={loading}>
+              重置密码
+            </Button>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} style={{ marginTop: 'var(--space-4)' }}>
-            <div className="stack">
-              <TextField
-                label="新密码"
-                type="password"
-                name="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="至少8个字符"
-                autoComplete="new-password"
-              />
-              <TextField
-                label="确认新密码"
-                type="password"
-                name="confirmPassword"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                error={error}
-                placeholder="再次输入新密码"
-                autoComplete="new-password"
-              />
-              <Button type="submit" fullWidth loading={loading}>
-                重置密码
-              </Button>
-            </div>
-          </form>
-        )}
-      </Card>
-    </div>
+        </form>
+      )}
+    </AuthShell>
   );
 }

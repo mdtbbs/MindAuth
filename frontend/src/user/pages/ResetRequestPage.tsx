@@ -1,14 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/api/client';
-import { Card, CardTitle } from '@/shared/Card';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
+import { AuthShell } from '@/user/components/AuthShell';
 
-/**
- * Password reset request page.
- * User enters their email to receive a reset link.
- */
 export function ResetRequestPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -37,45 +33,50 @@ export function ResetRequestPage() {
   }
 
   return (
-    <div className="page--auth">
-      <Card padding="lg">
-        <CardTitle>重置密码</CardTitle>
-
-        {sent ? (
-          <div style={{ marginTop: 'var(--space-4)' }}>
-            <p style={{ color: 'var(--color-success)', marginBottom: 'var(--space-4)' }}>
-              重置链接已发送到您的邮箱，请查收。
-            </p>
-            <Link to="/login">
-              <Button variant="primary">返回登录</Button>
-            </Link>
-          </div>
-        ) : (
-          <form id="reset-request-form" onSubmit={handleSubmit} style={{ marginTop: 'var(--space-4)' }}>
-            <div className="stack">
-              <TextField
-                label="邮箱"
-                type="email"
-                name="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                error={error}
-                placeholder="请输入注册邮箱"
-                autoComplete="email"
-              />
-              <Button type="submit" fullWidth loading={loading}>
-                发送重置链接
-              </Button>
-            </div>
-          </form>
-        )}
-
-        <div style={{ marginTop: 'var(--space-4)', textAlign: 'center' }}>
-          <Link to="/login" style={{ color: 'var(--color-primary)', fontSize: 'var(--text-sm)' }}>
-            返回登录
+    <AuthShell
+      title="找回密码"
+      description="输入您注册时使用的邮箱，我们会发送重置链接。"
+      eyebrow="账户恢复"
+      heroTitle="快速恢复账户访问权限。"
+      heroDescription="重置流程不会改变现有账户数据，仅用于重新设置登录密码。请优先使用您已验证的邮箱地址。"
+      footer={
+        <Link to="/login" className="inline-link">
+          返回登录
+        </Link>
+      }
+    >
+      {sent ? (
+        <div className="stack">
+          <div className="status-badge status-badge--success">重置邮件已发送</div>
+          <p className="section-description">
+            如果邮箱地址有效，您将很快收到重置链接。完成后可返回登录页继续访问。
+          </p>
+          <Link to="/login">
+            <Button variant="primary" fullWidth>
+              返回登录
+            </Button>
           </Link>
         </div>
-      </Card>
-    </div>
+      ) : (
+        <form id="reset-request-form" onSubmit={handleSubmit}>
+          <div className="stack">
+            <TextField
+              label="邮箱"
+              type="email"
+              name="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              error={error}
+              placeholder="请输入注册邮箱"
+              autoComplete="email"
+              autoFocus
+            />
+            <Button type="submit" fullWidth size="lg" loading={loading}>
+              发送重置链接
+            </Button>
+          </div>
+        </form>
+      )}
+    </AuthShell>
   );
 }

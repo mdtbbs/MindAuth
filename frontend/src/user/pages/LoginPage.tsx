@@ -2,17 +2,10 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
-import { Card, CardTitle } from '@/shared/Card';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
+import { AuthShell } from '@/user/components/AuthShell';
 
-/**
- * Login page with OAuth redirect preservation.
- *
- * When accessed with OAuth query params (redirect_uri, client_id, etc.),
- * the page shows the client name and redirects back to /api/authorize
- * after successful login.
- */
 export function LoginPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -28,26 +21,43 @@ export function LoginPage() {
   const codeChallengeMethod = params.get('code_challenge_method') || '';
 
   const isOAuthFlow = Boolean(redirectUri && clientId);
+  const decodedClientName = clientName ? decodeURIComponent(clientName) : '';
+
+  function buildAuthorizeParams() {
+    return new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      ...(state && { state }),
+      ...(scope && { scope }),
+      ...(codeChallenge && { code_challenge: codeChallenge }),
+      ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+    });
+  }
+
+  function buildAuthFlowParams() {
+    return new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      ...(clientName && { client_name: clientName }),
+      ...(state && { state }),
+      ...(scope && { scope }),
+      ...(codeChallenge && { code_challenge: codeChallenge }),
+      ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+    });
+  }
+
+  const authFlowQuery = isOAuthFlow ? buildAuthFlowParams().toString() : '';
+  const registerHref = authFlowQuery ? `/register?${authFlowQuery}` : '/register';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Redirect to dashboard if already logged in (and not in OAuth flow)
   useEffect(() => {
     if (user && !authLoading) {
       if (isOAuthFlow) {
-        // Redirect to OAuth authorize endpoint
-        const oauthParams = new URLSearchParams({
-          client_id: clientId,
-          redirect_uri: redirectUri,
-          ...(state && { state }),
-          ...(scope && { scope }),
-          ...(codeChallenge && { code_challenge: codeChallenge }),
-          ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
-        });
-        window.location.href = `/api/authorize?${oauthParams.toString()}`;
+        window.location.href = `/api/authorize?${buildAuthorizeParams().toString()}`;
       } else {
         navigate('/dashboard', { replace: true });
       }
@@ -56,10 +66,10 @@ export function LoginPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError('');
+    setFormError('');
 
     if (!username.trim() || !password) {
-      setError('请输入用户名和密码');
+      setFormError('请输入用户名和密码');
       return;
     }
 
@@ -69,81 +79,82 @@ export function LoginPage() {
       toast('success', '登录成功');
 
       if (isOAuthFlow) {
-        // After login, navigate to authorize endpoint
-        const oauthParams = new URLSearchParams({
-          client_id: clientId,
-          redirect_uri: redirectUri,
-          ...(state && { state }),
-          ...(scope && { scope }),
-          ...(codeChallenge && { code_challenge: codeChallenge }),
-          ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
-        });
-        window.location.href = `/api/authorize?${oauthParams.toString()}`;
+        window.location.href = `/api/authorize?${buildAuthorizeParams().toString()}`;
       } else {
         navigate('/dashboard', { replace: true });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '登录失败';
-      setError(msg);
+      setFormError(msg);
       toast('error', msg);
     } finally {
       setLoading(false);
     }
   }
 
+  const title = isOAuthFlow && decodedClientName ? `登录 ${decodedClientName}` : '登录 MindAuth';
+  const description = isOAuthFlow
+    ? `继续后将返回 ${decodedClientName || '目标应用'} 完成授权。`
+    : '使用您的 MindAuth 账户访问控制台、账户中心与授权应用。';
+
   return (
-    <div className="page--auth">
-      <Card padding="lg">
-        <CardTitle>
-          {isOAuthFlow && clientName
-            ? `登录到 ${decodeURIComponent(clientName)}`
-            : '登录 MindAuth'}
-        </CardTitle>
-
-        <form
-          id="login-form"
-          onSubmit={handleSubmit}
-          style={{ marginTop: 'var(--space-4)' }}
-          data-testid="login-form"
-        >
-          <div className="stack">
-            <TextField
-              id="username"
-              label="用户名"
-              name="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              error={error}
-              placeholder="请输入用户名"
-              autoComplete="username"
-              autoFocus
-            />
-            <TextField
-              id="password"
-              label="密码"
-              type="password"
-              name="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="请输入密码"
-              autoComplete="current-password"
-            />
-            <Button type="submit" fullWidth loading={loading} data-testid="login-submit">
-              登录
-            </Button>
-          </div>
-        </form>
-
-        <div style={{ marginTop: 'var(--space-4)', textAlign: 'center' }}>
-          <Link to="/register" style={{ color: 'var(--color-primary)', fontSize: 'var(--text-sm)' }}>
+    <AuthShell
+      title={title}
+      description={description}
+      eyebrow={isOAuthFlow ? 'OAuth 应用授权' : 'MindAuth 统一登录'}
+      heroTitle={isOAuthFlow ? '先完成账户验证，再继续应用授权。' : '欢迎回来，集中管理您的账户与安全状态。'}
+      heroDescription={isOAuthFlow
+        ? '当前授权请求会保留原始参数，登录成功后将自动返回应用继续授权。'
+        : '统一的账号入口，用于登录、查看通知、管理安全设置以及维护授权应用。'}
+      footer={
+        <>
+          <Link to={registerHref} className="inline-link">
             没有账号？注册
           </Link>
-          <span style={{ margin: '0 var(--space-2)', color: 'var(--color-text-muted)' }}>|</span>
-          <Link to="/reset-request" style={{ color: 'var(--color-primary)', fontSize: 'var(--text-sm)' }}>
-            忘记密码？
+          <span className="text-muted">/</span>
+          <Link to="/reset-request" className="inline-link">
+            忘记密码
           </Link>
+        </>
+      }
+    >
+      <form id="login-form" onSubmit={handleSubmit} data-testid="login-form">
+        <div className="stack">
+          {isOAuthFlow && decodedClientName ? (
+            <div className="status-badge status-badge--info">正在连接应用：{decodedClientName}</div>
+          ) : null}
+          {formError ? (
+            <div className="auth-form__alert" role="alert">
+              <div className="status-badge status-badge--danger">登录失败</div>
+              <p className="section-description auth-form__alert-text">{formError}</p>
+            </div>
+          ) : null}
+          <TextField
+            id="username"
+            label="用户名"
+            name="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="请输入用户名"
+            hint="请输入您的 MindAuth 用户名"
+            autoComplete="username"
+            autoFocus
+          />
+          <TextField
+            id="password"
+            label="密码"
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="请输入密码"
+            autoComplete="current-password"
+          />
+          <Button type="submit" fullWidth size="lg" loading={loading} data-testid="login-submit">
+            登录
+          </Button>
         </div>
-      </Card>
-    </div>
+      </form>
+    </AuthShell>
   );
 }
