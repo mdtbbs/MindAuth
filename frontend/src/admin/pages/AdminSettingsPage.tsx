@@ -5,6 +5,7 @@ import { useToast } from '@/shared/ToastProvider';
 import { Card, CardTitle } from '@/shared/Card';
 import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
+import { LoadingState } from '@/shared/LoadingState';
 import type { EmailConfigData, SmsConfigData, SystemConfigItem } from '@/api/types';
 
 type SettingsTab = 'email' | 'sms' | 'system';
@@ -120,7 +121,7 @@ function EmailConfigSection() {
     } finally { setTesting(false); }
   }
 
-  if (loading) return <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>;
+  if (loading) return <LoadingState />;
 
   const canWrite = hasPermission('email_config.write');
 
@@ -233,7 +234,7 @@ function SmsConfigSection() {
     } finally { setTesting(false); }
   }
 
-  if (loading) return <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>;
+  if (loading) return <LoadingState />;
 
   const canWrite = hasPermission('sms_config.write');
 
@@ -316,7 +317,7 @@ function SystemConfigSection() {
     }
   }
 
-  if (loading) return <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>;
+  if (loading) return <LoadingState />;
 
   const canWrite = hasPermission('config.write');
 

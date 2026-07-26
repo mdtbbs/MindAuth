@@ -7,6 +7,7 @@ import { Card, CardTitle, CardDescription } from '@/shared/Card';
 import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
+import { LoadingState } from '@/shared/LoadingState';
 import { AccountShell } from '@/user/components/AccountShell';
 import type {
   Session,
@@ -159,7 +160,7 @@ export function DashboardPage() {
   if (authLoading || !user) {
     return (
       <div className="page--auth auth-shell__main">
-        <div className="empty-state">加载中...</div>
+        <LoadingState />
       </div>
     );
   }

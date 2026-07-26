@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import api from '@/api/client';
+import { useResource } from '@/api/useResource';
+import { useDebouncedValue } from '@/shared/useDebouncedValue';
 import { useAdminAuth } from '../AdminAuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { Card } from '@/shared/Card';
 import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
+import { SkeletonTable } from '@/shared/Skeleton';
 import { Dialog } from '@/shared/Dialog';
 import type { AdminUserListItem, PaginationData } from '@/api/types';
 
@@ -13,12 +16,10 @@ export function AdminUsersPage() {
   const { hasPermission } = useAdminAuth();
   const { toast } = useToast();
 
-  const [users, setUsers] = useState<AdminUserListItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
-  const [pagination, setPagination] = useState<PaginationData | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const debouncedSearch = useDebouncedValue(search, 300);
 
   // Dialog state
   const [selectedUser, setSelectedUser] = useState<AdminUserListItem | null>(null);
@@ -27,35 +28,41 @@ export function AdminUsersPage() {
   const [duration, setDuration] = useState('permanent');
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Reset to page 1 whenever the (debounced) filters change
   useEffect(() => {
-    loadUsers();
-  }, [currentPage, search, roleFilter]);
+    setCurrentPage(1);
+  }, [debouncedSearch, roleFilter]);
 
-  async function loadUsers() {
-    setLoading(true);
-    try {
+  const {
+    data,
+    loading,
+    error,
+    reload: loadUsers,
+  } = useResource(
+    (signal) => {
       const params = new URLSearchParams();
-      if (search) params.append('search', search);
+      if (debouncedSearch) params.append('search', debouncedSearch);
       if (roleFilter) params.append('role', roleFilter);
-      params.append('page', currentPage.toString());
+      params.append('page', String(currentPage));
       params.append('limit', '20');
-
-      const res = await api.get<{ success: boolean; users: AdminUserListItem[]; pagination?: PaginationData }>(
-        `/api/admin/users?${params.toString()}`
+      return api.get<{ success: boolean; users: AdminUserListItem[]; pagination?: PaginationData }>(
+        `/api/admin/users?${params.toString()}`,
+        { signal },
       );
-      setUsers(res.users);
-      if (res.pagination) setPagination(res.pagination);
-    } catch {
-      toast('error', '获取用户列表失败');
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [currentPage, debouncedSearch, roleFilter],
+  );
+
+  const users = data?.users ?? [];
+  const pagination = data?.pagination ?? null;
+
+  useEffect(() => {
+    if (error) toast('error', '获取用户列表失败');
+  }, [error, toast]);
 
   function handleSearch(e: React.FormEvent) {
+    // Debounced query already drives the request; just prevent full-page submit
     e.preventDefault();
-    setCurrentPage(1);
-    loadUsers();
   }
 
   async function handleAction() {
@@ -164,7 +171,7 @@ export function AdminUsersPage() {
       {/* Users Table */}
       <Card>
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)', padding: 'var(--space-4)' }}>加载中...</p>
+          <SkeletonTable rows={8} columns={6} />
         ) : (
           <ResponsiveTable
             columns={[

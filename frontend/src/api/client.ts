@@ -116,10 +116,17 @@ function handle401(res: Response): void {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+export interface RequestOptions {
+  /** AbortSignal for cancellation — pass one so stale in-flight responses can
+   *  be dropped (prevents race conditions when inputs change rapidly). */
+  signal?: AbortSignal;
+}
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  opts: RequestOptions = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -140,6 +147,7 @@ async function request<T>(
     credentials: 'same-origin',
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: opts.signal,
   });
 
   handle401(res);
@@ -157,12 +165,12 @@ async function request<T>(
 // ─── Exported typed helpers ──────────────────────────────────────────────────
 
 export const api = {
-  get<T>(path: string): Promise<T> {
-    return request<T>('GET', path);
+  get<T>(path: string, opts?: RequestOptions): Promise<T> {
+    return request<T>('GET', path, undefined, opts);
   },
 
-  post<T>(path: string, body?: unknown): Promise<T> {
-    return request<T>('POST', path, body);
+  post<T>(path: string, body?: unknown, opts?: RequestOptions): Promise<T> {
+    return request<T>('POST', path, body, opts);
   },
 
   /** POST multipart form data (file uploads). Attaches the CSRF header like other mutating requests. */

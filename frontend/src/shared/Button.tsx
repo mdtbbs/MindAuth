@@ -47,8 +47,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       .join(' ');
 
     return (
-      <button ref={ref} className={classes} disabled={disabled || loading} {...rest}>
-        {loading && <span className="btn__loader" aria-hidden="true">...</span>}
+      <button
+        ref={ref}
+        className={classes}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
+        {...rest}
+      >
+        {loading && <span className="spinner btn__loader" aria-hidden="true" />}
         {children}
       </button>
     );

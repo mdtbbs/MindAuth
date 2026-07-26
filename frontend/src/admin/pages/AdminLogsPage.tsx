@@ -6,6 +6,8 @@ import { Card } from '@/shared/Card';
 import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
+import { SkeletonTable } from '@/shared/Skeleton';
+import { useDebouncedValue } from '@/shared/useDebouncedValue';
 import type { AdminLoginLogEntry, AuditLogEntry, SmsAuditLogEntry, PaginationData } from '@/api/types';
 
 type LogsTab = 'login' | 'audit' | 'sms';
@@ -66,6 +68,7 @@ function LoginLogsSection() {
   const [currentPage, setCurrentPage] = useState(1);
   const [userIdFilter, setUserIdFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+  const debouncedUserId = useDebouncedValue(userIdFilter, 300);
 
   const loadLogs = useCallback(async () => {
     setLoading(true);
@@ -73,7 +76,7 @@ function LoginLogsSection() {
       const params = new URLSearchParams();
       params.append('page', currentPage.toString());
       params.append('limit', '50');
-      if (userIdFilter) params.append('user_id', userIdFilter);
+      if (debouncedUserId) params.append('user_id', debouncedUserId);
       if (typeFilter) params.append('login_type', typeFilter);
 
       const res = await api.get<{ success: boolean; logs: AdminLoginLogEntry[] }>(
@@ -82,7 +85,7 @@ function LoginLogsSection() {
       setLogs(res.logs);
     } catch { toast('error', '获取登录日志失败'); }
     finally { setLoading(false); }
-  }, [currentPage, userIdFilter, typeFilter, toast]);
+  }, [currentPage, debouncedUserId, typeFilter, toast]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
 
@@ -104,7 +107,7 @@ function LoginLogsSection() {
 
       <Card>
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+          <SkeletonTable rows={6} columns={5} />
         ) : (
           <ResponsiveTable
             columns={[
@@ -147,6 +150,7 @@ function AuditLogsSection() {
   const [currentPage, setCurrentPage] = useState(1);
   const [actionFilter, setActionFilter] = useState('');
   const [targetTypeFilter, setTargetTypeFilter] = useState('');
+  const debouncedAction = useDebouncedValue(actionFilter, 300);
 
   const loadLogs = useCallback(async () => {
     setLoading(true);
@@ -154,7 +158,7 @@ function AuditLogsSection() {
       const params = new URLSearchParams();
       params.append('page', currentPage.toString());
       params.append('limit', '50');
-      if (actionFilter) params.append('action', actionFilter);
+      if (debouncedAction) params.append('action', debouncedAction);
       if (targetTypeFilter) params.append('target_type', targetTypeFilter);
 
       const res = await api.get<{ success: boolean; logs: AuditLogEntry[]; pagination?: PaginationData }>(
@@ -164,7 +168,7 @@ function AuditLogsSection() {
       if (res.pagination) setPagination(res.pagination);
     } catch { toast('error', '获取审计日志失败'); }
     finally { setLoading(false); }
-  }, [currentPage, actionFilter, targetTypeFilter, toast]);
+  }, [currentPage, debouncedAction, targetTypeFilter, toast]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
 
@@ -199,7 +203,7 @@ function AuditLogsSection() {
 
       <Card>
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+          <SkeletonTable rows={6} columns={5} />
         ) : (
           <ResponsiveTable
             columns={[
@@ -254,6 +258,7 @@ function SmsLogsSection() {
   const [currentPage, setCurrentPage] = useState(1);
   const [actionFilter, setActionFilter] = useState('');
   const [phoneLast4, setPhoneLast4] = useState('');
+  const debouncedPhone = useDebouncedValue(phoneLast4, 300);
 
   const loadLogs = useCallback(async () => {
     setLoading(true);
@@ -262,7 +267,7 @@ function SmsLogsSection() {
       params.append('page', currentPage.toString());
       params.append('limit', '50');
       if (actionFilter) params.append('action', actionFilter);
-      if (phoneLast4) params.append('phone_last4', phoneLast4);
+      if (debouncedPhone) params.append('phone_last4', debouncedPhone);
 
       const res = await api.get<{ success: boolean; logs: SmsAuditLogEntry[]; pagination?: PaginationData }>(
         `/api/admin/sms-audit-logs?${params.toString()}`
@@ -271,7 +276,7 @@ function SmsLogsSection() {
       if (res.pagination) setPagination(res.pagination);
     } catch { toast('error', '获取短信审计日志失败'); }
     finally { setLoading(false); }
-  }, [currentPage, actionFilter, phoneLast4, toast]);
+  }, [currentPage, actionFilter, debouncedPhone, toast]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
 
@@ -293,7 +298,7 @@ function SmsLogsSection() {
 
       <Card>
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+          <SkeletonTable rows={6} columns={5} />
         ) : (
           <ResponsiveTable
             columns={[

@@ -75,7 +75,7 @@
   top: 0;
   z-index: var(--z-sticky);
   height: var(--header-height);
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-glass-bg);
   border-bottom: 1px solid var(--color-border-soft);
   display: flex;
   align-items: center;
@@ -190,8 +190,8 @@
   gap: var(--space-6);
   padding: var(--space-8);
   border-radius: var(--radius-2xl);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.46) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.56);
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-glass-border);
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(16px);
 }
@@ -232,7 +232,7 @@
 .auth-shell__feature {
   padding: var(--space-4);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--color-glass-bg-strong);
   border: 1px solid var(--color-border-soft);
 }
 
@@ -309,7 +309,7 @@
   top: 0;
   z-index: var(--z-sticky);
   min-height: var(--header-height);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--color-glass-bg);
   border-bottom: 1px solid var(--color-border-soft);
   backdrop-filter: blur(12px);
 }
@@ -425,6 +425,105 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+}
+
+/* ─── Admin shell ──────────────────────────────────────────────
+   Sidebar + content layout for the admin SPA. Mirrors account-shell. */
+.admin-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100dvh;
+  background: var(--color-bg);
+}
+
+.admin-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+  background: var(--color-bg-elevated);
+  border-right: 1px solid var(--color-border-soft);
+  overflow-y: auto;
+}
+
+.admin-sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.admin-sidebar__brand-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.admin-sidebar__brand-meta {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.admin-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.admin-sidebar__footer {
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.admin-sidebar__toggle {
+  display: none;
+}
+
+.admin-content {
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-10);
+}
+
+@media (min-width: 769px) {
+  .admin-content {
+    padding: var(--space-8);
+  }
+}
+
+/* Below md: sidebar collapses to a top bar with a toggle-able drawer */
+@media (max-width: 768px) {
+  .admin-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sidebar {
+    position: sticky;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+
+  .admin-sidebar__toggle {
+    display: inline-flex;
+  }
+
+  .admin-sidebar__nav,
+  .admin-sidebar__footer {
+    display: none;
+  }
+
+  .admin-sidebar__nav.is-open {
+    display: flex;
+  }
+
+  .admin-sidebar__footer.is-open {
+    display: block;
+  }
 }
 
 .account-page__hero {

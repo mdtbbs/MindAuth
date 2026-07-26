@@ -7,6 +7,7 @@ import { Card, CardTitle, CardDescription } from '@/shared/Card';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
 import { Dialog } from '@/shared/Dialog';
+import { LoadingState } from '@/shared/LoadingState';
 import { AccountShell } from '@/user/components/AccountShell';
 import type { PrivacySettings } from '@/api/types';
 
@@ -297,7 +298,7 @@ export function AccountSettingsPage() {
   if (authLoading) {
     return (
       <div className="page--auth auth-shell__main">
-        <div className="empty-state">加载中...</div>
+        <LoadingState />
       </div>
     );
   }

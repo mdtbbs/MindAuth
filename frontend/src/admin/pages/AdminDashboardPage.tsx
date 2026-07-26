@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '@/api/client';
 import { useToast } from '@/shared/ToastProvider';
 import { Card, CardTitle } from '@/shared/Card';
+import { LoadingState } from '@/shared/LoadingState';
 import type { AdminStatsData } from '@/api/types';
 
 export function AdminDashboardPage() {
@@ -25,7 +26,7 @@ export function AdminDashboardPage() {
   }
 
   if (loading) {
-    return <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>;
+    return <LoadingState message="加载统计数据…" />;
   }
 
   if (!stats) {

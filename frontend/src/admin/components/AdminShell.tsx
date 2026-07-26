@@ -41,68 +41,58 @@ export function AdminShell({ children, currentPage, onNavigate }: AdminShellProp
     setMobileMenuOpen(false);
   }
 
+  const openClass = mobileMenuOpen ? ' is-open' : '';
+
   return (
-    <div className="layout--sidebar">
-      <aside className="sidebar">
-        <div style={{ marginBottom: 'var(--space-4)' }}>
-          <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-semibold)' }}>
-            MindAuth Admin
-          </h2>
+    <div className="admin-shell">
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar__brand">
+          <span className="admin-sidebar__brand-title">MindAuth Admin</span>
           {admin && (
-            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-1)' }}>
-              {admin.username} ({admin.role})
-            </p>
+            <span className="admin-sidebar__brand-meta">
+              {admin.username}（{admin.role}）
+            </span>
           )}
         </div>
 
-        {/* Mobile menu toggle */}
         <button
-          className="btn btn--secondary"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          style={{ display: 'none', width: '100%', marginBottom: 'var(--space-3)' }}
-          aria-label="Toggle navigation menu"
+          type="button"
+          className="btn btn--secondary admin-sidebar__toggle"
+          onClick={() => setMobileMenuOpen((v) => !v)}
+          aria-expanded={mobileMenuOpen}
+          aria-controls="admin-nav"
         >
           {mobileMenuOpen ? '隐藏菜单' : '显示菜单'}
         </button>
 
-        <nav className={mobileMenuOpen ? 'sidebar__nav--open' : ''}>
-          <div className="stack stack--sm">
-            {filteredNavItems.map((item) => (
+        <nav id="admin-nav" className={`admin-sidebar__nav${openClass}`} aria-label="管理导航">
+          {filteredNavItems.map((item) => {
+            const active = currentPage === item.id;
+            return (
               <button
                 key={item.id}
-                className={`sidebar__item ${currentPage === item.id ? 'sidebar__item--active' : ''}`}
+                type="button"
+                className="admin-sidebar__item"
+                aria-current={active ? 'page' : undefined}
                 onClick={() => handleNavigate(item.id)}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: 'var(--space-2) var(--space-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: 'none',
-                  background: currentPage === item.id ? 'var(--color-primary-bg)' : 'transparent',
-                  color: currentPage === item.id ? 'var(--color-primary)' : 'var(--color-text)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: currentPage === item.id ? 'var(--weight-semibold)' : 'var(--weight-normal)',
-                }}
               >
-                <span style={{ marginRight: 'var(--space-2)' }}>{item.icon}</span>
+                <span className="admin-sidebar__item-icon" aria-hidden="true">
+                  {item.icon}
+                </span>
                 {item.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </nav>
 
-        <div style={{ marginTop: 'var(--space-6)', paddingTop: 'var(--space-4)', borderTop: '1px solid var(--color-border)' }}>
+        <div className={`admin-sidebar__footer${openClass}`}>
           <Button variant="ghost" size="sm" fullWidth onClick={handleLogout}>
             退出登录
           </Button>
         </div>
       </aside>
 
-      <main className="content">
-        {children}
-      </main>
+      <main className="admin-content">{children}</main>
     </div>
   );
 }

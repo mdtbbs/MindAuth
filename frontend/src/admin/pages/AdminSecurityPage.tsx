@@ -7,6 +7,7 @@ import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
 import { Dialog } from '@/shared/Dialog';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
+import { SkeletonTable } from '@/shared/Skeleton';
 import type { IpBan, Challenge, UserField, PaginationData } from '@/api/types';
 
 type SecurityTab = 'ip_bans' | 'challenges' | 'fields';
@@ -144,7 +145,7 @@ function IpBansSection() {
           </div>
         )}
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+          <SkeletonTable rows={5} columns={4} />
         ) : (
           <ResponsiveTable
             columns={[
@@ -291,7 +292,7 @@ function ChallengesSection() {
           </div>
         )}
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+          <SkeletonTable rows={5} columns={4} />
         ) : (
           <ResponsiveTable
             columns={[
@@ -437,7 +438,7 @@ function FieldsSection() {
           </div>
         )}
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+          <SkeletonTable rows={5} columns={4} />
         ) : (
           <ResponsiveTable
             columns={[

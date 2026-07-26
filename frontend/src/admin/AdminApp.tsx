@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AdminAuthProvider, useAdminAuth } from './AdminAuthProvider';
 import { ToastProvider } from '@/shared/ToastProvider';
+import { LoadingState } from '@/shared/LoadingState';
 import { AdminShell } from './components/AdminShell';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
@@ -40,7 +41,7 @@ function AdminRouter() {
   if (loading) {
     return (
       <div className="page--auth">
-        <p style={{ color: 'var(--color-text-muted)' }}>加载中...</p>
+        <LoadingState />
       </div>
     );
   }

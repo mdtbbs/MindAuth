@@ -7,6 +7,7 @@ import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
 import { Dialog } from '@/shared/Dialog';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
+import { SkeletonTable } from '@/shared/Skeleton';
 import type { AdminOAuthClient, AdminCreatedClient } from '@/api/types';
 
 export function AdminClientsPage() {
@@ -167,7 +168,7 @@ export function AdminClientsPage() {
 
       <Card>
         {loading ? (
-          <p style={{ color: 'var(--color-text-muted)', padding: 'var(--space-4)' }}>加载中...</p>
+          <SkeletonTable rows={5} columns={4} />
         ) : (
           <ResponsiveTable
             columns={[
