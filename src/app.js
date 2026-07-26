@@ -56,21 +56,31 @@ function createApp(deps = {}) {
   const CDN_URL = config.server.cdnUrl;
   const ALLOWED_ORIGINS = config.server.allowedOrigins;
 
-  // CORS middleware - allow cross-origin API requests
-  app.use(cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl)
-      if (!origin) return callback(null, true);
-
-      if (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,  // Allow cookies
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+  // CORS middleware - allow cross-origin API requests.
+  // Same-origin requests (Origin host === request Host) are always allowed —
+  // browsers attach an Origin header to fetch/crossorigin-asset requests even
+  // same-site, and rejecting those breaks the site itself (asset 500s, CSRF
+  // token fetch failures) whenever the exact origin isn't in ALLOWED_ORIGINS.
+  // Unknown origins get a response WITHOUT CORS headers (the browser blocks
+  // cross-origin reads) instead of a hard 500.
+  app.use(cors((req, callback) => {
+    const origin = req.headers.origin;
+    let allow;
+    if (!origin) {
+      allow = true; // non-browser clients / same-origin navigations
+    } else {
+      let sameOrigin = false;
+      try {
+        sameOrigin = new URL(origin).host === req.headers.host;
+      } catch { /* malformed Origin -> not same-origin */ }
+      allow = sameOrigin || ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*');
+    }
+    callback(null, {
+      origin: allow,
+      credentials: true,  // Allow cookies
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token']
+    });
   }));
 
   // Security headers with CDN support
