@@ -5,6 +5,25 @@ import { Card, CardTitle } from '@/shared/Card';
 import { LoadingState } from '@/shared/LoadingState';
 import type { AdminStatsData } from '@/api/types';
 
+/** 7 天迷你条形图：单系列品牌色，零值以中性短杆表示，数值直接标注 */
+function TrendBars({ points, label }: { points: Array<{ date: string; count: number }>; label: string }) {
+  const max = Math.max(1, ...points.map((p) => p.count));
+  return (
+    <div className="trend-chart" role="img" aria-label={label}>
+      {points.map((p) => (
+        <div key={p.date} className="trend-chart__col" title={`${p.date}：${p.count}`}>
+          <span className="trend-chart__value">{p.count}</span>
+          <div
+            className={`trend-chart__bar${p.count === 0 ? ' trend-chart__bar--zero' : ''}`}
+            style={{ height: `${Math.max(4, (p.count / max) * 100)}%` }}
+          />
+          <span className="trend-chart__date">{p.date.slice(5)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AdminDashboardPage() {
   const { toast } = useToast();
   const [stats, setStats] = useState<AdminStatsData | null>(null);
@@ -95,25 +114,11 @@ export function AdminDashboardPage() {
       <div className="grid grid--2">
         <Card>
           <CardTitle>7天用户增长</CardTitle>
-          <div className="stack stack--sm">
-            {stats.trends.userGrowth.map((point) => (
-              <div key={point.date} className="cluster cluster--spread">
-                <span style={{ fontSize: 'var(--text-sm)' }}>{point.date}</span>
-                <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' }}>{point.count}</span>
-              </div>
-            ))}
-          </div>
+          <TrendBars points={stats.trends.userGrowth} label="7天用户增长趋势图" />
         </Card>
         <Card>
           <CardTitle>7天登录趋势</CardTitle>
-          <div className="stack stack--sm">
-            {stats.trends.loginTrend.map((point) => (
-              <div key={point.date} className="cluster cluster--spread">
-                <span style={{ fontSize: 'var(--text-sm)' }}>{point.date}</span>
-                <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' }}>{point.count}</span>
-              </div>
-            ))}
-          </div>
+          <TrendBars points={stats.trends.loginTrend} label="7天登录趋势图" />
         </Card>
       </div>
     </div>

@@ -383,9 +383,59 @@ img {
   border-top: 1px solid var(--color-border-soft);
 }
 
+/* ─── 迷你趋势条形图（管理端仪表盘） ─── */
+.trend-chart {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  height: 9rem;
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.trend-chart__col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.trend-chart__value {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.trend-chart__bar {
+  width: 100%;
+  max-width: 2.25rem;
+  background: var(--color-primary);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.trend-chart__bar--zero {
+  background: var(--color-border);
+}
+
+.trend-chart__date {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border-soft);
+  width: 100%;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .toast-container {
   position: fixed;
-  top: var(--space-4);
+  /* 页头之下，避免遮挡页头右侧按钮 */
+  top: calc(var(--header-height) + var(--space-3));
   right: var(--space-4);
   z-index: var(--z-toast);
   display: flex;
