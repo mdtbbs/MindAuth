@@ -1,7 +1,9 @@
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@playwright/test';
 
 const CLIENT_ID = '6d875cc521f1c60ba17dd53c7b9edc5a';
 const CLIENT_SECRET = '35d820f46aa6a1b330258d3af5b60b3c0094719acebcb149fc03d96cdf8f99f1';
+// Must exactly match the redirect_uri registered by src/db/seeds/testSeeds.js
+const REDIRECT_URI = 'http://localhost:4000/api/auth/callback';
 const ADMIN_SECRET = 'admin123';
 
 // Clear rate limits before all tests
@@ -21,22 +23,22 @@ test.describe('OAuth Authorization Code Flow', () => {
     const testEmail = testUsername + '@test.com';
     const testPassword = 'TestPass123';
 
-    // Step 1: 注册用户（通过 UI）
-    await page.goto('/#register');
+    // Step 1: 注册用户（通过 React UI）
+    // 注册限流为 5/小时，先清理限流计数
+    await page.request.post('/api/admin/test/clear-rate-limits', {
+      data: { secret: ADMIN_SECRET }
+    }).catch(() => {});
+
+    await page.goto('/register');
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', testUsername);
     await page.fill('#email', testEmail);
     await page.fill('#password', testPassword);
     await page.click('#register-form button[type="submit"]');
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
 
-    // Step 2: 登录（通过 UI）- 浏览器上下文保持 session cookie
-    await page.goto('/#login');
-    await page.waitForSelector('#login-form', { timeout: 5000 });
-    await page.fill('#username', testUsername);
-    await page.fill('#password', testPassword);
-    await page.click('#login-form button[type="submit"]');
-    await page.waitForSelector('.auth-shell', { timeout: 5000 });
+    // Step 2: 注册成功后应用自动登录并跳转 /dashboard —
+    // 浏览器上下文保持 session cookie
+    await page.waitForURL('**/dashboard', { timeout: 10000 });
 
     // 验证登录成功 - 检查 /api/me 返回用户信息
     const meResponse = await page.request.get('/api/me');
@@ -46,9 +48,9 @@ test.describe('OAuth Authorization Code Flow', () => {
     expect(meData.username).toBe(testUsername);
 
     // Step 3: 访问 authorize 端点 - 使用 page.request 处理重定向
-    const redirectUri = encodeURIComponent('http://localhost:4500/api/auth/callback');
-    const state = encodeURIComponent('/');
-    const authorizeUrl = `/api/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&state=${state}`;
+    const authorizeUrl = `/api/authorize?client_id=${CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&response_type=code&state=${encodeURIComponent('/')}`;
 
     // 使用 page.request 获取 authorize 响应（携带 session cookie）
     const authRes = await page.request.get(authorizeUrl, { maxRedirects: 0 });
@@ -69,6 +71,7 @@ test.describe('OAuth Authorization Code Flow', () => {
         code: authCode,
         client_id: CLIENT_ID,
         client_secret: CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
         grant_type: 'authorization_code'
       }
     });

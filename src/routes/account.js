@@ -220,6 +220,9 @@ router.post('/avatar', requireAuth, avatarUpload.single('file'), async (req, res
     // 更新数据库
     await pool.execute('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, user.id]);
 
+    // 会话缓存中存有完整用户资料，需失效以便 /api/me 返回最新头像
+    await sessionManager.invalidateUserSessionCache(req.cookies.session);
+
     logUserAudit({
       user_id: user.id,
       action: 'avatar_changed',
@@ -252,6 +255,9 @@ router.delete('/avatar', requireAuth, async (req, res) => {
     // 更新数据库
     await pool.execute('UPDATE users SET avatar_url = NULL WHERE id = ?', [user.id]);
 
+    // 会话缓存中存有完整用户资料，需失效以便 /api/me 返回最新头像
+    await sessionManager.invalidateUserSessionCache(req.cookies.session);
+
     res.json({ success: true });
   } catch (err) {
     console.error('Avatar delete error:', err);
@@ -277,6 +283,9 @@ router.post('/banner', requireAuth, bannerUpload.single('file'), async (req, res
 
     // 更新数据库
     await pool.execute('UPDATE users SET banner_url = ? WHERE id = ?', [bannerUrl, user.id]);
+
+    // 会话缓存中存有完整用户资料，需失效以便 /api/me 返回最新横幅
+    await sessionManager.invalidateUserSessionCache(req.cookies.session);
 
     logUserAudit({
       user_id: user.id,
@@ -309,6 +318,9 @@ router.delete('/banner', requireAuth, async (req, res) => {
 
     // 更新数据库
     await pool.execute('UPDATE users SET banner_url = NULL WHERE id = ?', [user.id]);
+
+    // 会话缓存中存有完整用户资料，需失效以便 /api/me 返回最新横幅
+    await sessionManager.invalidateUserSessionCache(req.cookies.session);
 
     res.json({ success: true });
   } catch (err) {

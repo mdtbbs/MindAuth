@@ -32,38 +32,60 @@ function generateLargeBuffer(sizeKB) {
   return Buffer.concat([PNG_MINIMAL, padding]);
 }
 
-// Helper: Register and login user
-async function registerAndLogin(page, username, email, password) {
-  await page.goto('/#register');
-  await page.waitForSelector('#register-form', { timeout: 5000 });
-  await page.fill('#username', username);
-  await page.fill('#email', email);
-  await page.fill('#password', password);
-  await page.click('#register-form button[type="submit"]');
-  await page.waitForSelector('#toast.show', { timeout: 5000 });
-  await page.waitForTimeout(500);
+// ─── 共享工具（同 auth.spec.js 风格）─────────────────────────────────────────
 
-  await page.goto('/#login');
-  await page.waitForSelector('#login-form', { timeout: 5000 });
-  await page.fill('#username', username);
-  await page.fill('#password', password);
-  await page.click('#login-form button[type="submit"]');
-  await page.waitForSelector('#username-display', { timeout: 5000 });
-
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(500);
+/** React ToastProvider 渲染 .toast-container > .toast（无 #toast 旧 id） */
+function toastWith(page, text) {
+  return page.locator('.toast', { hasText: text }).first();
 }
 
-// Helper: Upload file via filechooser
-async function uploadFile(page, inputId, file) {
-  const [fileChooser] = await Promise.all([
-    page.waitForEvent('filechooser'),
-    page.evaluate((id) => {
-      const input = document.getElementById(id);
-      if (input) input.click();
-    }, inputId)
-  ]);
-  await fileChooser.setFiles(file);
+/** 注册一个新用户；注册成功后应用会自动登录并跳转 /dashboard */
+async function registerUser(page, prefix) {
+  // 注册限流为 5/小时，本文件会注册多个用户，先清理限流计数
+  await page.request.post('/api/admin/test/clear-rate-limits', {
+    data: { secret: ADMIN_SECRET }
+  }).catch(() => {});
+  const username = `${prefix}_${Date.now()}`;
+  await page.goto('/register');
+  await page.waitForSelector('#register-form', { timeout: 5000 });
+  await page.fill('#username', username);
+  await page.fill('#email', `${username}@test.com`);
+  await page.fill('#password', 'TestPass123');
+  await page.click('#register-form button[type="submit"]');
+  await page.waitForURL('**/dashboard', { timeout: 10000 });
+  return username;
+}
+
+/**
+ * 注册新用户并进入账户设置「个人资料」tab。
+ * 该 tab 为默认激活 tab，包含隐藏的头像/横幅 file input
+ * （data-testid="avatar-input" / "banner-input"）。
+ */
+async function registerAndOpenProfile(page, prefix) {
+  const username = await registerUser(page, prefix);
+  await page.goto('/account-settings');
+  await page.waitForSelector('[data-testid="avatar-input"]', { state: 'attached', timeout: 8000 });
+  return username;
+}
+
+/** 通过隐藏 file input 上传（React 用 ref 触发点击，setInputFiles 直接可用） */
+async function uploadVia(page, testId, file) {
+  await page.setInputFiles(`[data-testid="${testId}"]`, file);
+}
+
+/**
+ * 直接调用上传 API（带 CSRF），用于验证服务端 multer 限制。
+ * 前端在选择文件时已做同样的大小预检，超限文件不会发到服务端，
+ * 因此服务端限制需要绕过 UI 直接断言。
+ */
+async function apiUpload(page, path, file) {
+  const csrfRes = await page.request.get('/api/csrf-token');
+  const { csrf_token: csrfToken } = await csrfRes.json();
+  const res = await page.request.post(path, {
+    headers: { 'X-CSRF-Token': csrfToken },
+    multipart: { file }
+  });
+  return { status: res.status(), body: await res.json() };
 }
 
 test.beforeAll(async ({ request }) => {
@@ -71,312 +93,218 @@ test.beforeAll(async ({ request }) => {
     await request.post('/api/admin/test/clear-rate-limits', {
       data: { secret: ADMIN_SECRET }
     });
-  } catch (err) {}
+  } catch (err) {
+    // Ignore if endpoint doesn't exist
+  }
 });
 
 test.describe.serial('头像功能', () => {
-  const password = 'TestPass123';
-
-  test.beforeAll(async ({ request }) => {
-    await request.post('/api/admin/test/clear-rate-limits', {
-      data: { secret: ADMIN_SECRET }
-    });
-  });
+  const avatarImg = (page) => page.locator('.settings-profile .account-avatar img');
 
   test.beforeEach(async ({ page, context }) => {
     await context.clearCookies();
-    const username = 'pw_avatar_' + Date.now();
-    const email = 'pw_avatar_' + Date.now() + '@test.com';
-    await registerAndLogin(page, username, email, password);
-  });
-
-  test.afterEach(async ({ request }) => {
-    await request.post('/api/admin/test/clear-rate-limits', {
-      data: { secret: ADMIN_SECRET }
-    });
+    await registerAndOpenProfile(page, 'pw_avatar');
   });
 
   test('头像上传成功', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
+    await uploadVia(page, 'avatar-input', {
       name: 'test-avatar.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
 
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await expect(page.locator('#avatar-img')).toBeVisible();
+    await expect(toastWith(page, '头像已更新')).toBeVisible({ timeout: 5000 });
+    await expect(avatarImg(page)).toBeVisible();
   });
 
   test('头像大小超限', async ({ page }) => {
-    // Use frontend's apiFetch which handles CSRF
     const largeBuffer = generateLargeBuffer(2500);
 
-    const result = await page.evaluate(async (bufferBase64) => {
-      const buffer = Uint8Array.from(atob(bufferBase64), c => c.charCodeAt(0));
-      const formData = new FormData();
-      formData.append('file', new Blob([buffer], { type: 'image/png' }), 'large.png');
+    // 前端预检：选择超过 2MB 的文件时直接提示，不发请求
+    await uploadVia(page, 'avatar-input', {
+      name: 'large.png',
+      mimeType: 'image/png',
+      buffer: largeBuffer
+    });
+    await expect(toastWith(page, '图片大小不能超过 2MB')).toBeVisible({ timeout: 5000 });
 
-      // Use window.apiFetch which handles CSRF tokens
-      try {
-        const res = await window.apiFetch('/api/account/avatar', {
-          method: 'POST',
-          body: formData,
-          headers: {}
-        });
-        return { status: res.success ? 200 : 400, body: res };
-      } catch (e) {
-        return { status: 0, body: { message: e.message } };
-      }
-    }, largeBuffer.toString('base64'));
-
-    // Multer should reject with error
+    // 服务端 multer 限制：绕过前端直接上传，应返回 400
+    const result = await apiUpload(page, '/api/account/avatar', {
+      name: 'large.png',
+      mimeType: 'image/png',
+      buffer: largeBuffer
+    });
+    expect(result.status).toBe(400);
     expect(result.body.success).toBe(false);
     expect(result.body.message).toContain('图片大小不能超过 2MB');
   });
 
   test('头像格式错误', async ({ page }) => {
-    const textBuffer = Buffer.from('This is not an image');
-
-    await uploadFile(page, 'avatar-file-input', {
+    // file input 的 accept 属性可被 setInputFiles 绕过，由服务端拒绝
+    await uploadVia(page, 'avatar-input', {
       name: 'invalid.txt',
       mimeType: 'text/plain',
-      buffer: textBuffer
+      buffer: Buffer.from('This is not an image')
     });
 
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    const toastText = await page.locator('#toast').textContent();
-    expect(toastText).toBeTruthy();
+    await expect(toastWith(page, '只支持 JPEG、PNG、GIF、WebP 格式的图片')).toBeVisible({ timeout: 5000 });
   });
 
   test('头像删除成功', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
+    await uploadVia(page, 'avatar-input', {
       name: 'test-avatar.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await page.waitForTimeout(500);
+    await expect(toastWith(page, '头像已更新')).toBeVisible({ timeout: 5000 });
+    await expect(avatarImg(page)).toBeVisible();
 
-    // Use page.evaluate with apiFetch for proper CSRF handling
-    const result = await page.evaluate(async () => {
-      const res = await window.apiFetch('/api/account/avatar', { method: 'DELETE' });
-      return res;
-    });
+    // 上传成功后「删除头像」按钮出现在个人资料 tab
+    await page.getByRole('button', { name: '删除头像' }).click();
+    await expect(toastWith(page, '头像已删除')).toBeVisible({ timeout: 5000 });
+    await expect(avatarImg(page)).toHaveCount(0);
 
-    expect(result.success).toBe(true);
-
+    // 刷新后仍显示首字母占位而非图片
     await page.reload();
-    await page.waitForSelector('#username-display', { timeout: 5000 });
-    await page.waitForTimeout(1000);
-
-    await expect(page.locator('#avatar-letter')).toBeVisible();
-    await expect(page.locator('#avatar-img')).toBeHidden();
+    await page.waitForSelector('.settings-profile .account-avatar', { timeout: 8000 });
+    await expect(avatarImg(page)).toHaveCount(0);
   });
 
   test('头像更换成功', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
+    await uploadVia(page, 'avatar-input', {
       name: 'avatar1.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await page.waitForTimeout(500);
+    await expect(toastWith(page, '头像已更新')).toBeVisible({ timeout: 5000 });
+    await expect(avatarImg(page)).toBeVisible();
+    const firstSrc = await avatarImg(page).getAttribute('src');
 
-    await uploadFile(page, 'avatar-file-input', {
+    await uploadVia(page, 'avatar-input', {
       name: 'avatar2.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await expect(page.locator('#avatar-img')).toBeVisible();
+    // 服务端以时间戳命名文件，更换成功后 src 必然变化
+    await expect(avatarImg(page)).not.toHaveAttribute('src', firstSrc, { timeout: 5000 });
+    await expect(avatarImg(page)).toBeVisible();
   });
 });
 
-test.describe.serial('背景图功能', () => {
-  const password = 'TestPass123';
-
-  test.beforeAll(async ({ request }) => {
-    await request.post('/api/admin/test/clear-rate-limits', {
-      data: { secret: ADMIN_SECRET }
-    });
-  });
+test.describe.serial('横幅功能', () => {
+  const bannerImg = (page) => page.locator('.settings-banner img');
 
   test.beforeEach(async ({ page, context }) => {
     await context.clearCookies();
-    const username = 'pw_banner_' + Date.now();
-    const email = 'pw_banner_' + Date.now() + '@test.com';
-    await registerAndLogin(page, username, email, password);
+    await registerAndOpenProfile(page, 'pw_banner');
   });
 
-  test.afterEach(async ({ request }) => {
-    await request.post('/api/admin/test/clear-rate-limits', {
-      data: { secret: ADMIN_SECRET }
-    });
-  });
-
-  test('背景图上传成功', async ({ page }) => {
-    await uploadFile(page, 'banner-file-input', {
+  test('横幅上传成功', async ({ page }) => {
+    await uploadVia(page, 'banner-input', {
       name: 'test-banner.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
 
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('背景图已更新');
-    await expect(page.locator('#banner-display img')).toBeVisible();
+    await expect(toastWith(page, '横幅已更新')).toBeVisible({ timeout: 5000 });
+    await expect(bannerImg(page)).toBeVisible();
   });
 
-  test('背景图大小超限', async ({ page }) => {
+  test('横幅大小超限', async ({ page }) => {
     const largeBuffer = generateLargeBuffer(6000);
 
-    const result = await page.evaluate(async (bufferBase64) => {
-      const buffer = Uint8Array.from(atob(bufferBase64), c => c.charCodeAt(0));
-      const formData = new FormData();
-      formData.append('file', new Blob([buffer], { type: 'image/png' }), 'large.png');
+    // 前端预检：超过 5MB 直接提示
+    await uploadVia(page, 'banner-input', {
+      name: 'large.png',
+      mimeType: 'image/png',
+      buffer: largeBuffer
+    });
+    await expect(toastWith(page, '图片大小不能超过 5MB')).toBeVisible({ timeout: 5000 });
 
-      try {
-        const res = await window.apiFetch('/api/account/banner', {
-          method: 'POST',
-          body: formData,
-          headers: {}
-        });
-        return { status: res.success ? 200 : 400, body: res };
-      } catch (e) {
-        return { status: 0, body: { message: e.message } };
-      }
-    }, largeBuffer.toString('base64'));
-
+    // 服务端 multer 限制
+    const result = await apiUpload(page, '/api/account/banner', {
+      name: 'large.png',
+      mimeType: 'image/png',
+      buffer: largeBuffer
+    });
+    expect(result.status).toBe(400);
     expect(result.body.success).toBe(false);
     expect(result.body.message).toContain('图片大小不能超过 5MB');
   });
 
-  test('背景图格式错误', async ({ page }) => {
-    const textBuffer = Buffer.from('This is not an image');
-
-    await uploadFile(page, 'banner-file-input', {
+  test('横幅格式错误', async ({ page }) => {
+    await uploadVia(page, 'banner-input', {
       name: 'invalid.txt',
       mimeType: 'text/plain',
-      buffer: textBuffer
+      buffer: Buffer.from('This is not an image')
     });
 
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    const toastText = await page.locator('#toast').textContent();
-    expect(toastText).toBeTruthy();
+    await expect(toastWith(page, '只支持 JPEG、PNG、GIF、WebP 格式的图片')).toBeVisible({ timeout: 5000 });
   });
 
-  test('背景图删除成功', async ({ page }) => {
-    await uploadFile(page, 'banner-file-input', {
+  test('横幅删除成功', async ({ page }) => {
+    await uploadVia(page, 'banner-input', {
       name: 'test-banner.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await page.waitForTimeout(500);
+    await expect(toastWith(page, '横幅已更新')).toBeVisible({ timeout: 5000 });
+    await expect(bannerImg(page)).toBeVisible();
 
-    const result = await page.evaluate(async () => {
-      const res = await window.apiFetch('/api/account/banner', { method: 'DELETE' });
-      return res;
-    });
-
-    expect(result.success).toBe(true);
+    await page.getByRole('button', { name: '删除横幅' }).click();
+    await expect(toastWith(page, '横幅已删除')).toBeVisible({ timeout: 5000 });
+    await expect(bannerImg(page)).toHaveCount(0);
 
     await page.reload();
-    await page.waitForSelector('#username-display', { timeout: 5000 });
-    await page.waitForTimeout(1000);
-
-    await expect(page.locator('#banner-display img')).toBeHidden();
+    await page.waitForSelector('.settings-banner', { timeout: 8000 });
+    await expect(bannerImg(page)).toHaveCount(0);
   });
 
-  test('背景图更换成功', async ({ page }) => {
-    await uploadFile(page, 'banner-file-input', {
+  test('横幅更换成功', async ({ page }) => {
+    await uploadVia(page, 'banner-input', {
       name: 'banner1.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('背景图已更新');
-    await page.waitForTimeout(500);
+    await expect(toastWith(page, '横幅已更新')).toBeVisible({ timeout: 5000 });
+    await expect(bannerImg(page)).toBeVisible();
+    const firstSrc = await bannerImg(page).getAttribute('src');
 
-    await uploadFile(page, 'banner-file-input', {
+    await uploadVia(page, 'banner-input', {
       name: 'banner2.png',
       mimeType: 'image/png',
       buffer: PNG_MINIMAL
     });
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('背景图已更新');
-    await expect(page.locator('#banner-display img')).toBeVisible();
+    await expect(bannerImg(page)).not.toHaveAttribute('src', firstSrc, { timeout: 5000 });
+    await expect(bannerImg(page)).toBeVisible();
   });
 });
 
 test.describe('头像格式支持', () => {
-  test.beforeAll(async ({ request }) => {
-    await request.post('/api/admin/test/clear-rate-limits', {
-      data: { secret: ADMIN_SECRET }
-    });
-  });
+  const avatarImg = (page) => page.locator('.settings-profile .account-avatar img');
 
   test.beforeEach(async ({ page, context }) => {
     await context.clearCookies();
-    const username = 'pw_format_' + Date.now();
-    const email = 'pw_format_' + Date.now() + '@test.com';
-    const password = 'TestPass123';
-    await registerAndLogin(page, username, email, password);
+    await registerAndOpenProfile(page, 'pw_format');
   });
 
-  test.afterEach(async ({ request }) => {
-    await request.post('/api/admin/test/clear-rate-limits', {
-      data: { secret: ADMIN_SECRET }
+  const formats = [
+    { label: 'JPEG', name: 'test.jpeg', mimeType: 'image/jpeg', buffer: JPEG_MINIMAL },
+    { label: 'PNG', name: 'test.png', mimeType: 'image/png', buffer: PNG_MINIMAL },
+    { label: 'GIF', name: 'test.gif', mimeType: 'image/gif', buffer: GIF_MINIMAL },
+    { label: 'WebP', name: 'test.webp', mimeType: 'image/webp', buffer: WEBP_MINIMAL },
+  ];
+
+  for (const format of formats) {
+    test(`支持${format.label}格式头像`, async ({ page }) => {
+      await uploadVia(page, 'avatar-input', {
+        name: format.name,
+        mimeType: format.mimeType,
+        buffer: format.buffer
+      });
+
+      await expect(toastWith(page, '头像已更新')).toBeVisible({ timeout: 5000 });
+      await expect(avatarImg(page)).toBeVisible();
     });
-  });
-
-  test('支持JPEG格式头像', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
-      name: 'test.jpeg',
-      mimeType: 'image/jpeg',
-      buffer: JPEG_MINIMAL
-    });
-
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await expect(page.locator('#avatar-img')).toBeVisible();
-  });
-
-  test('支持PNG格式头像', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
-      name: 'test.png',
-      mimeType: 'image/png',
-      buffer: PNG_MINIMAL
-    });
-
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await expect(page.locator('#avatar-img')).toBeVisible();
-  });
-
-  test('支持GIF格式头像', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
-      name: 'test.gif',
-      mimeType: 'image/gif',
-      buffer: GIF_MINIMAL
-    });
-
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await expect(page.locator('#avatar-img')).toBeVisible();
-  });
-
-  test('支持WebP格式头像', async ({ page }) => {
-    await uploadFile(page, 'avatar-file-input', {
-      name: 'test.webp',
-      mimeType: 'image/webp',
-      buffer: WEBP_MINIMAL
-    });
-
-    await page.waitForSelector('#toast.show', { timeout: 5000 });
-    await expect(page.locator('#toast')).toContainText('头像已更新');
-    await expect(page.locator('#avatar-img')).toBeVisible();
-  });
+  }
 });

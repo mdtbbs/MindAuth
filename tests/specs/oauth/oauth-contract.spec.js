@@ -19,10 +19,12 @@ const { test, expect } = require('@playwright/test');
 
 const ADMIN_SECRET = 'admin123';
 
-// Seeded test OAuth client (see src/db/schema-mysql.js seedTestOAuthClient)
+// Seeded test OAuth client (see src/db/seeds/testSeeds.js seedTestOAuthClient)
+// redirect_uri must EXACTLY match the registered value, or /api/authorize
+// redirects to the oauth-error page without a code.
 const CLIENT_ID = 'forum';
 const CLIENT_SECRET = 'forum_secret_key_for_development';
-const REDIRECT_URI = 'http://localhost:4500/api/auth/callback';
+const REDIRECT_URI = 'http://localhost:4000/api/auth/callback';
 
 /** Helper: clear rate limits */
 async function clearRateLimits(request) {

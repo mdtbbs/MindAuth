@@ -89,7 +89,7 @@ async function seedTestOAuthClient(pool) {
   for (const client of testClients) {
     try {
       const [existing] = await pool.execute(
-        'SELECT id FROM clients WHERE client_id = ?',
+        'SELECT id, name, client_secret, redirect_uri FROM clients WHERE client_id = ?',
         [client.client_id]
       );
 
@@ -99,6 +99,18 @@ async function seedTestOAuthClient(pool) {
           [client.name, client.client_id, client.client_secret, client.redirect_uri]
         );
         console.log(`Test OAuth client '${client.name}' created`);
+      } else if (
+        existing[0].name !== client.name ||
+        existing[0].client_secret !== client.client_secret ||
+        existing[0].redirect_uri !== client.redirect_uri
+      ) {
+        // Dev/test fixtures must match the seed definition exactly — E2E tests
+        // depend on these values.  Sync rows left behind by older seed data.
+        await pool.execute(
+          'UPDATE clients SET name = ?, client_secret = ?, redirect_uri = ? WHERE id = ?',
+          [client.name, client.client_secret, client.redirect_uri, existing[0].id]
+        );
+        console.log(`Test OAuth client '${client.name}' re-synced to seed values`);
       }
     } catch (err) {
       console.warn(`Could not seed OAuth client '${client.name}':`, err.message);

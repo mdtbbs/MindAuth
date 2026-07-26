@@ -432,6 +432,19 @@ test.describe('User API - Notification lifecycle', () => {
     });
     expect((await banRes.json()).success).toBe(true);
 
+    // Banning revokes all of the user's sessions (security hardening), so the
+    // user session in this request context is now invalid.  Unban and log the
+    // user back in before exercising the notification APIs.
+    const unbanRes = await request.delete(`/api/admin/users/${user.id}/ban`, {
+      headers: { 'X-CSRF-Token': await getCsrf(request) },
+    });
+    expect((await unbanRes.json()).success).toBe(true);
+
+    const reloginRes = await request.post('/api/login', {
+      data: { username: user.username, password: user.password },
+    });
+    expect(reloginRes.status()).toBe(200);
+
     const listRes = await request.get('/api/notifications');
     const listData = await listRes.json();
     expect(listData.success).toBe(true);
