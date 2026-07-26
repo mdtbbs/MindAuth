@@ -84,13 +84,14 @@ GET /api/authorize?redirect_uri={redirect_uri}&client_id={client_id}&state={stat
 
 ### 3.2 Token 端点
 
-第三方后端用 code 换取用户信息和 token：
+第三方后端用 code 换取 token：
 
 ```
 POST /api/token
 Content-Type: application/json
 
 {
+  "grant_type": "authorization_code",
   "code": "授权码",
   "client_id": "应用标识",
   "client_secret": "应用密钥",
@@ -101,34 +102,32 @@ Content-Type: application/json
 **响应成功：**
 ```json
 {
-  "success": true,
   "access_token": "xxx",
-  "refresh_token": "xxx",
   "token_type": "Bearer",
+  "refresh_token": "xxx",
   "expires_in": 3600,
-  "user": {
-    "id": 1,
-    "username": "用户名",
-    "email": "邮箱",
-    "created_at": "注册时间"
-  }
+  "scope": "openid profile email"
 }
 ```
 
-**响应失败：**
+> **注意：** 响应中不包含用户信息。请使用 `access_token` 调用 `/api/userinfo` 获取用户信息（见 3.4）。
+
+**响应失败（RFC 6749 格式）：**
 ```json
 {
-  "success": false,
-  "message": "错误信息"
+  "error": "invalid_grant",
+  "error_description": "无效、过期或已使用的授权码"
 }
 ```
 
 **错误码：**
-| message | 说明 |
-|---------|------|
-| 缺少参数 | code/client_id/client_secret 未提供 |
-| 无效的 client_id 或 client_secret | 应用未注册或密钥错误 |
-| 无效或已使用的 code | code 过期、已使用或不存在 |
+| error | HTTP | 说明 |
+|-------|------|------|
+| `unsupported_grant_type` | 400 | grant_type 缺失或不为 `authorization_code` |
+| `invalid_request` | 400 | 缺少必需参数（code/client_id/client_secret），或该授权码使用了 PKCE 但未提供 code_verifier |
+| `invalid_client` | 401 | client_id 未注册或 client_secret 错误 |
+| `invalid_grant` | 401 | code 无效、过期或已使用；code 与 client_id 不匹配；redirect_uri 不匹配；code_verifier 校验失败 |
+| `server_error` | 500 | 服务器内部错误 |
 
 ---
 
@@ -141,6 +140,7 @@ POST /api/refresh
 Content-Type: application/json
 
 {
+  "grant_type": "refresh_token",
   "refresh_token": "xxx",
   "client_id": "应用标识",
   "client_secret": "应用密钥"
@@ -150,11 +150,11 @@ Content-Type: application/json
 **响应成功：**
 ```json
 {
-  "success": true,
   "access_token": "新的 access_token",
-  "refresh_token": "新的 refresh_token（rotation）",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "refresh_token": "新的 refresh_token（rotation）",
+  "expires_in": 3600,
+  "scope": "openid profile email"
 }
 ```
 
@@ -171,15 +171,31 @@ GET /api/userinfo
 Authorization: Bearer {access_token}
 ```
 
-**响应：**
+**响应（字段随 token 的 scope 变化）：**
 ```json
 {
   "sub": "1",
+  "id": 1,
   "username": "用户名",
+  "name": "用户名",
+  "avatar_url": "/uploads/avatars/xxx.webp",
+  "phone_verified": true,
+  "phone_verified_at": "2026-01-01T00:00:00.000Z",
+  "phone_masked": "138****8000",
+  "ban_status": "none",
+  "is_muted": false,
+  "updated_at": 1735689600,
+  "custom_fields": { "字段key": "值" },
   "email": "邮箱",
-  "created_at": "注册时间"
+  "email_verified": true
 }
 ```
+
+**字段说明：**
+- `sub`：始终返回（用户 ID 的字符串形式）
+- `profile` scope：返回 `id`、`username`、`name`、`avatar_url`、`phone_verified`、`phone_verified_at`、`phone_masked`、`ban_status`、`is_muted`、`updated_at`，以及 `custom_fields`（仅公开的自定义字段，无值时省略该字段）
+- `email` scope：返回 `email`、`email_verified`
+- 响应中**不包含** `created_at` 字段
 
 ---
 
@@ -240,6 +256,8 @@ Content-Type: application/json
     "id": 1,
     "username": "用户名",
     "email": "邮箱",
+    "phone_verified": false,
+    "phone_verified_at": null,
     "created_at": "注册时间"
   }
 }
@@ -286,11 +304,12 @@ app.get('/callback', async (req, res) => {
     return res.status(400).send('缺少授权码');
   }
 
-  // 调用认证中心换取用户信息
+  // 调用认证中心换取 token
   const response = await fetch('https://auth.example.com/api/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      grant_type: 'authorization_code',
       code,
       client_id: process.env.MINDAUTH_CLIENT_ID,
       client_secret: process.env.MINDAUTH_CLIENT_SECRET,
@@ -300,9 +319,15 @@ app.get('/callback', async (req, res) => {
 
   const result = await response.json();
 
-  if (result.success) {
-    const user = result.user;
-    // { id, username, email, created_at }
+  if (response.ok) {
+    // result = { access_token, token_type, refresh_token, expires_in, scope }
+
+    // 用 access_token 调用 /api/userinfo 获取用户信息
+    const userinfoRes = await fetch('https://auth.example.com/api/userinfo', {
+      headers: { 'Authorization': `Bearer ${result.access_token}` }
+    });
+    const user = await userinfoRes.json();
+    // { sub, id, username, email, ... }（字段随 scope 变化，见 3.4）
 
     // 创建本地会话
     req.session.user = user;
@@ -310,7 +335,7 @@ app.get('/callback', async (req, res) => {
     req.session.refreshToken = result.refresh_token;
     res.redirect('/dashboard');
   } else {
-    res.status(401).send(result.message);
+    res.status(401).send(result.error_description || result.error);
   }
 });
 ```
@@ -335,6 +360,7 @@ def callback():
         return '缺少授权码', 400
 
     response = requests.post('https://auth.example.com/api/token', json={
+        'grant_type': 'authorization_code',
         'code': code,
         'client_id': 'YOUR_CLIENT_ID',
         'client_secret': 'YOUR_CLIENT_SECRET'
@@ -342,14 +368,19 @@ def callback():
 
     result = response.json()
 
-    if result.get('success'):
-        user = result['user']
+    if response.ok:
+        # result = { access_token, token_type, refresh_token, expires_in, scope }
+        # 用 access_token 调用 /api/userinfo 获取用户信息
+        user = requests.get(
+            'https://auth.example.com/api/userinfo',
+            headers={'Authorization': f"Bearer {result['access_token']}"}
+        ).json()
         session['user'] = user
         session['access_token'] = result['access_token']
         session['refresh_token'] = result['refresh_token']
         return redirect('/dashboard')
     else:
-        return result.get('message'), 401
+        return result.get('error_description') or result.get('error'), 401
 ```
 
 ### 4.4 同域场景（前端直接调用）
@@ -403,11 +434,11 @@ async function getUserInfo() {
        │                 │<──────────────────│
        │                 │                   │
        │                 │ 6.后端用 code     │
-       │                 │   换取用户信息    │
+       │                 │   换取 tokens     │
        │                 │──────────────────>│
        │                 │                   │
-       │                 │ 7.返回 user +     │
-       │                 │   tokens          │
+       │                 │ 7.返回 tokens     │
+       │                 │   (含refresh)     │
        │                 │<──────────────────│
        │                 │                   │
        │  8.登录成功     │                   │
@@ -447,10 +478,14 @@ curl -X POST http://localhost:4001/api/login \
 curl -L -b cookies.txt \
   "http://localhost:4001/api/authorize?redirect_uri=http://localhost:4001/callback&client_id=YOUR_CLIENT_ID"
 
-# 3. 用 code 换取用户信息
+# 3. 用 code 换取 token
 curl -X POST http://localhost:4001/api/token \
   -H "Content-Type: application/json" \
-  -d '{"code":"获得的code","client_id":"YOUR_CLIENT_ID","client_secret":"YOUR_CLIENT_SECRET"}'
+  -d '{"grant_type":"authorization_code","code":"获得的code","client_id":"YOUR_CLIENT_ID","client_secret":"YOUR_CLIENT_SECRET"}'
+
+# 4. 用 access_token 获取用户信息
+curl http://localhost:4001/api/userinfo \
+  -H "Authorization: Bearer 获得的access_token"
 ```
 
 ---
@@ -466,7 +501,7 @@ A: 5分钟，超时后无法使用。
 **Q: 同域和跨域有什么区别？**
 A:
 - 同域：可直接通过 Cookie 共享 session，调用 `/api/verify`
-- 跨域：必须通过 OAuth 流程，使用 code 换取用户信息
+- 跨域：必须通过 OAuth 流程，使用 code 换取 token，再调用 `/api/userinfo` 获取用户信息
 
 **Q: 如何处理用户退出登录？**
 A: 第三方系统需自行处理本地会话清理，MindAuth 的退出不会自动通知第三方。如需检测用户是否已退出，可在 access_token 过期后调用 `/api/introspect` 检查。
