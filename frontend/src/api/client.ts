@@ -96,19 +96,20 @@ async function normalizeError(res: Response): Promise<ApiError> {
 
 // ─── 401 handler ─────────────────────────────────────────────────────────────
 
-let onUnauthorized: (() => void) | null = null;
+let onUnauthorized: ((path: string) => void) | null = null;
 
 /**
- * Register a callback that fires on 401 responses.
- * Typically used to redirect to login.
+ * Register a callback that fires on 401 responses. Receives the request path
+ * so the handler can ignore 401s that don't mean "session expired"
+ * (e.g. a non-admin user hitting an admin-only endpoint).
  */
-export function setUnauthorizedHandler(handler: () => void): void {
+export function setUnauthorizedHandler(handler: (path: string) => void): void {
   onUnauthorized = handler;
 }
 
-function handle401(res: Response): void {
+function handle401(res: Response, path: string): void {
   if (res.status === 401 && onUnauthorized) {
-    onUnauthorized();
+    onUnauthorized(path);
   }
 }
 
@@ -150,7 +151,7 @@ async function request<T>(
     signal: opts.signal,
   });
 
-  handle401(res);
+  handle401(res, path);
 
   if (!res.ok) {
     throw await normalizeError(res);
@@ -183,7 +184,7 @@ export const api = {
       body: formData,
     });
 
-    handle401(res);
+    handle401(res, path);
     if (!res.ok) throw await normalizeError(res);
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -197,8 +198,8 @@ export const api = {
     return request<T>('PATCH', path, body);
   },
 
-  del<T>(path: string): Promise<T> {
-    return request<T>('DELETE', path);
+  del<T>(path: string, body?: unknown): Promise<T> {
+    return request<T>('DELETE', path, body);
   },
 };
 

@@ -9,24 +9,18 @@ import { Button } from '@/shared/Button';
 import { Dialog } from '@/shared/Dialog';
 import { LoadingState } from '@/shared/LoadingState';
 import { AccountShell } from '@/user/components/AccountShell';
-import type { PrivacySettings } from '@/api/types';
 
-interface UserFieldDef {
-  id: number;
+// GET /api/account/fields 返回定义与当前值的合并结构（按 field_key 键控）
+interface AccountField {
   field_key: string;
   field_label: string;
   field_type: string;
   is_required: boolean;
-  is_public: boolean;
-  options: string | null;
+  options: string[] | null;
+  value: string | null;
 }
 
-interface UserFieldValue {
-  field_id: number;
-  value: string;
-}
-
-type SettingsSection = 'profile' | 'security' | 'privacy' | 'fields' | 'danger';
+type SettingsSection = 'profile' | 'security' | 'fields' | 'danger';
 
 const ACCOUNT_NAV = [
   { key: 'overview', label: '概览', href: '/dashboard' },
@@ -36,7 +30,6 @@ const ACCOUNT_NAV = [
 const SETTINGS_NAV: Array<{ key: SettingsSection; label: string }> = [
   { key: 'profile', label: '个人资料' },
   { key: 'security', label: '账号与安全' },
-  { key: 'privacy', label: '隐私设置' },
   { key: 'fields', label: '自定义字段' },
   { key: 'danger', label: '危险操作' },
 ];
@@ -198,77 +191,35 @@ export function AccountSettingsPage() {
     }
   }
 
-  const [privacy, setPrivacy] = useState<PrivacySettings>({
-    profile_public: true,
-    email_public: false,
-    show_activity: true,
-  });
-  const [privacyLoading, setPrivacyLoading] = useState(false);
-  const privacyLoaded = useRef(false);
-
-  // Defer until the user actually opens the "隐私" tab (load once)
-  useEffect(() => {
-    if (activeSection !== 'privacy' || privacyLoaded.current) return;
-    privacyLoaded.current = true;
-    api
-      .get<{ success: boolean; settings: PrivacySettings }>('/api/account/privacy')
-      .then((res) => {
-        if (res.settings) setPrivacy(res.settings);
-      })
-      .catch(() => {});
-  }, [activeSection]);
-
-  async function handleSavePrivacy() {
-    setPrivacyLoading(true);
-    try {
-      await api.put('/api/account/privacy', privacy);
-      toast('success', '隐私设置已保存');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '保存失败';
-      toast('error', msg);
-    } finally {
-      setPrivacyLoading(false);
-    }
-  }
-
-  const [fieldDefs, setFieldDefs] = useState<UserFieldDef[]>([]);
-  const [fieldValues, setFieldValues] = useState<Record<number, string>>({});
+  const [fieldDefs, setFieldDefs] = useState<AccountField[]>([]);
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const fieldsLoaded = useRef(false);
 
-  // Defer until the user opens the "自定义字段" tab (load once)
+  // Defer until the user opens the "自定义字段" tab (load once).
+  // 单个用户端点即包含定义与当前值（不要调 /api/admin/user-fields —— 普通用户会 401）
   useEffect(() => {
     if (activeSection !== 'fields' || fieldsLoaded.current) return;
     fieldsLoaded.current = true;
-    async function loadFields() {
-      try {
-        const [defsRes, valsRes] = await Promise.allSettled([
-          api.get<{ success: boolean; fields: UserFieldDef[] }>('/api/admin/user-fields'),
-          api.get<{ success: boolean; values: UserFieldValue[] }>('/api/account/fields'),
-        ]);
-        if (defsRes.status === 'fulfilled') {
-          setFieldDefs(defsRes.value.fields || []);
+    api
+      .get<{ success: boolean; fields: AccountField[] }>('/api/account/fields')
+      .then((res) => {
+        const fields = res.fields || [];
+        setFieldDefs(fields);
+        const map: Record<string, string> = {};
+        for (const f of fields) {
+          if (f.value !== null) map[f.field_key] = f.value;
         }
-        if (valsRes.status === 'fulfilled') {
-          const map: Record<number, string> = {};
-          for (const v of valsRes.value.values || []) {
-            map[v.field_id] = v.value;
-          }
-          setFieldValues(map);
-        }
-      } catch {}
-    }
-    loadFields();
-  }, [activeSection]);
+        setFieldValues(map);
+      })
+      .catch(() => toast('error', '获取自定义字段失败'));
+  }, [activeSection, toast]);
 
   async function handleSaveFields() {
     setFieldsLoading(true);
     try {
-      const values = Object.entries(fieldValues).map(([fieldId, value]) => ({
-        field_id: Number(fieldId),
-        value,
-      }));
-      await api.put('/api/account/fields', { values });
+      // 后端按 { values: { [field_key]: value } } 接收
+      await api.put('/api/account/fields', { values: fieldValues });
       toast('success', '自定义字段已保存');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '保存失败';
@@ -289,7 +240,8 @@ export function AccountSettingsPage() {
     }
     setDeleteLoading(true);
     try {
-      await api.del('/api/account/');
+      // 后端要求携带密码确认删除
+      await api.del('/api/account/', { password: deletePassword });
       toast('success', '账户已删除');
       await logout();
       navigate('/login', { replace: true });
@@ -528,46 +480,6 @@ export function AccountSettingsPage() {
               </div>
             ) : null}
 
-            {activeSection === 'privacy' ? (
-              <div className="settings-panel stack stack--xl">
-                <Card>
-                  <CardTitle>隐私设置</CardTitle>
-                  <CardDescription>控制资料公开程度与活动展示范围。</CardDescription>
-                  <div className="stack" style={{ marginTop: 'var(--space-5)' }}>
-                    <label className="cluster">
-                      <input
-                        type="checkbox"
-                        checked={privacy.profile_public}
-                        onChange={(e) => setPrivacy((p) => ({ ...p, profile_public: e.target.checked }))}
-                      />
-                      <span>公开个人资料</span>
-                    </label>
-                    <label className="cluster">
-                      <input
-                        type="checkbox"
-                        checked={privacy.email_public}
-                        onChange={(e) => setPrivacy((p) => ({ ...p, email_public: e.target.checked }))}
-                      />
-                      <span>公开邮箱地址</span>
-                    </label>
-                    <label className="cluster">
-                      <input
-                        type="checkbox"
-                        checked={privacy.show_activity}
-                        onChange={(e) => setPrivacy((p) => ({ ...p, show_activity: e.target.checked }))}
-                      />
-                      <span>显示活动状态</span>
-                    </label>
-                    <div className="cluster">
-                      <Button variant="secondary" loading={privacyLoading} onClick={handleSavePrivacy}>
-                        保存隐私设置
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            ) : null}
-
             {activeSection === 'fields' ? (
               <div className="settings-panel stack stack--xl">
                 <Card>
@@ -577,10 +489,10 @@ export function AccountSettingsPage() {
                     <div className="stack" style={{ marginTop: 'var(--space-5)' }}>
                       {fieldDefs.map((def) => (
                         <TextField
-                          key={def.id}
+                          key={def.field_key}
                           label={def.field_label}
-                          value={fieldValues[def.id] || ''}
-                          onChange={(e) => setFieldValues((prev) => ({ ...prev, [def.id]: e.target.value }))}
+                          value={fieldValues[def.field_key] || ''}
+                          onChange={(e) => setFieldValues((prev) => ({ ...prev, [def.field_key]: e.target.value }))}
                           hint={def.is_required ? '必填' : '选填'}
                         />
                       ))}

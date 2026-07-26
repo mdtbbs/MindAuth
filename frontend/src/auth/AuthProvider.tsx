@@ -52,8 +52,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (initialised.current) return;
     initialised.current = true;
 
-    // Register 401 handler to clear user state
-    setUnauthorizedHandler(() => {
+    // Register 401 handler to clear user state. Admin-only endpoints returning
+    // 401 for a regular user do NOT mean the session expired — ignore those,
+    // otherwise opening a page that probes an admin API logs the user out.
+    setUnauthorizedHandler((path) => {
+      if (path.startsWith('/api/admin')) return;
       setUser(null);
     });
 
