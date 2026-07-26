@@ -73,10 +73,11 @@ if (process.env.NODE_ENV !== 'production') {
         return res.status(400).json({ success: false, message: 'user_id required' });
       }
 
-      const { generateToken } = require('../../utils/token');
+      const { generateToken, hashToken } = require('../../utils/token');
       const token = generateToken();
 
-      await client.setEx(`reset:${token}`, 3600, JSON.stringify({ user_id }));
+      // Reset tokens are hashed at rest; /api/password/reset looks up by sha256
+      await client.setEx(`reset:${hashToken(token)}`, 3600, JSON.stringify({ user_id }));
 
       res.json({ success: true, token });
     } catch (err) {

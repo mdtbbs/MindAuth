@@ -78,7 +78,7 @@ export function AccountSettingsPage() {
     setPwdLoading(true);
     try {
       await api.post('/api/account/change-password', {
-        current_password: oldPassword,
+        old_password: oldPassword,
         new_password: newPassword,
       });
       toast('success', '密码已更新');
