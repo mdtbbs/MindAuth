@@ -65,11 +65,12 @@ const config = {
     passwordReset: 3600     // 1 hour
   },
 
-  // Rate limiting defaults
+  // Rate limiting defaults — every limiter gets its own key namespace so
+  // endpoints can never consume or reset each other's counters
   rateLimit: {
-    login: { maxAttempts: 5, windowMs: 5 * 60 * 1000 },      // 5 per 5 min
-    register: { maxAttempts: 5, windowMs: 60 * 60 * 1000 },  // 5 per hour
-    adminLogin: { maxAttempts: 3, windowMs: 15 * 60 * 1000 } // 3 per 15 min
+    login: { maxAttempts: 5, windowMs: 5 * 60 * 1000, keyPrefix: 'ratelimit:login' },          // 5 per 5 min
+    register: { maxAttempts: 5, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:register' },   // 5 per hour
+    adminLogin: { maxAttempts: 3, windowMs: 15 * 60 * 1000, keyPrefix: 'ratelimit:admin_login' } // 3 per 15 min
   },
 
   // Trusted proxy configuration for IP extraction
@@ -93,9 +94,9 @@ const config = {
     // Minimum length for ADMIN_SECRET in production
     minSecretLength: parseInt(process.env.ADMIN_SECRET_MIN_LENGTH) || 32,
     // Rate limits for admin operations (per IP)
-    userDelete: { maxAttempts: 10, windowMs: 60 * 60 * 1000 },    // 10 per hour
-    passwordReset: { maxAttempts: 20, windowMs: 60 * 60 * 1000 }, // 20 per hour
-    clientCreate: { maxAttempts: 20, windowMs: 60 * 60 * 1000 }   // 20 per hour
+    userDelete: { maxAttempts: 10, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:admin_user_delete' },       // 10 per hour
+    passwordReset: { maxAttempts: 20, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:admin_password_reset' }, // 20 per hour
+    clientCreate: { maxAttempts: 20, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:admin_client_create' }    // 20 per hour
   }
 };
 

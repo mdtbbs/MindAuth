@@ -30,9 +30,12 @@ async function cleanupExpiredData() {
       .replace(/\.\d{3}Z$/, '');
     const [smsResult] = await pool.execute('DELETE FROM sms_audit_logs WHERE created_at < ?', [smsCutoff]);
 
-    // Clean expired user sessions (inactive for 30 days)
+    // Clean user sessions that are past their absolute expiry, plus any
+    // legacy rows (expires_at NULL) inactive for 30 days
     const [sessionResult] = await pool.execute(
-      'DELETE FROM user_sessions WHERE last_active_at < DATE_SUB(NOW(), INTERVAL 30 DAY)'
+      `DELETE FROM user_sessions
+       WHERE (expires_at IS NOT NULL AND expires_at < NOW())
+          OR (expires_at IS NULL AND last_active_at < DATE_SUB(NOW(), INTERVAL 30 DAY))`
     );
 
     // Clean expired admin audit logs

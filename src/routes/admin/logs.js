@@ -15,7 +15,7 @@ router.get('/authorizations', requireAdmin, requireAdminPermission('authorizatio
       SELECT a.id, a.user_id, u.username, a.client_id, c.name as client_name, a.last_used_at, a.created_at
       FROM authorizations a
       JOIN users u ON a.user_id = u.id
-      JOIN clients c ON a.client_id = c.id
+      JOIN clients c ON a.client_id = c.client_id
     `;
     let params = [];
 

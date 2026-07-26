@@ -15,12 +15,13 @@ const notificationCenter = require('../modules/notifications/notificationCenter'
 const { logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
 const challengeManager = require('../modules/challenges/challengeManager');
+const config = require('../config');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
-const loginRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5 * 60 * 1000 });
-const registerRateLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 60 * 60 * 1000 }); // 5 per hour
+const loginRateLimiter = createRateLimiter(config.rateLimit.login);
+const registerRateLimiter = createRateLimiter(config.rateLimit.register);
 
 // Register
 router.post('/register', registerRateLimiter, async (req, res) => {
@@ -183,8 +184,10 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         details: { reason: 'invalid_password' },
       });
 
-      // Increment login failure counter
-      const failKey = `login_fail:${username}`;
+      // Increment login failure counter.
+      // Keyed by username AND IP so a remote attacker who only knows a
+      // username cannot lock the real owner out of their account.
+      const failKey = `login_fail:${username}:${getClientIp(req)}`;
       const failCount = await client.incr(failKey);
       if (failCount === 1) await client.expire(failKey, 300);
 
@@ -218,11 +221,12 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       return res.status(401).json({ success: false, message: '用户名或密码错误' });
     }
 
-    // Reset rate limit on successful login
+    // Reset the login limiter only — other limiters (admin login, register,
+    // password reset) keep their own counters
     const ip = getClientIp(req);
     const userAgent = req.headers['user-agent'] || '';
-    await resetRateLimit(ip);
-    await client.del(`login_fail:${username}`);
+    await resetRateLimit(ip, config.rateLimit.login.keyPrefix);
+    await client.del(`login_fail:${username}:${ip}`);
 
     // Reset lock status on successful login
     if (user.lock_level > 0) {

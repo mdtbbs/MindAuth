@@ -19,13 +19,18 @@ MindAuth is an OAuth 2.0 authentication service providing centralized SSO for Mi
 ```bash
 npm install          # Install dependencies (includes devDeps for React build)
 npm run build        # Build React frontend (vite build → dist/client/)
-npm run verify       # TypeCheck + Build
+npm run lint         # ESLint (backend Node + frontend TS/React)
+npm run verify       # Lint + TypeCheck + Build
 npm start            # Production mode (port 4001)
 npm run dev          # Development with --watch auto-reload
-npm run test:unit    # Unit tests (node --test tests/unit/*.test.js)
-npm run test:e2e     # E2E tests (Playwright)
+npm run test         # Unit tests (alias of test:unit)
+npm run test:unit    # Pure unit tests, no external services (node --test tests/unit/*.test.js)
+npm run test:integration # DB-backed tests; requires MySQL + RUN_INTEGRATION=1 (else skipped)
+npm run test:e2e     # E2E tests (Playwright; USE_MEMORY_REDIS=1 to skip real Redis)
 npm run typecheck    # TypeScript type checking (frontend only)
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint + typecheck + build + unit + integration + e2e against MySQL 8 / Redis 7 service containers on every push and PR to `main`.
 
 ## Architecture
 
@@ -197,7 +202,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `login_logs` | Login history | user_id, ip, device, login_type (web/oauth) |
 | `email_config` | SMTP settings | host, port, user, password, from (single row id=1) |
 | `system_config` | Runtime config | key, value (session_lifetime, password_rules, etc.) |
-| `user_sessions` | Active session tracking | user_id, token_hash, ip_address, device_info, last_active_at |
+| `user_sessions` | Active session tracking | user_id, session_token (SHA-256 hash), ip_address, device_info, expires_at, last_active_at |
 | `challenge_questions` | Challenge Q&A bank | question, answer_hash (bcrypt), enabled |
 | `ip_bans` | IP blacklist | ip_address, cidr_prefix, reason, expires_at |
 | `user_notifications` | User notifications | user_id, type, title, content, is_read |
@@ -206,7 +211,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `admin_audit_logs` | Admin action audit trail | admin_id, action, target_type, target_id, details (JSON) |
 | `sms_audit_logs` | SMS audit trail | user_id, action, phone_masked, success, code, ip_address |
 
-Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`.
+Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`.
 
 ### Redis Keys
 
@@ -224,8 +229,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `sms:send:user:{id}` | 5min | SMS send rate limit per user |
 | `sms:send:phone:{phone}` | 1min | SMS send rate limit per phone |
 | `sms:verify:fail:*` | Variable | SMS verify failure rate limit |
-| `phone_sync:{token}` | 5min | Phone verification sync token |
-| `login_fail:{username}` | 5min | Login failure counter (lockout) |
+| `login_fail:{username}:{ip}` | 5min | Login failure counter (lockout), keyed by username + IP |
 | `session_active:{hash}` | 5min | Session activity throttle |
 | `challenge_session:{csrf}` | 30min | Challenge question session |
 | `ip_bans_cache` | 5min | IP ban list cache |
@@ -241,17 +245,19 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - Role-based permission checks
 
 ### `csrf.js`
-- Double-submit cookie pattern
+- Signed double-submit cookie pattern (`csrf_token` = `random.HMAC(random)`, so only server-minted tokens validate)
 - `csrf_token` cookie (httpOnly=false)
-- Validates `X-CSRF-Token` header
-- Whitelist: `/token`, `/refresh`, `/login`, `/register`
+- Validates `X-CSRF-Token` header (timing-safe compare + signature check)
+- Exempt paths (13): OAuth `/token` `/refresh` `/introspect` `/revoke` `/verify`, `/login`, `/register`, `/admin/login`, `/challenge/random` `/challenge/verify`, `/email-verification/verify`, and the non-production `/admin/test/*` endpoints
 
 ### `rateLimit.js`
-- Redis sliding window + memory fallback
+- Redis fixed-window counter + memory fallback (memory Map pruned; counter always gets a TTL)
+- **Every limiter requires a unique `keyPrefix`** so endpoints cannot consume or reset each other's budget
 - Configurable limits:
-  - Login: 5/5min
-  - Register: 5/hour
-  - Admin login: 3/15min
+  - Login: 5/5min (`ratelimit:login`)
+  - Register: 5/hour (`ratelimit:register`)
+  - Admin login: 3/15min (`ratelimit:admin_login`)
+  - Challenge, password-reset, and admin test-send endpoints each have their own prefix
 
 ### `ipBan.js`
 - Uses `ipBanMatcher.isBanned()` to check incoming requests
@@ -328,11 +334,14 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 
 | File | Coverage |
 |------|----------|
-| `unit/sessionManager.test.js` | Session lifecycle (create, auth, revoke, touch) |
-| `unit/challengeManager.test.js` | Challenge question CRUD and verification |
-| `unit/notificationCenter.test.js` | Notification CRUD and read/unread |
-| `unit/runtimeConfig.test.js` | Runtime config get/set/cache |
-| `unit/migrator.test.js` | SQL migration runner |
+| `unit/migrator.test.js` | SQL migration runner (pure) |
+| `unit/tokenStore.test.js` | OAuth token hashing-at-rest + single-use codes (mock Redis) |
+| `unit/clientRegistry.test.js` | redirect_uri SSRF validation (pure) |
+| `unit/aliyunSms.test.js`, `unit/newFeatures.test.js` | SMS + misc (mock Redis) |
+| `integration/sessionManager.test.js` | Session lifecycle — requires MySQL |
+| `integration/challengeManager.test.js` | Challenge CRUD/verification — requires MySQL |
+| `integration/notificationCenter.test.js` | Notification CRUD — requires MySQL |
+| `integration/runtimeConfig.test.js` | Runtime config get/set/cache — requires MySQL |
 | `specs/auth/session-contract.spec.js` | Session contract E2E |
 | `specs/oauth/oauth-contract.spec.js` | OAuth contract E2E |
 | `specs/oauth/oauth-flow.spec.js` | Full OAuth flow E2E |
@@ -355,4 +364,4 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - Config validation on startup (strict in production)
 
 ---
-*Last updated: 2026-07-23*
+*Last updated: 2026-07-26*

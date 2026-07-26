@@ -12,13 +12,14 @@ export interface User {
   avatar_url: string | null;
   banner_url: string | null;
   email_verified: boolean;
-  phone: string | null;
+  phone_masked: string | null;
   phone_verified: boolean;
-  muted: boolean;
-  banned: boolean;
+  phone_verified_at: string | null;
   created_at: string;
-  updated_at: string;
 }
+
+/** GET /api/me returns user fields flattened onto the response object */
+export type MeResponse = User & { success: boolean };
 
 export interface UserProfile extends User {
   authorizations?: OAuthClient[];
@@ -31,10 +32,10 @@ export interface LoginRequest {
   password: string;
 }
 
+/** POST /api/login returns only { success } — fetch the user via GET /api/me afterwards */
 export interface LoginResponse {
   success: boolean;
-  message: string;
-  user: User;
+  message?: string;
 }
 
 export interface RegisterRequest {
@@ -46,7 +47,6 @@ export interface RegisterRequest {
 export interface RegisterResponse {
   success: boolean;
   message: string;
-  user: User;
 }
 
 // ─── OAuth / Clients ─────────────────────────────────────────────────────────
@@ -173,13 +173,8 @@ export interface ApiErrorResponse {
 
 export type ApiResponse<T = unknown> = ApiSuccessResponse<T> | ApiErrorResponse;
 
-/** Normalized error shape used by the API client */
-export interface ApiError {
-  code?: string;
-  message: string;
-  details?: unknown;
-  status?: number;
-}
+// The normalized API error is the `ApiError` class exported from './client'
+// (it extends Error so `err instanceof Error` narrows correctly in catch blocks).
 
 // ─── Admin Types ─────────────────────────────────────────────────────────────
 

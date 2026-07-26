@@ -136,16 +136,8 @@ export function AccountSettingsPage() {
     setAvatarLoading(true);
     try {
       const formData = new FormData();
-      formData.append('avatar', file);
-      const res = await fetch('/api/account/avatar', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { message?: string }).message || '上传失败');
-      }
+      formData.append('file', file);
+      await api.postForm('/api/account/avatar', formData);
       toast('success', '头像已更新');
       await loadCurrentUser();
     } catch (err: unknown) {
@@ -181,16 +173,8 @@ export function AccountSettingsPage() {
     setBannerLoading(true);
     try {
       const formData = new FormData();
-      formData.append('banner', file);
-      const res = await fetch('/api/account/banner', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { message?: string }).message || '上传失败');
-      }
+      formData.append('file', file);
+      await api.postForm('/api/account/banner', formData);
       toast('success', '横幅已更新');
       await loadCurrentUser();
     } catch (err: unknown) {

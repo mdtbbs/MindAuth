@@ -1,9 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const challengeManager = require('../modules/challenges/challengeManager');
+const { createRateLimiter } = require('../middleware/rateLimit');
+
+// Both endpoints are unauthenticated — rate limit to stop parallel
+// challenge farming / answer brute-forcing
+const randomLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:challenge_random' });
+const verifyLimiter = createRateLimiter({ maxAttempts: 15, windowMs: 5 * 60 * 1000, keyPrefix: 'ratelimit:challenge_verify' });
 
 // GET /challenge/random - Get a random challenge question
-router.get('/random', async (req, res) => {
+router.get('/random', randomLimiter, async (req, res) => {
   try {
     const csrfToken = req.cookies.csrf_token || 'anonymous';
     const result = await challengeManager.getRandomChallenge(csrfToken);
@@ -20,7 +26,7 @@ router.get('/random', async (req, res) => {
 });
 
 // POST /challenge/verify - Verify challenge answer (returns new question on failure)
-router.post('/verify', async (req, res) => {
+router.post('/verify', verifyLimiter, async (req, res) => {
   try {
     const { challenge_id, challenge_answer } = req.body;
     if (!challenge_id || !challenge_answer) {

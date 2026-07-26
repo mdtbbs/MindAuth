@@ -9,7 +9,25 @@
  * 4. Cache the token in memory so we only fetch it once per session.
  */
 
-import type { ApiError, CsrfTokenResponse } from './types';
+import type { CsrfTokenResponse } from './types';
+
+/**
+ * Normalized API error. Extends Error so `err instanceof Error` in catch
+ * blocks surfaces the server-provided message instead of a fallback string.
+ */
+export class ApiError extends Error {
+  status?: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(message: string, opts: { status?: number; code?: string; details?: unknown } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = opts.status;
+    this.code = opts.code;
+    this.details = opts.details;
+  }
+}
 
 // ─── CSRF token cache ────────────────────────────────────────────────────────
 
@@ -41,7 +59,7 @@ async function ensureCsrfToken(): Promise<string> {
   });
 
   if (!res.ok) {
-    throw { message: 'Failed to fetch CSRF token', status: res.status } satisfies ApiError;
+    throw new ApiError('Failed to fetch CSRF token', { status: res.status });
   }
 
   const data = (await res.json()) as CsrfTokenResponse;
@@ -64,18 +82,16 @@ async function normalizeError(res: Response): Promise<ApiError> {
     // response body is not JSON
   }
 
-  const err: ApiError = {
-    message:
-      (body?.message as string) ||
-      (body?.error as string) ||
-      `Request failed with status ${res.status}`,
+  const message =
+    (body?.message as string) ||
+    (body?.error as string) ||
+    `Request failed with status ${res.status}`;
+
+  return new ApiError(message, {
     status: res.status,
-  };
-
-  if (body?.code) err.code = body.code as string;
-  if (body?.details) err.details = body.details;
-
-  return err;
+    code: body?.code ? (body.code as string) : undefined,
+    details: body?.details,
+  });
 }
 
 // ─── 401 handler ─────────────────────────────────────────────────────────────
@@ -147,6 +163,22 @@ export const api = {
 
   post<T>(path: string, body?: unknown): Promise<T> {
     return request<T>('POST', path, body);
+  },
+
+  /** POST multipart form data (file uploads). Attaches the CSRF header like other mutating requests. */
+  async postForm<T>(path: string, formData: FormData): Promise<T> {
+    const token = await ensureCsrfToken();
+    const res = await fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': token },
+      body: formData,
+    });
+
+    handle401(res);
+    if (!res.ok) throw await normalizeError(res);
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
   },
 
   put<T>(path: string, body?: unknown): Promise<T> {

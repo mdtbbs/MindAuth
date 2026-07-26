@@ -7,12 +7,14 @@ const { timingSafeCompare } = require('../../utils/crypto');
 const { getClientIp } = require('../../utils/request');
 const { createAdminSession, deleteAdminSession, requireAdmin, normalizeRole, ROLE_PERMISSIONS } = require('../../middleware/requireAdmin');
 const { createRateLimiter, resetRateLimit } = require('../../middleware/rateLimit');
+const { logAudit } = require('../../utils/auditLog');
 const config = require('../../config');
 
 const adminLoginRateLimiter = createRateLimiter(config.rateLimit.adminLogin);
+const adminCreateRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:admin_create' });
 
 // POST /create - Create admin account (requires ADMIN_SECRET)
-router.post('/create', async (req, res) => {
+router.post('/create', adminCreateRateLimiter, async (req, res) => {
   try {
     const { secret, username, email, password } = req.body;
 
@@ -62,7 +64,16 @@ router.post('/create', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    await pool.execute('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email, passwordHash, 'super_admin']);
+    const [result] = await pool.execute('INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)', [username, email, passwordHash, 'super_admin']);
+
+    logAudit({
+      admin_id: result.insertId,
+      action: 'admin_created',
+      target_type: 'user',
+      target_id: result.insertId,
+      details: { username, via: 'ADMIN_SECRET' },
+      ip_address: getClientIp(req),
+    });
 
     res.status(201).json({ success: true, message: '管理员账号创建成功' });
   } catch (err) {
@@ -90,12 +101,41 @@ router.post('/login', adminLoginRateLimiter, async (req, res) => {
       return res.status(401).json({ success: false, message: '管理员账号不存在或密码错误' });
     }
 
+    // Admin accounts are subject to the same ban/lock rules as normal login
+    if (user.ban_status === 'banned' &&
+        !(user.ban_expires_at && new Date(user.ban_expires_at) < new Date())) {
+      return res.status(403).json({ success: false, message: '账号已被封禁' });
+    }
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return res.status(423).json({ success: false, message: '账号已锁定' });
+    }
+    if (!user.locked_until && user.lock_level >= 3) {
+      return res.status(423).json({ success: false, message: '账号已被永久锁定' });
+    }
+
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
+      logAudit({
+        admin_id: user.id,
+        action: 'admin_login_failed',
+        target_type: 'user',
+        target_id: user.id,
+        details: { reason: 'invalid_password' },
+        ip_address: getClientIp(req),
+      });
       return res.status(401).json({ success: false, message: '管理员账号不存在或密码错误' });
     }
 
-    await resetRateLimit(getClientIp(req), 'admin');
+    await resetRateLimit(getClientIp(req), config.rateLimit.adminLogin.keyPrefix);
+
+    logAudit({
+      admin_id: user.id,
+      action: 'admin_login',
+      target_type: 'user',
+      target_id: user.id,
+      details: {},
+      ip_address: getClientIp(req),
+    });
 
     const sessionResult = await createAdminSession(null, user.id);
     const token = sessionResult.token;

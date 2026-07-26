@@ -23,7 +23,10 @@ const { client } = require('../../src/redis');
 const challengeManager = require('../../src/modules/challenges/challengeManager');
 const bcrypt = require('bcrypt');
 
-describe('challengeManager', () => {
+// Integration test: requires a live MySQL test database (RUN_INTEGRATION=1).
+const RUN_INTEGRATION = process.env.RUN_INTEGRATION === '1' || process.env.CI === 'true';
+
+describe('challengeManager', { skip: !RUN_INTEGRATION }, () => {
   before(async () => {
     await runMigrations(pool);
   });

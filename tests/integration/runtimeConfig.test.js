@@ -20,7 +20,10 @@ process.env.NODE_ENV = 'test';
 const { pool, closePool, runMigrations } = require('../../src/db');
 const runtimeConfig = require('../../src/modules/config/runtimeConfig');
 
-describe('runtimeConfig', () => {
+// Integration test: requires a live MySQL test database (RUN_INTEGRATION=1).
+const RUN_INTEGRATION = process.env.RUN_INTEGRATION === '1' || process.env.CI === 'true';
+
+describe('runtimeConfig', { skip: !RUN_INTEGRATION }, () => {
   before(async () => {
     await runMigrations(pool);
   });

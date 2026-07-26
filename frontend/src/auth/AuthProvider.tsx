@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import api, { clearCsrfCache, setUnauthorizedHandler } from '@/api/client';
-import type { User, LoginResponse } from '@/api/types';
+import type { User, LoginResponse, MeResponse } from '@/api/types';
 
 // ─── Context shape ───────────────────────────────────────────────────────────
 
@@ -38,8 +38,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const loadCurrentUser = useCallback(async () => {
     try {
-      const res = await api.get<{ success: boolean; user: User }>('/api/me');
-      setUser(res.user);
+      // /api/me returns the user fields flattened onto the response object
+      const { success, ...me } = await api.get<MeResponse>('/api/me');
+      setUser(success ? (me as User) : null);
       setError(null);
     } catch {
       setUser(null);
@@ -68,11 +69,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           username,
           password,
         });
-        if (res.success && res.user) {
-          setUser(res.user);
-        } else {
-          throw new Error(res.message || 'Login failed');
+        if (!res.success) {
+          throw new Error(res.message || '登录失败');
         }
+        // /api/login only sets the session cookie — load the user separately
+        await loadCurrentUser();
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Login failed';
@@ -82,7 +83,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setLoading(false);
       }
     },
-    [],
+    [loadCurrentUser],
   );
 
   const logout = useCallback(async () => {

@@ -54,11 +54,13 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
   const deviceInfo = parseDeviceInfo(userAgent);
   const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS);
 
-  // 1. Insert into MySQL (durable store) — token_hash stored, never raw token
+  // 1. Insert into MySQL (durable store) — token_hash stored, never raw token.
+  // expires_at uses DB time (NOW()) so SQL-side expiry checks are consistent
+  // regardless of the app server's timezone.
   const [result] = await pool.execute(
-    `INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info)
-     VALUES (?, ?, ?, ?, ?)`,
-    [userId, tokenHash, ipAddress || null, (userAgent || '').slice(0, 500), deviceInfo]
+    `INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, expires_at)
+     VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))`,
+    [userId, tokenHash, ipAddress || null, (userAgent || '').slice(0, 500), deviceInfo, Math.floor(SESSION_LIFETIME_MS / 1000)]
   );
   const sessionId = result.insertId;
 
@@ -73,8 +75,9 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
     throw new Error(`createUserSession: user ${userId} not found`);
   }
 
-  // 3. Cache in Redis by hashed token
-  const cachePayload = { ...userRows[0], session_id: sessionId };
+  // 3. Cache in Redis by hashed token (expiry travels with the payload so
+  // cache hits still enforce the absolute session lifetime)
+  const cachePayload = { ...userRows[0], session_id: sessionId, session_expires_at: expiresAt.toISOString() };
   await client.setEx(`session:${tokenHash}`, SESSION_CACHE_TTL, JSON.stringify(cachePayload));
 
   // 4. Add to per-user index set (for bulk invalidation without SCAN)
@@ -102,6 +105,11 @@ async function authenticateUserSession(rawToken) {
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
+      // Enforce absolute lifetime even on cache hits
+      if (parsed.session_expires_at && new Date(parsed.session_expires_at) <= new Date()) {
+        await client.del(`session:${tokenHash}`).catch(() => {});
+        return null;
+      }
       // Sanity check: must have phone_verified field (guards against stale/malformed cache)
       if (Object.prototype.hasOwnProperty.call(parsed, 'phone_verified')) {
         return {
@@ -112,9 +120,11 @@ async function authenticateUserSession(rawToken) {
     } catch { /* fall through to MySQL */ }
   }
 
-  // 2. Fallback to MySQL — lookup by hash
+  // 2. Fallback to MySQL — lookup by hash, rejecting expired sessions.
+  // (expires_at IS NULL tolerates rows created before the 002 migration ran.)
   const [rows] = await pool.execute(
-    `SELECT id, user_id FROM user_sessions WHERE session_token = ?`,
+    `SELECT id, user_id, expires_at FROM user_sessions
+     WHERE session_token = ? AND (expires_at IS NULL OR expires_at > NOW())`,
     [tokenHash]
   );
   if (!rows[0]) return null;
@@ -131,7 +141,11 @@ async function authenticateUserSession(rawToken) {
   if (!userRows[0]) return null;
 
   // 4. Re-populate Redis cache
-  const cachePayload = { ...userRows[0], session_id: sessionRow.id };
+  const cachePayload = {
+    ...userRows[0],
+    session_id: sessionRow.id,
+    session_expires_at: sessionRow.expires_at ? new Date(sessionRow.expires_at).toISOString() : null,
+  };
   await client.setEx(`session:${tokenHash}`, SESSION_CACHE_TTL, JSON.stringify(cachePayload));
 
   return {
@@ -427,6 +441,17 @@ async function revokeAdminSessionsForUser(userId) {
   return { revokedCount: tokenHashes.length };
 }
 
+/**
+ * Drop the Redis cache entry for one user session so the next request
+ * re-reads fresh user data from MySQL. The durable session row is untouched.
+ *
+ * @param {string} rawToken - raw token from cookie
+ */
+async function invalidateUserSessionCache(rawToken) {
+  if (!rawToken) return;
+  await client.del(`session:${hashToken(rawToken)}`);
+}
+
 // ─── Exports ──────────────────────────────────────────────────
 
 module.exports = {
@@ -439,6 +464,7 @@ module.exports = {
   touchUserSession,
   revokeUserSession,
   revokeAllUserSessions,
+  invalidateUserSessionCache,
   listUserSessions,
 
   // Admin sessions

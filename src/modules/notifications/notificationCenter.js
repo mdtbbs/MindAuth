@@ -16,6 +16,7 @@
 
 const { pool } = require('../../db');
 const { sendEmail } = require('../../utils/email');
+const { escapeHtml } = require('../../utils/validation');
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -56,19 +57,19 @@ async function create({ user_id, type, title, content, ip_address, user_agent, s
     try {
       const email = await getUserEmail(user_id);
       if (email) {
-        await sendEmail({
-          to: email,
-          subject: `[MindAuth] ${title}`,
-          html: `
+        await sendEmail(
+          email,
+          `[MindAuth] ${title}`,
+          `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #ff6b35;">${title}</h2>
-              <p>${content || ''}</p>
-              ${ip_address ? `<p style="color: #666; font-size: 12px;">IP: ${ip_address}</p>` : ''}
+              <h2 style="color: #ff6b35;">${escapeHtml(title)}</h2>
+              <p>${escapeHtml(content || '')}</p>
+              ${ip_address ? `<p style="color: #666; font-size: 12px;">IP: ${escapeHtml(ip_address)}</p>` : ''}
               <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
               <p style="color: #999; font-size: 12px;">此邮件由 MindAuth 自动发送，请勿回复。</p>
             </div>
-          `,
-        });
+          `
+        );
       }
     } catch (err) {
       console.warn('[NotificationCenter] email send failed:', err.message);

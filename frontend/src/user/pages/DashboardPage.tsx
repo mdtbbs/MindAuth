@@ -62,7 +62,7 @@ export function DashboardPage() {
         api.get<{ success: boolean; sessions: Session[] }>('/api/sessions'),
         api.get<{ success: boolean; notifications: Notification[] }>('/api/notifications'),
         api.get<{ success: boolean; logs: LoginLog[] }>('/api/login-logs'),
-        api.get<{ success: boolean; authorizations: Authorization[] }>('/api/me'),
+        api.get<{ success: boolean; authorizations: Authorization[] }>('/api/authorizations'),
         api.get<UnreadCount>('/api/notifications/unread-count'),
       ]);
 
@@ -70,16 +70,13 @@ export function DashboardPage() {
       if (notifsRes.status === 'fulfilled') setNotifications(notifsRes.value.notifications || []);
       if (logsRes.status === 'fulfilled') setLoginLogs(logsRes.value.logs || []);
       if (unreadRes.status === 'fulfilled') setUnreadCount(unreadRes.value.count || 0);
-      if (authsRes.status === 'fulfilled') {
-        const data = authsRes.value as { success: boolean; authorizations?: Authorization[] };
-        setAuthorizations(data.authorizations || []);
-      }
+      if (authsRes.status === 'fulfilled') setAuthorizations(authsRes.value.authorizations || []);
     } catch {}
   }, []);
 
   useEffect(() => {
     if (user) {
-      setPhoneStatus({ phone: user.phone, verified: user.phone_verified });
+      setPhoneStatus({ phone: user.phone_masked, verified: user.phone_verified });
       loadDashboardData();
     }
   }, [user, loadDashboardData]);

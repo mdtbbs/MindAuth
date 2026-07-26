@@ -9,10 +9,18 @@
  * inside a transaction with row locking.
  *
  * Index sets (Redis SETs) allow targeted invalidation without SCAN:
- *   accesstokens_by_userclient:{userId}:{clientId} → Set<accessToken>
+ *   accesstokens_by_userclient:{userId}:{clientId} → Set<sha256(accessToken)>
+ *
+ * Tokens are stored under their SHA-256 hash — a Redis dump never exposes
+ * usable bearer tokens. Callers always pass the raw token.
  */
 
+const crypto = require('crypto');
 const { client } = require('../../redis');
+
+function hashToken(rawToken) {
+  return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
+}
 
 // ─── Authorization Codes ──────────────────────────────────────
 
@@ -56,9 +64,10 @@ async function consumeAuthCode(code) {
  * @param {number} ttlSeconds - Time-to-live in seconds (typically 3600 = 1 hour).
  */
 async function storeAccessToken(token, data, ttlSeconds) {
-  await client.setEx(`accesstoken:${token}`, ttlSeconds, JSON.stringify(data));
+  const tokenHash = hashToken(token);
+  await client.setEx(`accesstoken:${tokenHash}`, ttlSeconds, JSON.stringify(data));
   // Index for targeted invalidation (avoids SCAN)
-  await client.sAdd(`accesstokens_by_userclient:${data.user_id}:${data.client_id}`, token);
+  await client.sAdd(`accesstokens_by_userclient:${data.user_id}:${data.client_id}`, tokenHash);
 }
 
 /**
@@ -68,7 +77,7 @@ async function storeAccessToken(token, data, ttlSeconds) {
  * @returns {Promise<object|null>} Parsed payload or null.
  */
 async function getAccessToken(token) {
-  const raw = await client.get(`accesstoken:${token}`);
+  const raw = await client.get(`accesstoken:${hashToken(token)}`);
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -84,7 +93,7 @@ async function getAccessToken(token) {
  * @returns {Promise<number>} TTL in seconds (-2 = key does not exist).
  */
 async function getAccessTokenTtl(token) {
-  return client.ttl(`accesstoken:${token}`);
+  return client.ttl(`accesstoken:${hashToken(token)}`);
 }
 
 /**
@@ -93,7 +102,7 @@ async function getAccessTokenTtl(token) {
  * @param {string} token
  */
 async function revokeAccessToken(token) {
-  await client.del(`accesstoken:${token}`);
+  await client.del(`accesstoken:${hashToken(token)}`);
 }
 
 /**
@@ -105,9 +114,10 @@ async function revokeAccessToken(token) {
  */
 async function revokeAccessTokensForUserClient(userId, clientId) {
   const indexKey = `accesstokens_by_userclient:${userId}:${clientId}`;
-  const tokens = await client.sMembers(indexKey);
-  if (tokens.length > 0) {
-    await Promise.all(tokens.map(t => client.del(`accesstoken:${t}`).catch(() => {})));
+  // Index members are already hashes — delete their keys directly
+  const tokenHashes = await client.sMembers(indexKey);
+  if (tokenHashes.length > 0) {
+    await Promise.all(tokenHashes.map(h => client.del(`accesstoken:${h}`).catch(() => {})));
   }
   await client.del(indexKey).catch(() => {});
 }

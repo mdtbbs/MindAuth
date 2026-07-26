@@ -10,10 +10,12 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 const { logUserAudit } = require('../utils/userAudit');
 const { getClientIp } = require('../utils/request');
 const sessionManager = require('../modules/sessions/sessionManager');
+const tokenStore = require('../modules/oauth/tokenStore');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const RESET_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
-const resetRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 60 * 60 * 1000, keyPrefix: 'reset' }); // 3 per hour
+const resetRateLimiter = createRateLimiter({ maxAttempts: 3, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:password_reset_request' }); // 3 per hour
+const resetExecLimiter = createRateLimiter({ maxAttempts: 10, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:password_reset_exec' }); // 10 per hour
 
 // Request password reset
 router.post('/reset-request', resetRateLimiter, async (req, res) => {
@@ -53,7 +55,7 @@ router.post('/reset-request', resetRateLimiter, async (req, res) => {
 });
 
 // Execute password reset
-router.post('/reset', async (req, res) => {
+router.post('/reset', resetExecLimiter, async (req, res) => {
   const { token, new_password } = req.body;
 
   if (!token) {
@@ -101,27 +103,20 @@ router.post('/reset', async (req, res) => {
     // Revoke all user sessions via sessionManager (clears MySQL, Redis, index sets)
     await sessionManager.revokeAllUserSessions(parsed.user_id);
 
-    // Best-effort: invalidate cached access tokens for this user in Redis.
-    // Access tokens are keyed by token (not user_id), so we must scan.
-    // Password reset is rare, so this one-time scan cost is acceptable.
+    // Best-effort: revoke cached access tokens for this user via the
+    // per-user/client index sets maintained by tokenStore (no SCAN).
     try {
-      const scanStream = client.scanIterator({ MATCH: 'accesstoken:*', COUNT: 200 });
-      const deletions = [];
-      for await (const key of scanStream) {
-        const data = await client.get(key);
-        if (!data) continue;
-        try {
-          const payload = JSON.parse(data);
-          if (payload.user_id === parsed.user_id) {
-            deletions.push(client.del(key).catch(() => {}));
-          }
-        } catch (_) {
-          // ignore malformed entries
-        }
-      }
-      if (deletions.length > 0) await Promise.all(deletions);
-    } catch (scanErr) {
-      console.warn('[Password] access token scan failed:', scanErr.message);
+      const [clientRows] = await pool.execute(
+        'SELECT DISTINCT client_id FROM authorizations WHERE user_id = ?',
+        [parsed.user_id]
+      );
+      await Promise.all(
+        clientRows.map(row =>
+          tokenStore.revokeAccessTokensForUserClient(parsed.user_id, row.client_id).catch(() => {})
+        )
+      );
+    } catch (revokeErr) {
+      console.warn('[Password] access token revocation failed:', revokeErr.message);
     }
 
     logUserAudit({

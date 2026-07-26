@@ -47,6 +47,12 @@ function validateConfig(config) {
     if (config.server.allowedOrigins.includes('*')) {
       errors.push('ALLOWED_ORIGINS=* is not allowed in production when credentials are enabled');
     }
+
+    // Memory Redis stores sessions, OAuth tokens, and rate limits in process
+    // memory — data loss on restart and no cross-instance sharing
+    if (process.env.USE_MEMORY_REDIS === '1' || process.env.USE_MEMORY_REDIS === 'true') {
+      errors.push('USE_MEMORY_REDIS must not be enabled in production');
+    }
   }
 
   // --- MySQL config ---

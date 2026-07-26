@@ -36,6 +36,30 @@ function isSuperAdmin(req) {
   return req.adminUser?.normalized_role === 'super_admin' || req.adminUser?.role === 'admin';
 }
 
+/**
+ * Guard for per-user admin actions. Returns { status, message } when the
+ * action must be rejected, or null when it is allowed.
+ * - Admin-role targets may only be acted on by a super admin
+ * - blockSelf: the acting admin cannot target their own account
+ * - protectLastSuper: the last remaining super admin cannot be removed
+ */
+async function checkTargetGuard(req, targetId, { blockSelf = false, protectLastSuper = false } = {}) {
+  const [rows] = await pool.execute('SELECT id, role FROM users WHERE id = ?', [targetId]);
+  const target = rows[0];
+  if (!target) return { status: 404, message: '用户不存在' };
+  if (blockSelf && target.id === req.adminUser.id) {
+    return { status: 400, message: '不能对自己的账号执行此操作' };
+  }
+  if (isAdminRole(target.role) && !isSuperAdmin(req)) {
+    return { status: 403, message: '只有超级管理员可以操作管理员账号' };
+  }
+  if (protectLastSuper && (target.role === 'super_admin' || target.role === 'admin')) {
+    const [cnt] = await pool.execute("SELECT COUNT(*) AS n FROM users WHERE role IN ('super_admin', 'admin')");
+    if (cnt[0].n <= 1) return { status: 403, message: '不能移除最后一个超级管理员' };
+  }
+  return null;
+}
+
 // GET /users - Get all users
 router.get('/', requireAdmin, requireAdminPermission('users.read'), async (req, res) => {
   try {
@@ -139,7 +163,7 @@ router.get('/:id', requireAdmin, requireAdminPermission('users.read'), async (re
     const [authorizations] = await pool.execute(`
       SELECT a.id, a.client_id, c.name as client_name, a.scope, a.last_used_at, a.created_at
       FROM authorizations a
-      LEFT JOIN clients c ON a.client_id = c.id
+      LEFT JOIN clients c ON a.client_id = c.client_id
       WHERE a.user_id = ?
       ORDER BY a.last_used_at DESC
       LIMIT 20
@@ -244,8 +268,9 @@ router.post('/:id/reset-password', requireAdmin, requireAdminPermission('users.r
     if (config.server.isProduction) {
       // Production: Never expose password, even if email failed
       if (emailSent.mode === 'console') {
-        console.warn(`[SECURITY] Password reset for user ${user.username} (${id}) - email failed. Temp password logged separately.`);
-        console.warn(`[SECURITY] Temp password for ${user.username}: ${tempPassword}`);
+        // Never write the temporary password to logs — if email is not
+        // configured the admin must re-run the reset after fixing SMTP
+        console.warn(`[SECURITY] Password reset for user ${user.username} (${id}) - email not configured, temp password NOT delivered.`);
       }
       res.json({
         success: true,
@@ -345,6 +370,9 @@ router.delete('/:id', requireAdmin, requireAdminPermission('users.delete'), user
     const { id } = req.params;
     const userId = parseInt(id);
 
+    const guard = await checkTargetGuard(req, userId, { blockSelf: true, protectLastSuper: true });
+    if (guard) return res.status(guard.status).json({ success: false, message: guard.message });
+
     // Revoke all sessions (user + admin) BEFORE deletion so Redis keys are cleaned up
     // while we still have the session data to find them
     await sessionManager.revokeAllUserSessions(userId);
@@ -384,6 +412,9 @@ router.post('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async
     const { reason, duration, expires_at } = req.body;
     const banExpires = calcBanExpiry(duration, expires_at);
 
+    const guard = await checkTargetGuard(req, parseInt(id), { blockSelf: true, protectLastSuper: true });
+    if (guard) return res.status(guard.status).json({ success: false, message: guard.message });
+
     const [result] = await pool.execute(
       'UPDATE users SET ban_status = ?, ban_reason = ?, banned_by = ?, ban_expires_at = ? WHERE id = ?',
       ['banned', reason || null, req.adminUser.id, banExpires, id]
@@ -413,6 +444,9 @@ router.post('/:id/mute', requireAdmin, requireAdminPermission('users.ban'), asyn
     const { id } = req.params;
     const { reason, duration, expires_at } = req.body;
     const banExpires = calcBanExpiry(duration, expires_at);
+
+    const guard = await checkTargetGuard(req, parseInt(id), { blockSelf: true });
+    if (guard) return res.status(guard.status).json({ success: false, message: guard.message });
 
     const [result] = await pool.execute(
       'UPDATE users SET ban_status = ?, ban_reason = ?, banned_by = ?, ban_expires_at = ? WHERE id = ?',
@@ -454,6 +488,10 @@ router.delete('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), asy
 router.post('/:id/unlock', requireAdmin, requireAdminPermission('users.unlock'), async (req, res) => {
   try {
     const { id } = req.params;
+
+    const guard = await checkTargetGuard(req, parseInt(id));
+    if (guard) return res.status(guard.status).json({ success: false, message: guard.message });
+
     const [result] = await pool.execute(
       'UPDATE users SET lock_level = 0, locked_until = NULL WHERE id = ?',
       [id]

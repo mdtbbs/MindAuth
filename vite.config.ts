@@ -8,6 +8,9 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, 'dist/client'),
     emptyOutDir: true,
+    // Emit source maps so production stack traces (ErrorBoundary, Sentry-style
+    // reporting) map back to original TSX instead of minified bundles
+    sourcemap: true,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'frontend/index.html'),

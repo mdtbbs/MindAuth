@@ -21,6 +21,7 @@ const { sendSmsCode, checkSmsCode } = require('../../utils/aliyunSms');
 const { getClientIp } = require('../../utils/request');
 const { logSmsAudit } = require('../../utils/smsAudit');
 const { createNotification } = require('../../utils/notify');
+const sessionManager = require('../sessions/sessionManager');
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -245,10 +246,9 @@ async function verifyCode(user, rawPhone, rawCode, req) {
       [phone, user.id]
     );
 
-    // Invalidate session cache so req.user is fresh on next request
-    if (token) {
-      await client.del(`session:${token}`);
-    }
+    // Invalidate session cache so req.user is fresh on next request.
+    // Must go through sessionManager — cache keys are keyed by token HASH.
+    await sessionManager.invalidateUserSessionCache(token);
 
     await clearVerifyFailureLimits(user.id, phone);
     await logSmsAudit({ ...audit, success: true, code: 'PHONE_BOUND' });

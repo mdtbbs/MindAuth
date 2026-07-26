@@ -9,7 +9,7 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
-const sendRateLimiter = createRateLimiter({ maxAttempts: 1, windowMs: 60 * 1000, keyPrefix: 'verify' }); // 1 per minute
+const sendRateLimiter = createRateLimiter({ maxAttempts: 1, windowMs: 60 * 1000, keyPrefix: 'ratelimit:email_verify_send' }); // 1 per minute
 
 // Helper: persist a verification token to MySQL as a durable fallback in case
 // Redis loses data. The verify endpoint checks Redis first and falls back here.

@@ -49,7 +49,12 @@ async function cleanupUser(userId) {
   await client.del(`sessions_by_user:${userId}`).catch(() => {});
 }
 
-describe('sessionManager', () => {
+// Integration test: requires a live MySQL test database. Set RUN_INTEGRATION=1
+// (CI does this) to enable; otherwise the whole suite is skipped so it never
+// crashes on a machine without a database.
+const RUN_INTEGRATION = process.env.RUN_INTEGRATION === '1' || process.env.CI === 'true';
+
+describe('sessionManager', { skip: !RUN_INTEGRATION }, () => {
   before(async () => {
     await runMigrations(pool);
   });

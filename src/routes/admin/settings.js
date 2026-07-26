@@ -3,7 +3,13 @@ const router = express.Router();
 const { pool } = require('../../db');
 const { formatMySQLDateTime } = require('../../utils/datetime');
 const { requireAdmin, requireAdminPermission } = require('../../middleware/requireAdmin');
+const { createRateLimiter } = require('../../middleware/rateLimit');
 const { getClientIp } = require('../../utils/request');
+
+// Test send endpoints hit external mail/SMS providers — limit to prevent
+// abuse as a spam relay / SMS cost drain even by authenticated admins
+const testEmailLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 10 * 60 * 1000, keyPrefix: 'ratelimit:admin_test_email' });
+const testSmsLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 10 * 60 * 1000, keyPrefix: 'ratelimit:admin_test_sms' });
 const config = require('../../config');
 const runtimeConfig = require('../../modules/config/runtimeConfig');
 const auditWriter = require('../../modules/audit/auditWriter');
@@ -150,7 +156,7 @@ router.put('/email-config', requireAdmin, requireAdminPermission('email_config.w
 });
 
 // POST /test-email - Send test email
-router.post('/test-email', requireAdmin, requireAdminPermission('email_config.write'), async (req, res) => {
+router.post('/test-email', requireAdmin, requireAdminPermission('email_config.write'), testEmailLimiter, async (req, res) => {
   try {
     const { email } = req.body;
 
@@ -170,7 +176,7 @@ router.post('/test-email', requireAdmin, requireAdminPermission('email_config.wr
     res.json({ success: true, message: '测试邮件已发送，请检查邮箱' });
   } catch (err) {
     console.error('Test email error:', err);
-    res.status(500).json({ success: false, message: '发送失败: ' + err.message });
+    res.status(500).json({ success: false, message: '测试邮件发送失败，请检查 SMTP 配置' });
   }
 });
 
@@ -244,7 +250,7 @@ router.put('/sms-config', requireAdmin, requireAdminPermission('sms_config.write
 });
 
 // POST /test-sms - Send test SMS
-router.post('/test-sms', requireAdmin, requireAdminPermission('sms_config.write'), async (req, res) => {
+router.post('/test-sms', requireAdmin, requireAdminPermission('sms_config.write'), testSmsLimiter, async (req, res) => {
   try {
     const phone = String(req.body?.phone || '').trim();
 
@@ -275,7 +281,7 @@ router.post('/test-sms', requireAdmin, requireAdminPermission('sms_config.write'
 // GET /config - Get system configuration
 router.get('/config', requireAdmin, requireAdminPermission('config.read'), async (req, res) => {
   try {
-    const [configs] = await pool.execute('SELECT key, value, description FROM system_config');
+    const [configs] = await pool.execute('SELECT `key`, `value`, description FROM system_config');
     const [emailRows] = await pool.execute('SELECT host, port, user, `from`, secure FROM email_config WHERE id = 1');
     const emailConfig = emailRows[0] || {};
 

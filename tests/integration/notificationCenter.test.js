@@ -40,7 +40,10 @@ async function cleanupUser(userId) {
   await pool.execute('DELETE FROM users WHERE id = ?', [userId]);
 }
 
-describe('notificationCenter', () => {
+// Integration test: requires a live MySQL test database (RUN_INTEGRATION=1).
+const RUN_INTEGRATION = process.env.RUN_INTEGRATION === '1' || process.env.CI === 'true';
+
+describe('notificationCenter', { skip: !RUN_INTEGRATION }, () => {
   let user;
 
   before(async () => {

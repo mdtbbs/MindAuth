@@ -28,6 +28,7 @@
 
 const crypto = require('crypto');
 const { pool, transaction } = require('../../db');
+const { timingSafeCompare } = require('../../utils/crypto');
 const { generateShortToken, generateToken } = require('../../utils/token');
 const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../../utils/datetime');
 const { maskPhone } = require('../../utils/phone');
@@ -84,6 +85,15 @@ function verifyPkce(codeVerifier, codeChallenge) {
   return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(codeChallenge));
 }
 
+/**
+ * Refresh tokens are stored in MySQL as SHA-256 hashes — a database dump
+ * never exposes usable tokens. All refresh_tokens.token reads/writes must
+ * go through this helper.
+ */
+function hashRefreshToken(rawToken) {
+  return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
+}
+
 // ─── Client verification ──────────────────────────────────────
 
 /**
@@ -95,14 +105,20 @@ function verifyPkce(codeVerifier, codeChallenge) {
  * @returns {Promise<object>} The client row
  */
 async function verifyClient(clientId, clientSecret) {
+  if (!clientId || !clientSecret) {
+    throw new OAuthError(401, 'invalid_client', '缺少客户端认证');
+  }
+  // Fetch by client_id only, then compare the secret in constant time —
+  // a SQL equality comparison can leak secret prefixes via timing
   const [rows] = await pool.execute(
-    'SELECT * FROM clients WHERE client_id = ? AND client_secret = ?',
-    [clientId, clientSecret]
+    'SELECT * FROM clients WHERE client_id = ?',
+    [clientId]
   );
-  if (!rows[0]) {
+  const row = rows[0];
+  if (!row || !timingSafeCompare(String(clientSecret), String(row.client_secret))) {
     throw new OAuthError(401, 'invalid_client', '无效的 client_id 或 client_secret');
   }
-  return rows[0];
+  return row;
 }
 
 /**
@@ -253,9 +269,12 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
     [user.id, ipAddress, clientData.name, 'oauth']
   );
 
-  // 12. Build redirect URL
-  const stateParam = state ? `&state=${encodeURIComponent(state)}` : '';
-  return { redirectTo: `${redirectUri}?code=${code}${stateParam}` };
+  // 12. Build redirect URL (URL API keeps any query string the registered
+  // redirect_uri already carries intact)
+  const redirectTo = new URL(redirectUri);
+  redirectTo.searchParams.set('code', code);
+  if (state) redirectTo.searchParams.set('state', state);
+  return { redirectTo: redirectTo.toString() };
 }
 
 // ─── Token Exchange ───────────────────────────────────────────
@@ -310,6 +329,9 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
     [codeData.user_id]
   );
   const user = userRows[0];
+  if (!user) {
+    throw new OAuthError(401, 'invalid_grant', '授权用户不存在');
+  }
 
   // 7. Generate tokens
   const accessToken = generateToken();
@@ -325,10 +347,10 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
     token_type: 'Bearer',
   }, ACCESS_TOKEN_TTL_S);
 
-  // 9. Store refresh token in MySQL
+  // 9. Store refresh token in MySQL (hashed)
   await pool.execute(
     'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at) VALUES (?, ?, ?, ?, ?)',
-    [user.id, clientId, refreshToken, effectiveScope, refreshExpiresAt]
+    [user.id, clientId, hashRefreshToken(refreshToken), effectiveScope, refreshExpiresAt]
   );
 
   // 10. Return RFC 6749 compliant response
@@ -372,7 +394,7 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
         SELECT * FROM refresh_tokens
         WHERE token = ? AND client_id = ?
         FOR UPDATE
-      `, [refreshToken, clientId]);
+      `, [hashRefreshToken(refreshToken), clientId]);
       const row = tokenRows[0];
 
       if (!row) {
@@ -414,7 +436,7 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
       await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [row.id]);
       await conn.execute(
         'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at) VALUES (?, ?, ?, ?, ?)',
-        [user.id, clientId, newRefreshToken, storedToken.scope || 'openid profile email', newRefreshExpiresAt]
+        [user.id, clientId, hashRefreshToken(newRefreshToken), storedToken.scope || 'openid profile email', newRefreshExpiresAt]
       );
     });
   } catch (txErr) {
@@ -460,18 +482,8 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
  * @returns {Promise<object>} RFC 7662 introspection response
  */
 async function introspect({ token, clientId, clientSecret }) {
-  // 1. Verify client credentials
-  if (!clientId || !clientSecret) {
-    throw new OAuthError(401, 'invalid_client', '缺少客户端认证');
-  }
-
-  const [clientRows] = await pool.execute(
-    'SELECT * FROM clients WHERE client_id = ? AND client_secret = ?',
-    [clientId, clientSecret]
-  );
-  if (!clientRows[0]) {
-    throw new OAuthError(401, 'invalid_client', '无效的客户端认证');
-  }
+  // 1. Verify client credentials (constant-time, shared with all endpoints)
+  await verifyClient(clientId, clientSecret);
 
   // 2. Check if it's an access token (Redis)
   const tokenData = await tokenStore.getAccessToken(token);
@@ -487,10 +499,10 @@ async function introspect({ token, clientId, clientSecret }) {
     };
   }
 
-  // 3. Check if it's a refresh token (MySQL)
+  // 3. Check if it's a refresh token (MySQL, stored hashed)
   const [refreshRows] = await pool.execute(
     'SELECT * FROM refresh_tokens WHERE token = ? AND revoked = 0 AND expires_at > ?',
-    [token, formatMySQLDateTime()]
+    [hashRefreshToken(token), formatMySQLDateTime()]
   );
   const refreshToken = refreshRows[0];
   if (refreshToken) {
@@ -521,18 +533,8 @@ async function introspect({ token, clientId, clientSecret }) {
  * @returns {Promise<{ success: boolean }>}
  */
 async function revoke({ token, tokenTypeHint, clientId, clientSecret }) {
-  // 1. Verify client credentials
-  if (!clientId || !clientSecret) {
-    throw new OAuthError(401, 'invalid_client', '缺少客户端认证');
-  }
-
-  const [clientRows] = await pool.execute(
-    'SELECT * FROM clients WHERE client_id = ? AND client_secret = ?',
-    [clientId, clientSecret]
-  );
-  if (!clientRows[0]) {
-    throw new OAuthError(401, 'invalid_client', '无效的客户端认证');
-  }
+  // 1. Verify client credentials (constant-time, shared with all endpoints)
+  await verifyClient(clientId, clientSecret);
 
   // 2. Try to revoke access token (Redis)
   const accessTokenData = await tokenStore.getAccessToken(token);
@@ -541,10 +543,10 @@ async function revoke({ token, tokenTypeHint, clientId, clientSecret }) {
     return { success: true };
   }
 
-  // 3. Try to revoke refresh token (MySQL)
+  // 3. Try to revoke refresh token (MySQL, stored hashed)
   await pool.execute(
     'UPDATE refresh_tokens SET revoked = 1 WHERE token = ? AND client_id = ?',
-    [token, clientId]
+    [hashRefreshToken(token), clientId]
   );
 
   // 4. RFC 7009: always return success

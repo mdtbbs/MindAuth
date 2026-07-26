@@ -1,16 +1,39 @@
 const crypto = require('crypto');
 const { timingSafeCompare } = require('../utils/crypto');
+const config = require('../config');
 
 /**
  * CSRF Protection Middleware
- * Uses double-submit cookie pattern:
- * 1. Server sets csrf_token cookie
+ * Uses a signed double-submit cookie pattern:
+ * 1. Server sets csrf_token cookie — value is `${random}.${hmac(random)}`
  * 2. Client must send X-CSRF-Token header matching the cookie
- * 3. Validates on POST/PUT/PATCH/DELETE requests
+ * 3. Validates match + HMAC signature on POST/PUT/PATCH/DELETE requests
+ *
+ * The HMAC signature means only tokens minted by this server pass — an
+ * attacker who can plant cookies (e.g. from a sibling subdomain) cannot
+ * forge a valid value.
  */
 
+// Derived key, stable across restarts and instances that share ADMIN_SECRET
+const CSRF_HMAC_KEY = crypto.createHash('sha256')
+  .update(`csrf:${config.admin.secret || 'mindauth-dev-csrf'}`)
+  .digest();
+
+function signCsrfValue(random) {
+  return crypto.createHmac('sha256', CSRF_HMAC_KEY).update(random).digest('hex');
+}
+
 function generateCsrfToken() {
-  return crypto.randomBytes(32).toString('hex');
+  const random = crypto.randomBytes(16).toString('hex');
+  return `${random}.${signCsrfValue(random)}`;
+}
+
+function isValidCsrfToken(token) {
+  if (typeof token !== 'string') return false;
+  const dot = token.indexOf('.');
+  if (dot <= 0) return false;
+  const expected = signCsrfValue(token.slice(0, dot));
+  return timingSafeCompare(token.slice(dot + 1), expected);
 }
 
 /**
@@ -18,8 +41,9 @@ function generateCsrfToken() {
  * Should be applied before routes that need CSRF protection
  */
 function setCsrfCookie(req, res, next) {
-  // Only set if not already present
-  if (!req.cookies.csrf_token) {
+  // Set when absent, and re-issue when the existing cookie is not a token
+  // this server signed (legacy format or tampered value)
+  if (!isValidCsrfToken(req.cookies.csrf_token)) {
     const token = generateCsrfToken();
     res.cookie('csrf_token', token, {
       httpOnly: false, // Must be readable by JS
@@ -76,8 +100,8 @@ function validateCsrf(req, res, next) {
     });
   }
 
-  // Timing-safe comparison
-  if (!timingSafeCompare(cookieToken, headerToken)) {
+  // Timing-safe comparison + server signature check
+  if (!timingSafeCompare(cookieToken, headerToken) || !isValidCsrfToken(cookieToken)) {
     return res.status(403).json({
       success: false,
       message: 'CSRF token 无效'
@@ -91,7 +115,8 @@ function validateCsrf(req, res, next) {
  * Endpoint to get/refresh CSRF token
  */
 function csrfTokenEndpoint(req, res) {
-  const token = req.cookies.csrf_token || generateCsrfToken();
+  const existing = req.cookies.csrf_token;
+  const token = isValidCsrfToken(existing) ? existing : generateCsrfToken();
 
   res.cookie('csrf_token', token, {
     httpOnly: false,

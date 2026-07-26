@@ -39,6 +39,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Claude Code local state / agent worktrees
+.claude/
+
 # Temporary files
 tmp/
 temp/
