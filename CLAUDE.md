@@ -14,6 +14,23 @@ MindAuth is an OAuth 2.0 authentication service providing centralized SSO for Mi
 - Session management with Redis caching and token hashing
 - Forum-style account UX for Mindustry community services
 
+## Documentation Map
+
+Detailed Chinese developer docs live in `docs/`. This file stays the compact authoritative index; read the mapped doc before working in its area:
+
+| Doc | Read it when |
+|-----|--------------|
+| `docs/getting-started.md` | Setting up a dev environment, running tests, first-time onboarding |
+| `docs/architecture/overview.md` | Changing startup sequence, middleware order, or `src/app.js` wiring |
+| `docs/architecture/backend.md` | Working in `src/modules/**`, `src/middleware/*`, or `src/utils/*` |
+| `docs/architecture/frontend.md` | Working in `frontend/src/**` or touching the legacy `public/js/` SPA boundary |
+| `docs/architecture/database.md` | Changing schema/migrations, Redis key usage, or `system_config` keys |
+| `docs/architecture/security.md` | Touching auth, tokens, CSRF, rate limiting, IP handling, or RBAC |
+| `docs/api/README.md` | Adding/changing any endpoint (full ~93-endpoint index + shared conventions) |
+| `docs/api/{auth,oauth,account,admin}.md` | Endpoint-level reference per domain (params, responses, errors) |
+| `docs/operations/{deployment,configuration,runbook}.md` | Deploying, changing env vars/config keys, or handling incidents |
+| `docs/third-party-integration.md` | Changing anything third-party clients depend on (public OAuth contract) |
+
 ## Commands
 
 ```bash
@@ -98,7 +115,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 
 | Module | File | Key Exports |
 |--------|------|-------------|
-| `sessionManager` | `sessions/sessionManager.js` | `createUserSession`, `authenticateUserSession`, `touchUserSession`, `revokeUserSession`, `revokeAllUserSessions`, `listUserSessions`, `createAdminSession`, `authenticateAdminSession`, `revokeAdminSessionsForUser` |
+| `sessionManager` | `sessions/sessionManager.js` | `hashToken`, `createUserSession`, `authenticateUserSession`, `touchUserSession`, `revokeUserSession`, `revokeAllUserSessions`, `invalidateUserSessionCache`, `listUserSessions`, `createAdminSession`, `authenticateAdminSession`, `revokeAdminSessionsForUser` |
 | `oauthIssuer` | `oauth/oauthIssuer.js` | `authorize`, `exchangeCode`, `refresh`, `introspect`, `revoke`, `userinfo`, `userByAccessToken`, `listAuthorizations`, `revokeAuthorization`, `verify` |
 | `tokenStore` | `oauth/tokenStore.js` | `storeAuthCode`, `consumeAuthCode`, `storeAccessToken`, `getAccessToken`, `getAccessTokenTtl`, `revokeAccessToken`, `revokeAccessTokensForUserClient` |
 | `clientRegistry` | `admin/clientRegistry.js` | `createClient`, `updateClient`, `rotateSecret`, `deleteClient`, `listClients`, `getClient`, `validateRedirectUri` |
@@ -130,6 +147,9 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/userinfo` | GET | User info | OIDC Core |
 | `/revoke` | POST | Token revocation | RFC 7009 |
 | `/verify` | POST | Session verification | Custom |
+| `/user` | GET | User info (legacy MindFourm compat, Bearer) | Custom |
+| `/authorizations` | GET | List current user's authorized apps | Custom |
+| `/authorizations/:client_id` | DELETE | Revoke authorization for a client | Custom |
 
 ### Account Management (`/api/account`)
 | Endpoint | Method | Description |
@@ -139,8 +159,8 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/avatar` | POST/DELETE | Upload/delete avatar |
 | `/banner` | POST/DELETE | Upload/delete banner |
 | `/` | DELETE | Delete account |
-| `/privacy` | GET/PUT | Privacy settings |
 | `/fields` | GET/PUT | Custom field values |
+| `/audit-logs` | GET | Current user's security audit log |
 
 ### Password Reset (`/api/password`)
 | Endpoint | Method | Description |
@@ -178,11 +198,12 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 |----------|--------|-------------|------|
 | `/sms/send` | POST | Send SMS verification code | Session |
 | `/sms/verify` | POST | Verify SMS code and bind phone | Session |
-| `/sms/sync-status` | POST | Sync phone status to external service | Token |
 | `/challenge/random` | GET | Get random challenge question | None |
 | `/challenge/verify` | POST | Verify challenge answer | None |
 | `/sessions` | GET | List active sessions | Session |
+| `/sessions/:id` | DELETE | Revoke a session (remote logout) | Session |
 | `/notifications` | GET | List user notifications | Session |
+| `/notifications/:id` | DELETE | Delete a notification | Session |
 | `/notifications/unread-count` | GET | Get unread notification count | Session |
 | `/notifications/:id/read` | PATCH | Mark notification as read | Session |
 | `/notifications/read-all` | PATCH | Mark all notifications as read | Session |
@@ -209,7 +230,10 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `user_fields` | Custom field definitions | field_key, field_label, field_type, is_required, is_public, options |
 | `user_field_values` | Custom field values | user_id, field_id, value |
 | `admin_audit_logs` | Admin action audit trail | admin_id, action, target_type, target_id, details (JSON) |
+| `user_audit_logs` | User security audit trail (written by `src/utils/userAudit.js`) | user_id, action, ip_address, details |
 | `sms_audit_logs` | SMS audit trail | user_id, action, phone_masked, success, code, ip_address |
+| `sms_config` | Aliyun SMS settings (single row id=1) | access_key_id, access_key_secret, sign_name, template_code |
+| `email_verification_tokens` | Email verification tokens (MySQL fallback beside Redis) | user_id, token_hash, expires_at |
 
 Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`.
 
@@ -230,7 +254,10 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `sms:send:phone:{phone}` | 1min | SMS send rate limit per phone |
 | `sms:verify:fail:*` | Variable | SMS verify failure rate limit |
 | `login_fail:{username}:{ip}` | 5min | Login failure counter (lockout), keyed by username + IP |
-| `session_active:{hash}` | 5min | Session activity throttle |
+| `session_active:{sessionId}` | 5min | Session activity throttle (keyed by session id, not token hash) |
+| `sessions_by_user:{userId}` | none | Index SET of a user's session hashes |
+| `admin_sessions_by_user:{userId}` | none | Index SET of a user's admin session hashes |
+| `accesstokens_by_userclient:{userId}:{clientId}` | none | Index SET for bulk access-token revocation |
 | `challenge_session:{csrf}` | 30min | Challenge question session |
 | `ip_bans_cache` | 5min | IP ban list cache |
 
@@ -248,7 +275,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - Signed double-submit cookie pattern (`csrf_token` = `random.HMAC(random)`, so only server-minted tokens validate)
 - `csrf_token` cookie (httpOnly=false)
 - Validates `X-CSRF-Token` header (timing-safe compare + signature check)
-- Exempt paths (13): OAuth `/token` `/refresh` `/introspect` `/revoke` `/verify`, `/login`, `/register`, `/admin/login`, `/challenge/random` `/challenge/verify`, `/email-verification/verify`, and the non-production `/admin/test/*` endpoints
+- Exempt paths (15): OAuth `/token` `/refresh` `/introspect` `/revoke` `/verify`, `/login`, `/register`, `/admin/login`, `/challenge/random` `/challenge/verify`, `/email-verification/verify`, and the non-production `/admin/test/*` endpoints
 
 ### `rateLimit.js`
 - Redis fixed-window counter + memory fallback (memory Map pruned; counter always gets a TTL)
@@ -273,8 +300,8 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 
 | File | Functions |
 |------|-----------|
-| `token.js` | `generateToken()` (32 bytes), `generateShortToken()` (16 bytes) |
-| `validation.js` | `isValidEmail`, `isValidPassword` (8 chars + complexity), `isValidUsername`, `escapeHtml` |
+| `token.js` | `generateToken()` (32 bytes), `generateShortToken()` (16 bytes), `hashToken()` (SHA-256) |
+| `validation.js` | `isValidEmail`, `isValidPassword` (rules from `system_config`: `password_min_length` default 6, `password_require_complexity` default off), `getPasswordValidationError`, `isValidUsername`, `getUsernameValidationError`, `escapeHtml` |
 | `email.js` | `sendEmail`, `sendVerificationEmail`, `sendPasswordResetEmail` |
 | `crypto.js` | `timingSafeCompare` |
 | `request.js` | `getClientIp` (trusted proxy support) |
