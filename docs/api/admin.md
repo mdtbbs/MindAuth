@@ -154,6 +154,8 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | POST | `/api/admin/test-sms` | `sms_config.write` | 5 次/10 分钟 | `phone`*（11 位大陆手机号） | 发送测试短信；未配置返回 503（`SMS_NOT_CONFIGURED`） |
 | GET | `/api/admin/config` | `config.read` | — | — | 返回 `system`（system_config 全表 key/value/description）+ `email`（不含密码） |
 | PUT | `/api/admin/config/:key` | `config.write` | — | body: `value` | 更新单个运行时配置（见下文） |
+| POST | `/api/admin/auth-background` | `config.write` | — | form-data: `file`* | 上传登录页自定义背景图（见下文） |
+| DELETE | `/api/admin/auth-background` | `config.write` | — | — | 恢复默认网格背景（删除旧背景文件） |
 
 ### email-config / sms-config 脱敏回显
 
@@ -161,9 +163,22 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 - `GET /sms-config` **不返回** `access_key_secret`，以 `has_access_key_secret` 标示；`PUT` 省略该字段同样沿用旧值。
 - 两者保存后均使 `runtimeConfig` 缓存失效并写审计（`config.email` / `config.sms`）。
 
+### 登录页背景（auth-background）
+
+`POST /api/admin/auth-background` 上传登录/注册等认证页的整屏自定义背景图（`multipart/form-data`，字段名 `file`）：
+
+- 文件限制：≤5MB，仅 JPEG/PNG/WebP（**不含 GIF**，MIME 与扩展名双重校验，见 `src/middleware/upload.js` 的 `backgroundUpload`）；
+- 保存为 `public/uploads/backgrounds/auth_bg_{timestamp}{ext}`，URL 写入 `system_config` 的 `auth_background_url` 键；
+- 换图与恢复默认都会**删除旧背景文件**（经 `src/utils/publicFiles.js` 的路径穿越校验）；
+- 两个端点均写管理审计（action=`config.system`，details 含 key/value）。
+
+成功响应：`POST` 返回 `{ "success": true, "background_url": "/uploads/backgrounds/auth_bg_....png", "message": "登录页背景已更新" }`；`DELETE` 返回 `{ "success": true, "message": "已恢复默认背景" }`。未选择文件返回 400。
+
+前台经公开端点 `GET /api/public/auth-page-config` 读取该配置（见 [README.md](README.md) 端点索引）；管理 SPA 在系统配置页的「登录页外观」tab 维护（通用配置列表隐藏 `auth_background_url` 键，避免双入口绕过旧文件清理）。
+
 ### PUT /api/admin/config/:key 可用 key
 
-`runtimeConfig.set` 只执行 UPDATE（不新增 key，key 不存在时静默无效果）。初始 seed 的 key（`src/db/migrations/001_initial_schema.sql`）：
+`runtimeConfig.set` 只执行 UPDATE（不新增 key，key 不存在时静默无效果）。初始 seed 的 key（`001_initial_schema.sql` 6 个 + `003_auth_background_config.sql` 1 个，共 7 个）：
 
 | key | 默认值 | 含义 |
 |-----|--------|------|
@@ -173,6 +188,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | `registration_enabled` | `1` | 是否允许新用户注册（0/1） |
 | `sms_audit_retention_days` | `365` | 短信审计日志保留天数 |
 | `audit_retention_days` | `365` | 管理审计日志保留天数 |
+| `auth_background_url` | 空 | 登录页自定义背景图 URL（空 = 默认网格背景；请经 `auth-background` 端点维护，不要直接 PUT） |
 
 ## 授权与登录日志（logs.js）
 

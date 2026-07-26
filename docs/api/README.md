@@ -83,6 +83,7 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | `/userinfo` `/user` `/verify` | 共用 30 次 / 分钟 |
 | 管理端 删除用户 / 重置密码 / 创建客户端 | 10、20、20 次 / 小时 |
 | 管理端 `test-email` / `test-sms` | 各 5 次 / 10 分钟 |
+| `GET /api/public/auth-page-config` | 60 次 / 分钟 |
 
 ## 端点总索引
 
@@ -93,6 +94,9 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | 方法 | 路径 | 认证 | 限流/权限 | 用途 |
 |------|------|------|-----------|------|
 | GET | `/api/csrf-token` | 无 | — | 获取/刷新 CSRF 令牌 |
+| GET | `/api/public/auth-page-config` | 无 | 60/分钟 | 登录页外观公开配置（见下文） |
+
+**`GET /api/public/auth-page-config`**（`src/routes/public.js`）：返回认证页（登录/注册等）的公开外观配置，当前仅自定义背景图 URL：`{ "success": true, "background_url": "/uploads/backgrounds/..." | null }`（`null` 表示前端使用默认网格背景）。限流前缀 `ratelimit:public_config`（60 次/分钟），响应带 `Cache-Control: public, max-age=60`。背景图由管理端 `POST/DELETE /api/admin/auth-background` 维护，见 [admin.md](admin.md)。
 
 ### 认证域 — 详见 [auth.md](auth.md)
 
@@ -182,6 +186,8 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | POST | `/api/admin/test-sms` | 管理 | `sms_config.write`；5/10分钟 | 发送测试短信 |
 | GET | `/api/admin/config` | 管理 | `config.read` | 读取系统配置 |
 | PUT | `/api/admin/config/:key` | 管理 | `config.write` | 更新单项系统配置 |
+| POST | `/api/admin/auth-background` | 管理 | `config.write` | 上传登录页自定义背景图（≤5MB，JPEG/PNG/WebP） |
+| DELETE | `/api/admin/auth-background` | 管理 | `config.write` | 恢复默认登录页背景 |
 | GET | `/api/admin/authorizations` | 管理 | `authorizations.read` | 全部授权记录 |
 | DELETE | `/api/admin/authorizations/:id` | 管理 | `users.write` | 撤销授权记录 |
 | GET | `/api/admin/login-logs` | 管理 | `login_logs.read` | 登录日志（可筛选） |

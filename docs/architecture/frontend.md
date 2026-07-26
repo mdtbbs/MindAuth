@@ -56,10 +56,12 @@ frontend/src/
 
 布局组件（`user/components/`）：
 
-- **AuthShell** — 认证页外壳：品牌 header + hero 区（eyebrow/heroTitle/heroFeatures 可定制，内置 4 条默认特性文案）+ 表单卡片，用于登录/注册/重置等公开页。
+- **AuthShell** — 认证页外壳（整屏背景 + 居中卡片，仿阿里云）：品牌 header + 单列居中的表单卡片（`max-width: 27.5rem`），用于登录/注册/重置等公开页。背景默认为浅蓝方格网格（`--auth-bg`/`--auth-grid-line`，暗色主题有对应变体）；管理端可上传自定义背景图，AuthShell 经 `GET /api/public/auth-page-config` 获取（**模块级 Promise 缓存**，SPA 生命周期内仅请求一次，失败静默回退默认网格），有图时以 `cover` 铺满并叠加 `--auth-scrim` 可读性遮罩。旧版 hero 双栏布局（eyebrow/heroTitle/heroFeatures）已移除。
 - **AccountShell** — 登录后外壳：顶部品牌栏 + 左侧账户侧边栏（头像、`navItems` 导航、`activeNavKey` 高亮）+ 内容区，用于 Dashboard 与账户设置。
 
-**旧 hash 路由兼容**：`main.tsx` 在渲染前调用 `routes/legacyHashRoutes.ts` 的 `normalizeLegacyHashRoutes()`，将 `/#/login`、`/#/reset-password?token=abc` 等 7 条旧 vanilla SPA hash 路由用 `history.replaceState` 重写为等价路径路由（保留 query），使迁移前的书签与邮件链接继续有效。
+**AccountSettingsPage 的分区**：个人资料 / 账号与安全 / 自定义字段 / 危险操作 四个 tab。原「隐私设置」tab 已移除（后端不存在 `/api/account/privacy` 端点，属死 UI）；自定义字段区使用用户端 `GET/PUT /api/account/fields`（按 `field_key` 键控），删除账户携带后端必填的 `password` 确认字段。
+
+**旧 hash 路由兼容**：`main.tsx` 在渲染前调用 `routes/legacyHashRoutes.ts` 的 `normalizeLegacyHashRoutes()`，将 `/#/login`、`/#/reset-password?token=abc` 等 7 条旧 vanilla SPA hash 路由用 `history.replaceState` 重写为等价路径路由（保留 query），使迁移前的书签与邮件链接继续有效。旧 SPA 同时使用过 `#login` 与 `#/login` 两种写法，匹配时前导斜杠可选，两种形式均可归一化。
 
 ## 管理 SPA
 
@@ -88,14 +90,17 @@ frontend/src/
 | 系统配置 | `config.read` |
 | 日志查看 | `audit_logs.read` |
 
+**AdminSettingsPage 的 tab**：邮件配置 / 短信配置 / 系统配置 / 登录页外观 四个 tab（各自声明所需权限，经 `hasPermission` 过滤）。「登录页外观」tab 提供认证页自定义背景图的预览、上传与恢复默认（调用 `POST/DELETE /api/admin/auth-background`，写操作需 `config.write`）；系统配置 tab 的通用键值列表**隐藏 `auth_background_url`**，避免绕过「登录页外观」的旧文件清理逻辑形成双入口。
+
 ## 与后端的契约
 
 **`api/client.ts`** 是唯一的 fetch 封装：
 
 - **ApiError** — 继承 `Error` 的归一化错误（`status` / `code` / `details`），非 2xx 响应统一抛出，message 优先取服务端 `message`/`error` 字段。
 - **CSRF 自动附加** — POST/PUT/PATCH/DELETE 前经 `ensureCsrfToken()`：优先用内存缓存 → 读 `csrf_token` cookie → 兜底请求 `GET /api/csrf-token`，随后附加 `X-CSRF-Token` 头。`clearCsrfCache()` 供登出后清缓存。
-- **401 统一处理** — `setUnauthorizedHandler(fn)` 注册全局回调；任何请求返回 401 都会触发（`AuthProvider` 用它把 `user` 置空）。
-- **`postForm`** — multipart 上传专用（头像/横幅），不设 `Content-Type`（浏览器自动带 boundary），同样附加 CSRF 头。
+- **401 统一处理** — `setUnauthorizedHandler(fn)` 注册全局回调，任何请求返回 401 都会触发，**回调携带请求路径**；`AuthProvider` 用它把 `user` 置空，但**忽略 `/api/admin/*` 的 401**（普通用户探测管理端点返回 401 不代表会话过期，避免误登出）。
+- **`postForm`** — multipart 上传专用（头像/横幅/管理端登录页背景），不设 `Content-Type`（浏览器自动带 boundary），同样附加 CSRF 头。
+- **`del`** — 支持可选请求体（如删除账户时携带 `password` 确认字段）。
 - 所有请求 `credentials: 'same-origin'`，支持传入 `AbortSignal` 取消。
 
 **会话 Cookie 机制**：登录后由服务端下发 httpOnly `session` cookie（管理端为 `admin_session`），前端不持有 token。`AuthProvider` 初始化时调用 `/api/me` 恢复会话（登录接口只设 cookie，用户信息需单独加载）；`AdminAuthProvider` 调用 `/api/admin/me`，并额外提供 `hasPermission()`。
@@ -121,7 +126,7 @@ frontend/src/
 
 `design/` 三个 CSS 文件（两个入口均全量引入，不依赖 monorepo 的 `shared-styles/`）：
 
-- `tokens.css` — 设计变量（`--color-primary: #ff6b35` 等品牌色、背景、间距、字体）
+- `tokens.css` — 设计变量（`--color-primary: #ff6b35` 等品牌色、背景、间距、字体）。圆角令牌已整体收直为方正风格：`--radius-sm/md/lg/xl/2xl` 为 2/3/4/4/6px（`--radius-full` 保留用于头像/徽章类圆形元素）；另含认证页背景变量 `--auth-bg`/`--auth-grid-line`/`--auth-scrim`（默认网格与自定义背景遮罩，均有暗色变体）
 - `components.css` — 全局 reset + 组件类样式
 - `layout.css` — 布局工具类（`.container`、响应式断点等）
 

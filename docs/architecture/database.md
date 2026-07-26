@@ -12,12 +12,13 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 2. **记录**：首次运行创建 `schema_version` 表（`version` PRIMARY KEY、`name`、`applied_at`），已应用的版本不会重复执行——正常启动**从不删数据**，重复调用是 no-op。
 3. **执行**：每个待执行文件经 `splitStatements()` 拆成单条语句依次 `pool.query()`。全部成功后才写入 `schema_version`；任一语句失败则抛错且**不记录版本**，下次启动重试。注意 MySQL 的 DDL 会隐式 COMMIT，失败的迁移可能已部分生效，无法真正回滚。
 
-现有两个迁移文件（以 SQL 文件为准）：
+现有三个迁移文件（以 SQL 文件为准）：
 
 | 文件 | 内容边界 |
 |------|---------|
 | [`001_initial_schema.sql`](../../src/db/migrations/001_initial_schema.sql) | 全量初始 schema：18 张表 + `email_config`/`sms_config` 的单行种子 + `system_config` 的 6 个种子键 |
 | [`002_security_hardening.sql`](../../src/db/migrations/002_security_hardening.sql) | 安全加固：`user_sessions` 增加 `expires_at` 列（存量回填 30 天）并将 token 索引改为 UNIQUE（`uniq_sessions_token`）、新增 `idx_sessions_expires`；`refresh_tokens.token` 存量值 `SHA2(token, 256)` 哈希化；删除 `clients` 的 `idx_clients_credentials` 复合索引（含 secret）；删除 `users.session_token` 列及 `idx_users_session`、冗余的 `idx_users_username`/`idx_users_email`；`ip_bans` 新增 `idx_ip_bans_ip` |
+| [`003_auth_background_config.sql`](../../src/db/migrations/003_auth_background_config.sql) | `INSERT IGNORE` 种子 `system_config` 的 `auth_background_url` 键（登录页自定义背景图 URL，空 = 默认网格背景）。必须由迁移种子的原因：`runtimeConfig.set()` 只执行 UPDATE 不插入新键，行不存在时管理端无法保存——**新增任何 system_config 配置键都须走迁移种子** |
 
 ## MySQL 表
 
@@ -106,7 +107,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 
 [`src/modules/config/runtimeConfig.js`](../../src/modules/config/runtimeConfig.js) 是 `system_config` 表的唯一读写封装：环境变量（`src/config/index.js`）管静态配置，本模块管动态配置。
 
-**种子键**（由 001 迁移 `INSERT IGNORE` 写入）：
+**种子键**（001 迁移种子 6 个 + 003 迁移种子 1 个，均 `INSERT IGNORE` 写入，共 7 个）：
 
 | 键 | 默认值 | 含义 |
 |----|--------|------|
@@ -116,11 +117,12 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | `registration_enabled` | `1` | 是否允许新用户注册（0/1） |
 | `sms_audit_retention_days` | `365` | 短信审计日志保留天数 |
 | `audit_retention_days` | `365` | 管理审计日志保留天数 |
+| `auth_background_url` | 空 | 登录页自定义背景图 URL（空 = 默认网格背景；003 迁移种子，经管理端 `auth-background` 端点维护） |
 
 **缓存与写入**：
 
 - 进程内 `Map` 缓存，TTL 5 分钟（`CACHE_TTL_MS`）；`get()`/`getMany()` 缓存优先、miss 回源 DB（DB 中不存在的键缓存为 `null`）。
-- 唯一写入口是管理端 `PUT /api/admin/config/:key`（`routes/admin/settings.js`，需 `config.write` 权限），内部调用 `set()`：只 `UPDATE` 已存在的键并使该键缓存失效。缓存是单进程的，多实例部署时其他实例最长 5 分钟后才看到新值。
+- 写入口均在管理端（`routes/admin/settings.js`，需 `config.write` 权限）：通用的 `PUT /api/admin/config/:key`，以及专管 `auth_background_url` 的 `POST/DELETE /api/admin/auth-background`（含旧背景文件清理）。内部均调用 `set()`：只 `UPDATE` 已存在的键并使该键缓存失效。缓存是单进程的，多实例部署时其他实例最长 5 分钟后才看到新值。
 - **例外**：`cleanup.js` 读取 `sms_audit_retention_days` 与 `audit_retention_days` 时**不经过本模块**，直接 `SELECT ... FROM system_config` 查库，因此保留天数修改对清理任务立即生效。
 
 ## 事务与错误处理约定

@@ -202,7 +202,7 @@ DB 后备的动态配置（`system_config` 表）读写，带进程内缓存。�
 
 ### upload.js
 
-导出 `avatarUpload`（2MB）、`bannerUpload`（5MB），基于 multer diskStorage。MIME 与扩展名双重白名单（JPEG/PNG/GIF/WebP，二者必须匹配）；文件名 `{userId}_{timestamp}{ext}`；目录 `public/uploads/{avatars,banners}/` 启动时自动创建。用于 `/api/account/avatar`、`/api/account/banner`。
+导出 `avatarUpload`（2MB）、`bannerUpload`（5MB）、`backgroundUpload`（5MB），基于 multer diskStorage。MIME 与扩展名双重白名单（JPEG/PNG/GIF/WebP，二者必须匹配）；文件名 `{userId}_{timestamp}{ext}`；目录 `public/uploads/{avatars,banners,backgrounds}/` 启动时自动创建。`avatarUpload`/`bannerUpload` 用于 `/api/account/avatar`、`/api/account/banner`；`backgroundUpload` 用于管理端 `POST /api/admin/auth-background`（登录页背景），**不允许 GIF**（避免动图背景），且因管理端无 `req.user`，文件名为 `auth_bg_{timestamp}{ext}`。
 
 ## utils 速查表
 
@@ -217,6 +217,7 @@ DB 后备的动态配置（`system_config` 表）读写，带进程内缓存。�
 | `email.js` | `sendEmail`, `sendPasswordResetEmail`, `sendVerificationEmail`, `getEmailConfig` | nodemailer 发信，SMTP 配置读 `email_config` 表 |
 | `notify.js` | `createNotification(opts)` | legacy 薄包装 → `notificationCenter.create()` |
 | `phone.js` | `maskPhone(phone)` | 手机号脱敏 |
+| `publicFiles.js` | `safePublicPath(relative)`, `tryRemovePublicFile(relative)` | `public/` 下文件的路径穿越校验与安全删除（自 account.js 提取；头像/横幅/登录页背景换图时删旧文件用） |
 | `request.js` | `getClientIp(req)`, `isValidIpv4(ip)`, `isTrustedProxy(req)` | 客户端 IP 提取；代理头默认不信任，支持可信代理与 Cloudflare 网段 |
 | `smsAudit.js` | `logSmsAudit(data)` | 写 `sms_audit_logs` |
 | `token.js` | `generateToken()`（32 字节）, `generateShortToken()`（16 字节）, `hashToken(rawToken)` | 随机令牌生成与 SHA-256 哈希 |

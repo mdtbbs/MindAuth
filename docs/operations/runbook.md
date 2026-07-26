@@ -74,7 +74,7 @@
 保留天数可在管理后台设置页（`/api/admin/config`）修改，最小 1 天。Redis 中的 auth code、管理员会话、重置/验证令牌靠 TTL 自动过期，无需清理。
 
 ### uploads 备份
-用户头像/横幅存于 `public/uploads/{avatars,banners}/`，**不在数据库中**，需纳入文件级备份（DB 备份只含 `avatar_url` 路径）。
+用户头像/横幅存于 `public/uploads/{avatars,banners}/`，管理端上传的登录页背景图存于 `public/uploads/backgrounds/`，均**不在数据库中**，需纳入文件级备份（DB 备份只含 `avatar_url`/`banner_url` 及 `system_config.auth_background_url` 路径）。
 
 ## 安全事件响应
 

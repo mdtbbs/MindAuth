@@ -94,7 +94,7 @@
 
 所有环境（含开发）均要求 `MYSQL_HOST`、`MYSQL_DATABASE`、`REDIS_HOST` 非空（均有默认值，通常自动满足）。
 
-上传目录处理：自动创建 `public/uploads/` 及 `avatars/`、`banners/` 子目录，并通过写入/删除 `.write-test` 临时文件验证可写性。
+上传目录处理：自动创建 `public/uploads/` 及 `avatars/`、`banners/` 子目录，并通过写入/删除 `.write-test` 临时文件验证可写性（登录页背景目录 `backgrounds/` 由 `src/middleware/upload.js` 加载时创建，不在 validate.js 校验范围内）。
 
 ## 运行时常量
 
@@ -124,7 +124,7 @@
 
 ## runtimeConfig 动态配置
 
-`system_config` 表由 `001_initial_schema.sql` 播种 6 个键：
+`system_config` 表由迁移播种 7 个键（`001_initial_schema.sql` 6 个 + `003_auth_background_config.sql` 1 个）：
 
 | 键 | 默认值 | 含义 |
 |----|--------|------|
@@ -134,6 +134,7 @@
 | `registration_enabled` | `1` | 是否允许新用户注册（0/1） |
 | `sms_audit_retention_days` | `365` | 短信审计日志保留天数 |
 | `audit_retention_days` | `365` | 管理审计日志保留天数 |
+| `auth_background_url` | 空 | 登录页自定义背景图 URL（空 = 默认网格背景）。由管理后台系统配置页「登录页外观」tab 上传维护（`POST/DELETE /api/admin/auth-background`，含旧文件清理），**勿在通用配置列表里手改** |
 
 **缓存行为**：`runtimeConfig` 使用进程内 Map 缓存，TTL 5 分钟（`CACHE_TTL_MS`）。`set()` 写库后仅使**本进程**缓存失效——单实例部署下管理端修改立即生效；多实例部署下其他实例最长 5 分钟后才读到新值。
 
