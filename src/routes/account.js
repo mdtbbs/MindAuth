@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 const { pool, transaction } = require('../db');
 const { client } = require('../redis');
 const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
-const { generateToken } = require('../utils/token');
+const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
 const { avatarUpload, bannerUpload } = require('../middleware/upload');
@@ -120,11 +120,13 @@ router.post('/change-email', requireAuth, async (req, res) => {
       return res.status(409).json({ success: false, message: '该邮箱已被其他用户使用' });
     }
 
-    // Generate verification token
+    // Generate verification token — store only its hash server-side; the raw
+    // token goes into the emailed link (verify endpoint looks up by hash)
     const token = generateToken();
+    const tokenHash = hashToken(token);
 
-    // Store verification token in Redis (replaces any existing) and MySQL (fallback)
-    await client.setEx(`verify:${token}`, TOKEN_TTL, JSON.stringify({
+    // Store verification token hash in Redis (replaces any existing) and MySQL (fallback)
+    await client.setEx(`verify:${tokenHash}`, TOKEN_TTL, JSON.stringify({
       user_id: user.id,
       email: new_email
     }));
@@ -132,7 +134,7 @@ router.post('/change-email', requireAuth, async (req, res) => {
       const expiresAt = new Date(Date.now() + TOKEN_TTL * 1000).toISOString().slice(0, 19).replace('T', ' ');
       await pool.execute(
         'INSERT INTO email_verification_tokens (token, user_id, email, expires_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), email = VALUES(email), expires_at = VALUES(expires_at)',
-        [token, user.id, new_email, expiresAt]
+        [tokenHash, user.id, new_email, expiresAt]
       );
     } catch (persistErr) {
       console.warn('[Account] MySQL token persist failed:', persistErr.message);
