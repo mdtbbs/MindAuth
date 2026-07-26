@@ -100,8 +100,14 @@ async function authenticateUserSession(rawToken) {
 
   const tokenHash = hashToken(rawToken);
 
-  // 1. Check Redis cache
-  const cached = await client.get(`session:${tokenHash}`);
+  // 1. Check Redis cache. A Redis outage must not 500 every authenticated
+  // request — degrade to the MySQL lookup below (same path as a cache miss).
+  let cached = null;
+  try {
+    cached = await client.get(`session:${tokenHash}`);
+  } catch (err) {
+    console.warn('[SessionManager] Redis unavailable, falling back to MySQL:', err.message);
+  }
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
@@ -140,13 +146,14 @@ async function authenticateUserSession(rawToken) {
   );
   if (!userRows[0]) return null;
 
-  // 4. Re-populate Redis cache
+  // 4. Re-populate Redis cache (best effort — MySQL already authenticated us)
   const cachePayload = {
     ...userRows[0],
     session_id: sessionRow.id,
     session_expires_at: sessionRow.expires_at ? new Date(sessionRow.expires_at).toISOString() : null,
   };
-  await client.setEx(`session:${tokenHash}`, SESSION_CACHE_TTL, JSON.stringify(cachePayload));
+  await client.setEx(`session:${tokenHash}`, SESSION_CACHE_TTL, JSON.stringify(cachePayload))
+    .catch(err => console.warn('[SessionManager] session cache write failed:', err.message));
 
   return {
     user: userRows[0],
@@ -363,20 +370,27 @@ async function authenticateAdminSession(rawToken) {
 
   const tokenHash = hashToken(rawToken);
 
-  // 1. Check Redis for admin session data
-  const sessionData = await client.get(`admin_session:${tokenHash}`);
+  // 1. Check Redis for admin session data. Admin sessions are Redis-only, so a
+  // Redis outage fails closed (401) instead of crashing the request with a 500.
+  let sessionData;
+  try {
+    sessionData = await client.get(`admin_session:${tokenHash}`);
+  } catch (err) {
+    console.warn('[SessionManager] Redis unavailable for admin session:', err.message);
+    return null;
+  }
   if (!sessionData) return null;
 
   let session;
   try {
     session = JSON.parse(sessionData);
   } catch {
-    await client.del(`admin_session:${tokenHash}`);
+    await client.del(`admin_session:${tokenHash}`).catch(() => {});
     return null;
   }
 
   if (!session.user_id) {
-    await client.del(`admin_session:${tokenHash}`);
+    await client.del(`admin_session:${tokenHash}`).catch(() => {});
     return null;
   }
 

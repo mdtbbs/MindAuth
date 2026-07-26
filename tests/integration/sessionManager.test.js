@@ -120,17 +120,14 @@ describe('sessionManager', { skip: !RUN_INTEGRATION }, () => {
     });
 
     it('does NOT write users.session_token', async () => {
-      const result = await sessionManager.createUserSession({
+      await sessionManager.createUserSession({
         userId: user.id,
       });
 
-      const [rows] = await pool.execute(
-        'SELECT session_token FROM users WHERE id = ?',
-        [user.id]
-      );
-
-      // users.session_token should remain NULL (deprecated column)
-      assert.equal(rows[0].session_token, null);
+      // The deprecated users.session_token column was dropped by migration 002
+      // — it must not exist at all (selecting it would throw on any fresh DB)
+      const [cols] = await pool.execute("SHOW COLUMNS FROM users LIKE 'session_token'");
+      assert.equal(cols.length, 0, 'deprecated users.session_token column should not exist');
     });
 
     it('caches session data in Redis by hash', async () => {
@@ -477,6 +474,44 @@ describe('sessionManager', { skip: !RUN_INTEGRATION }, () => {
         const members = await client.sMembers(`admin_sessions_by_user:${adminUser.id}`);
         assert.equal(members.length, 0);
       });
+    });
+  });
+
+  describe('Redis outage resilience', () => {
+    it('authenticateUserSession falls back to MySQL when Redis throws', async () => {
+      const user = await createTestUser();
+      const { token } = await sessionManager.createUserSession({
+        userId: user.id, ipAddress: '127.0.0.1', userAgent: 'test',
+      });
+
+      const origGet = client.get.bind(client);
+      const origSetEx = client.setEx.bind(client);
+      client.get = async () => { throw new Error('redis down'); };
+      client.setEx = async () => { throw new Error('redis down'); };
+      try {
+        const result = await sessionManager.authenticateUserSession(token);
+        assert.ok(result, 'should authenticate via MySQL fallback');
+        assert.equal(result.user.id, user.id);
+      } finally {
+        client.get = origGet;
+        client.setEx = origSetEx;
+      }
+    });
+
+    it('authenticateAdminSession fails closed (null) when Redis throws', async () => {
+      const admin = await createTestUser({ role: 'super_admin' });
+      const { token } = await sessionManager.createAdminSession({
+        adminId: admin.id, ipAddress: '127.0.0.1', userAgent: 'test',
+      });
+
+      const origGet = client.get.bind(client);
+      client.get = async () => { throw new Error('redis down'); };
+      try {
+        const result = await sessionManager.authenticateAdminSession(token);
+        assert.equal(result, null);
+      } finally {
+        client.get = origGet;
+      }
     });
   });
 });
