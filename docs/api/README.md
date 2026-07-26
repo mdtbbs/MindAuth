@@ -176,6 +176,7 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | GET | `/api/admin/clients` | 管理 | `clients.read` | OAuth 客户端列表 |
 | POST | `/api/admin/clients` | 管理 | `clients.write`；20/小时 | 创建客户端 |
 | PUT | `/api/admin/clients/:id` | 管理 | `clients.write` | 更新客户端 |
+| POST | `/api/admin/clients/:id/rotate-secret` | 管理 | `clients.write` | 轮换客户端密钥（新 secret 仅回显一次） |
 | DELETE | `/api/admin/clients/:id` | 管理 | `clients.write` | 删除客户端 |
 | GET | `/api/admin/stats` | 管理 | — | 仪表盘统计 |
 | GET | `/api/admin/email-config` | 管理 | `email_config.read` | 读取 SMTP 配置（脱敏） |
@@ -189,10 +190,10 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | POST | `/api/admin/auth-background` | 管理 | `config.write` | 上传登录页自定义背景图（≤5MB，JPEG/PNG/WebP） |
 | DELETE | `/api/admin/auth-background` | 管理 | `config.write` | 恢复默认登录页背景 |
 | GET | `/api/admin/authorizations` | 管理 | `authorizations.read` | 全部授权记录 |
-| DELETE | `/api/admin/authorizations/:id` | 管理 | `users.write` | 撤销授权记录 |
+| DELETE | `/api/admin/authorizations/:id` | 管理 | `users.write` | 撤销授权记录并吊销其令牌 |
 | GET | `/api/admin/login-logs` | 管理 | `login_logs.read` | 登录日志（可筛选） |
 | GET | `/api/admin/ip-bans` | 管理 | `ip_bans.read` | IP 黑名单列表 |
-| POST | `/api/admin/ip-bans` | 管理 | `ip_bans.write` | 添加 IP 封禁（支持 CIDR） |
+| POST | `/api/admin/ip-bans` | 管理 | `ip_bans.write` | 添加 IP 封禁（IPv4/IPv6，支持 CIDR） |
 | PUT | `/api/admin/ip-bans/:id` | 管理 | `ip_bans.write` | 更新封禁原因/期限 |
 | DELETE | `/api/admin/ip-bans/:id` | 管理 | `ip_bans.write` | 删除 IP 封禁 |
 | GET | `/api/admin/challenges` | 管理 | `config.read` | 问答题库列表 |

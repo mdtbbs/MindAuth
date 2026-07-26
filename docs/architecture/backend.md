@@ -21,20 +21,20 @@ MindAuth 后端（Express + MySQL + Redis）按"深模块"组织：`src/modules/
 | 导出 | 说明 |
 |------|------|
 | `createUserSession({ userId, ipAddress, userAgent, remember })` | 建会话（MySQL + Redis 缓存），返回 `{ token, expiresAt, sessionId }`，`token` 为 cookie 用原始值 |
-| `authenticateUserSession(rawToken)` | 认证；Redis 优先、MySQL 回退并回填，返回 `{ user, session: { id } }` 或 `null` |
+| `authenticateUserSession(rawToken)` | 认证；Redis 优先、MySQL 回退并回填（Redis 抛错按缓存未命中处理，降级 MySQL），返回 `{ user, session: { id } }` 或 `null` |
 | `touchUserSession(sessionId)` | 节流更新 `last_active_at`（5min 一次），fire-and-forget |
 | `revokeUserSession({ token, userId, sessionId })` | 吊销单个会话（token 或 sessionId 定位） |
 | `revokeAllUserSessions(userId, { exceptToken })` | 吊销全部会话，可保留当前 |
 | `invalidateUserSessionCache(rawToken)` | 只删 Redis 缓存，MySQL 行不动（用户资料变更后用） |
 | `listUserSessions(userId, currentTokenHash)` | 会话列表，含 `is_current` |
 | `createAdminSession({ adminId, ipAddress, userAgent })` | 管理员会话（仅 Redis，24h） |
-| `authenticateAdminSession(rawToken)` | 认证；**每次回 DB 重查 role/ban_status**，返回含 `normalized_role` 的 admin |
+| `authenticateAdminSession(rawToken)` | 认证；**每次回 DB 重查 role/ban_status**，返回含 `normalized_role` 的 admin；Redis 故障时 fail-closed 返回 `null` |
 | `revokeAdminSessionsForUser(userId)` | 吊销某用户全部管理员会话 |
 | `hashToken(rawToken)` | SHA-256 工具（测试/内部用） |
 
 依赖：MySQL `user_sessions`、`users`；Redis `session:{hash}`、`sessions_by_user:{userId}`、`admin_session:{hash}`、`admin_sessions_by_user:{userId}`、`session_active:{id}`；utils `deviceInfo`。
 
-约束：token 仅以 SHA-256 哈希落库，原始值只在 cookie；`users.session_token` 已废弃不读不写；30 天绝对有效期用 DB 时间计算，Redis payload 携带 `session_expires_at`，缓存命中也校验；批量吊销走索引集合，无 SCAN；管理员被撤权或封禁后下次认证即失效。
+约束：token 仅以 SHA-256 哈希落库，原始值只在 cookie；`users.session_token` 已废弃不读不写；30 天绝对有效期用 DB 时间计算，Redis payload 携带 `session_expires_at`，缓存命中也校验；批量吊销走索引集合，无 SCAN；管理员被撤权或封禁后下次认证即失效。**Redis 故障降级**：用户会话认证在 Redis 命令抛错时按缓存未命中处理，降级 MySQL（缓存回填 best-effort，失败仅告警）；管理员会话仅存 Redis，无回退层，故障时 fail-closed 返回 `null`（401）而非 500。
 
 ### oauthIssuer（`src/modules/oauth/oauthIssuer.js`）
 
@@ -218,7 +218,7 @@ DB 后备的动态配置（`system_config` 表）读写，带进程内缓存。�
 | `notify.js` | `createNotification(opts)` | legacy 薄包装 → `notificationCenter.create()` |
 | `phone.js` | `maskPhone(phone)` | 手机号脱敏 |
 | `publicFiles.js` | `safePublicPath(relative)`, `tryRemovePublicFile(relative)` | `public/` 下文件的路径穿越校验与安全删除（自 account.js 提取；头像/横幅/登录页背景换图时删旧文件用） |
-| `request.js` | `getClientIp(req)`, `isValidIpv4(ip)`, `isTrustedProxy(req)` | 客户端 IP 提取；代理头默认不信任，支持可信代理与 Cloudflare 网段 |
+| `request.js` | `getClientIp(req)`, `isValidIpv4(ip)`, `isTrustedProxy(req)`, `normalizeIpCandidate(value)` | 客户端 IP 提取；代理头默认不信任，支持可信代理与 Cloudflare 网段；代理头值 IPv4/IPv6 均接受（剥端口与方括号、`::ffff:` 映射还原为 IPv4） |
 | `smsAudit.js` | `logSmsAudit(data)` | 写 `sms_audit_logs` |
 | `token.js` | `generateToken()`（32 字节）, `generateShortToken()`（16 字节）, `hashToken(rawToken)` | 随机令牌生成与 SHA-256 哈希 |
 | `userAudit.js` | `logUserAudit({user_id, action, ...})`, `getUserAuditLogs(userId, limit)`, `VALID_ACTIONS` | 用户审计写入/查询，action 白名单 |

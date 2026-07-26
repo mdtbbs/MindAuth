@@ -79,6 +79,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | GET | `/api/admin/clients` | `clients.read` | — | — | 列表：`id, name, client_id, redirect_uri, require_pkce, created_at`（**不含 secret**） |
 | POST | `/api/admin/clients` | `clients.write` | 20 次/小时 | `name`*, `redirect_uri`*, `require_pkce` | 创建客户端（见下文） |
 | PUT | `/api/admin/clients/:id` | `clients.write` | — | `name`*, `redirect_uri`*, `require_pkce` | 更新；`require_pkce` 省略时不改动该标志；`redirect_uri` 同样过 SSRF 校验 |
+| POST | `/api/admin/clients/:id/rotate-secret` | `clients.write` | — | — | 轮换客户端密钥：旧 secret 立即失效，返回 `{ client_id, client_secret }`，**新 secret 仅此一次回显**；客户端不存在 404；写审计 `client.rotate_secret` |
 | DELETE | `/api/admin/clients/:id` | `clients.write` | — | — | 删除客户端 |
 
 ### 创建客户端与 secret 返回时机
@@ -89,7 +90,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 { "success": true, "client_id": "<16字节hex>", "client_secret": "<32字节hex>" }
 ```
 
-**`client_secret` 仅在创建响应中返回一次**；`GET /clients` 列表不回显 secret，之后无法再次查询。如需更换可调用 `clientRegistry.rotateSecret`（模块已实现，当前未暴露 HTTP 路由）。
+**`client_secret` 仅在创建响应中返回一次**；`GET /clients` 列表不回显 secret，之后无法再次查询。如需更换可调用 `POST /api/admin/clients/:id/rotate-secret`（管理 SPA 的 Clients 页提供「轮换密钥」按钮，复用一次性 secret 展示对话框）——新 secret 同样只在轮换响应中回显一次。
 
 `redirect_uri` 校验（`validateRedirectUri`）：必须是合法 URL、协议限 `http`/`https`，且禁止内网/本机地址（localhost、`127.0.0.1`、`*.local`、RFC1918 私网段、链路本地 169.254.x.x、云元数据地址等），否则 400 返回具体原因。所有变更写入 `client.*` 审计记录。
 
@@ -100,7 +101,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | 方法 | 路径 | 权限 | 限流 | 参数摘要 | 说明 |
 |------|------|------|------|----------|------|
 | GET | `/api/admin/ip-bans` | `ip_bans.read` | — | query: `page`, `limit`(≤100，默认 50) | 分页列表，返回 `bans` + `pagination` |
-| POST | `/api/admin/ip-bans` | `ip_bans.write` | — | `ip`*, `cidr_prefix`, `reason`, `expires_at` | 新增封禁（见下文） |
+| POST | `/api/admin/ip-bans` | `ip_bans.write` | — | `ip`*, `cidr_prefix`, `reason`, `expires_at` | 新增封禁，IPv4/IPv6 均可（见下文） |
 | PUT | `/api/admin/ip-bans/:id` | `ip_bans.write` | — | `reason`, `expires_at` | 仅可更新原因与到期时间（两者省略即置 NULL） |
 | DELETE | `/api/admin/ip-bans/:id` | `ip_bans.write` | — | — | 删除封禁记录 |
 
@@ -108,14 +109,14 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 
 ```json
 {
-  "ip": "203.0.113.0",       // 必填，本路由仅接受 IPv4 点分格式
-  "cidr_prefix": 24,          // 可选，0-32；提供后按 CIDR 网段封禁
+  "ip": "203.0.113.0",       // 必填，IPv4 或 IPv6（如 "2001:db8::1"），net.isIP 校验
+  "cidr_prefix": 24,          // 可选，按地址族限制：IPv4 0-32 / IPv6 0-128；提供后按 CIDR 网段封禁
   "reason": "扫描攻击",       // 可选
   "expires_at": "2026-08-01 00:00:00"  // 可选，MySQL DATETIME 可解析的时间；省略为永久
 }
 ```
 
-响应含新记录 `id`。说明：写入端点校验限 IPv4（`cidr_prefix` 0–32）；匹配引擎 `ipBanMatcher` 本身支持 IPv4/IPv6（BigInt 128 位），IPv6 记录需直接落库。
+响应含新记录 `id`。`ip` 非法或 `cidr_prefix` 超出该地址族范围返回 400（如 `CIDR 前缀须为 0-128`）；匹配引擎 `ipBanMatcher` 同样支持 IPv4/IPv6（BigInt 128 位），跨地址族永不匹配。
 
 ## 挑战题库（challenges.js）
 
@@ -195,7 +196,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | 方法 | 路径 | 权限 | 限流 | 参数摘要 | 说明 |
 |------|------|------|------|----------|------|
 | GET | `/api/admin/authorizations` | `authorizations.read` | — | query: `page`, `limit`(默认 50), `user_id` | OAuth 授权记录（联查用户名与客户端名），按 `last_used_at` 倒序 |
-| DELETE | `/api/admin/authorizations/:id` | `users.write` | — | — | 撤销一条授权记录 |
+| DELETE | `/api/admin/authorizations/:id` | `users.write` | — | — | 撤销一条授权记录，并经 `oauthIssuer.revokeAuthorization` **联动吊销该 user/client 的全部 refresh token（MySQL）与 access token（Redis）**；记录不存在 404 |
 | GET | `/api/admin/login-logs` | `login_logs.read` | — | query: `page`, `limit`(默认 100), `user_id`, `login_type`(web/oauth) | 登录日志（含 ip/device/login_type） |
 
 ## 管理审计日志（auditLogs.js）

@@ -41,6 +41,8 @@ REDIS_PASSWORD=<redis-password>
 ALLOWED_ORIGINS=https://forum.example.com  # CORS 白名单，逗号分隔
 ```
 
+`ALLOWED_ORIGINS` 只需列出**跨域调用方**（如 MindFourm 前端域名）：同源请求（Origin host 与请求 Host 一致）由 CORS 中间件自动放行，无需把 MindAuth 自身域名写进白名单；白名单外的来源会收到不带 CORS 头的正常响应（浏览器侧拦截跨域读取），不会导致服务端 500。
+
 生成 `ADMIN_SECRET`：
 
 ```bash
@@ -101,7 +103,7 @@ TRUSTED_PROXY_IPS=127.0.0.1
 TRUST_CLOUDFLARE=true
 ```
 
-仅当请求的 TCP 对端 IP 在可信列表（或 Cloudflare 网段）内，才会按 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For`（取第一个 IP）的优先级解析真实客户端 IP；头部值必须是合法 IPv4，否则回退到连接地址。
+仅当请求的 TCP 对端 IP 在可信列表（或 Cloudflare 网段）内，才会按 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For`（取第一个 IP）的优先级解析真实客户端 IP；头部值须为合法 IPv4 或 IPv6（自动剥离端口与 IPv6 方括号，`::ffff:` 映射地址还原为 IPv4），否则回退到连接地址。
 
 ### nginx 最小配置片段
 

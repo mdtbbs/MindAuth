@@ -77,7 +77,7 @@ MindAuth 是社区的**统一身份提供方（OAuth 2.0 SSO Provider）**：
 | 顺序 | 中间件/路由 | 说明 |
 |------|-------------|------|
 | 1 | `app.set('trust proxy', false)` | 见「关键设计决策」 |
-| 2 | CORS | 白名单校验 `Origin`（`ALLOWED_ORIGINS`），允许携带 Cookie |
+| 2 | CORS | 同源（Origin host == Host）始终放行；跨域按 `ALLOWED_ORIGINS` 白名单，白名单外返回无 CORS 头的正常响应（非 500）；允许携带 Cookie |
 | 3 | helmet | CSP（含 CDN_URL 指令）、生产环境 HSTS |
 | 4 | compression / express.json / cookieParser | 基础中间件 |
 | 5 | LEGACY_FILES 白名单 | 旧静态页放行（见下） |

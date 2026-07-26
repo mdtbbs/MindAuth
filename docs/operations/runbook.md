@@ -30,8 +30,8 @@
 - **定位**：`node scripts/test-redis.js`；`GET /api/health` 会反映 Redis 状态。
 - **行为（以源码为准）**：
   - 限流自动退化为**进程内存 Map**（[rateLimit.js](../../src/middleware/rateLimit.js)），窗口逻辑不变，但计数不跨实例、重启即清零。
-  - 会话认证（[sessionManager.js](../../src/modules/sessions/sessionManager.js)）的 MySQL 回退**只在缓存未命中（返回 null）时触发**，如缓存被清空/过期，可自动回源 DB 重建。但 Redis 命令**抛错**时没有 try/catch 兜底，请求会 500；node-redis 默认离线队列还可能让请求挂起等待重连。
-  - 管理员会话**只存 Redis**：Redis 数据丢失 = 全部管理员被登出（重新登录即可）；用户会话在 MySQL 有持久行，不受影响。
+  - 用户会话认证（[sessionManager.js](../../src/modules/sessions/sessionManager.js)）：Redis 命令**抛错时按缓存未命中处理，自动降级走 MySQL 查询**（缓存回填 best-effort，失败仅告警），已登录用户不受影响、不会 500。注意 node-redis 默认离线队列仍可能让命令挂起等待重连（挂起不等于抛错，兜底不触发）。
+  - 管理员会话**只存 Redis**，无持久层可回退：断连期间管理端认证 **fail-closed 返回 401**（不再是未捕获异常 500）；Redis 恢复且会话数据未丢失/未过期即恢复可用，数据丢失则需重新登录。用户会话在 MySQL 有持久行，不受影响。
 - **处置**：恢复 Redis 后无需重启应用（客户端自动重连）；若长时间不可用，优先恢复 Redis 而非重启应用。
 
 ### MySQL 不可达
@@ -76,12 +76,12 @@
 
 | 操作 | 路径 | 备注 |
 |------|------|------|
-| 封禁 IP | 管理后台 Security 页，或 `POST /api/admin/ip-bans` `{ip, cidr_prefix, reason, expires_at}` | 路由校验**仅接受 IPv4**（CIDR 0–32），匹配引擎虽支持 IPv6 但无法经此路由录入；生效即时（自动刷新缓存） |
+| 封禁 IP | 管理后台 Security 页，或 `POST /api/admin/ip-bans` `{ip, cidr_prefix, reason, expires_at}` | **IPv4/IPv6 均可录入**（`net.isIP` 判族，CIDR 前缀 IPv4 0–32 / IPv6 0–128）；生效即时（自动刷新缓存） |
 | 解封 IP | `DELETE /api/admin/ip-bans/:id` | |
 | 封禁用户 | `POST /api/admin/users/:id/ban` `{reason, duration, expires_at}` | **自动吊销该用户全部用户+管理员会话**并通知；解封 `DELETE /api/admin/users/:id/ban` |
 | 吊销用户全部会话 | 无独立端点 | 随封号 / 删号 / `POST /api/admin/users/:id/reset-password` 自动执行；仅吊销会话需调用模块 `sessionManager.revokeAllUserSessions(userId)`（[sessionManager.js](../../src/modules/sessions/sessionManager.js)） |
-| 撤销 OAuth 授权 | `DELETE /api/admin/authorizations/:id` | **仅删除 authorizations 记录**，不联动吊销已发放的 refresh/access token；彻底切断需另删该用户该客户端的 `refresh_tokens` 或直接封号 |
-| 轮换客户端 secret | **仅模块层提供** `clientRegistry.rotateSecret(id, actor)`，无 HTTP 路由 | 替代：删除并重建客户端（会换 client_id），或扩展路由暴露 rotateSecret |
+| 撤销 OAuth 授权 | `DELETE /api/admin/authorizations/:id` | 复用 `oauthIssuer.revokeAuthorization`：删除授权记录并**联动吊销该 user/client 的全部 refresh token（MySQL）与 access token（Redis）**，一步彻底切断 |
+| 轮换客户端 secret | `POST /api/admin/clients/:id/rotate-secret`（`clients.write`），或管理后台 Clients 页「轮换密钥」按钮 | 旧 secret 立即失效；新 secret **仅在响应中回显一次**；写审计 `client.rotate_secret` |
 | ADMIN_SECRET 泄漏 | 更换 `.env` 中 `ADMIN_SECRET`（≥32 字符）并重启（`pm2 restart mindauth`） | 该密钥可调用 `POST /api/admin/create` 创建管理员及非生产 `/test/*` 端点；事后核查 `admin_audit_logs` 与 users 表中异常管理员账号并清除 |
 
 ## 日志去哪看

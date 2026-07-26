@@ -31,6 +31,7 @@ MindAuth 是面向公网的 OAuth 2.0 SSO 认证服务，本文档面向后端�
 
 - **哈希入库**：raw token（32 字节随机 hex）只存在于 Cookie；MySQL `user_sessions.session_token` 与 Redis key `session:{hash}` 均为 SHA-256 哈希。migration 002 为该列加 UNIQUE 索引并删除了废弃的 `users.session_token` 列。
 - **双层存储**：MySQL 为持久层（绝对过期 `expires_at`，30 天，用 DB 时间 `NOW()` 计算）；Redis 为 24h 缓存，缓存载荷内携带 `session_expires_at`，缓存命中时仍强制校验绝对生命周期。
+- **Redis 故障降级**：`authenticateUserSession` 对 Redis 命令抛错做 try/catch，按缓存未命中处理并降级走 MySQL 查询（缓存回填 best-effort，失败仅告警）——Redis 断连不会让全部已登录请求 500。管理员会话仅存 Redis，无持久层可回退，故障时 **fail-closed** 返回 null（401）而非未捕获异常。
 - **会话管理**：`sessions_by_user:{userId}` 索引集合支持免 SCAN 的批量注销；用户可通过 `/api/sessions` 列出活动会话（IP、设备）并远程注销单个/全部会话。`last_active_at` 更新经 `session_active:{sessionId}` 键 5 分钟节流。
 - **管理员会话**：仅存 Redis（24h），**每次请求都回 DB 复查 role 与 ban_status**——降权或封禁即时生效并删除会话（[requireAdmin.js](../../src/middleware/requireAdmin.js) 委托 `authenticateAdminSession`）。
 
@@ -81,8 +82,8 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 
 ## IP 处理与封禁
 
-- **可信代理模型**（[request.js](../../src/utils/request.js)）：`app.set('trust proxy', false)`，默认不信任任何代理头。仅当 `TRUSTED_PROXY_ENABLED=true` 且 TCP 对端在显式白名单（`TRUSTED_PROXY_IPS`）或（开启 `TRUST_CLOUDFLARE` 时）Cloudflare IPv4 网段内，才依次读取 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For` 首项，且头内值必须是合法 IPv4 才采信；否则回退 socket 地址。这使限流、锁定、封禁、审计所用 IP 不可被普通客户端伪造。注意：代理头提取目前仅接受 IPv4 值，IPv6 客户端经代理时会回退为代理地址。
-- **IP 封禁**（[ipBanMatcher.js](../../src/modules/security/ipBanMatcher.js) + [ipBan.js](../../src/middleware/ipBan.js)）：`ip_bans` 表支持精确与 CIDR 匹配，**IPv4/IPv6 均支持**（BigInt 128 位运算，含 `::` 压缩、内嵌 IPv4、zone id 处理）；跨地址族永不匹配；过期封禁在匹配时跳过。封禁列表缓存于 Redis `ip_bans_cache`（5min TTL），管理端增删改后调用 `refreshCache` 失效。检查失败时**fail open**（记录日志放行），保证封禁子系统故障不影响可用性。中间件在 CSRF 之前挂载，封禁 IP 在到达 API 前即被 403。
+- **可信代理模型**（[request.js](../../src/utils/request.js)）：`app.set('trust proxy', false)`，默认不信任任何代理头。仅当 `TRUSTED_PROXY_ENABLED=true` 且 TCP 对端在显式白名单（`TRUSTED_PROXY_IPS`）或（开启 `TRUST_CLOUDFLARE` 时）Cloudflare IPv4 网段内，才依次读取 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For` 首项，头内值经 `normalizeIpCandidate` 校验归一化后才采信——**IPv4 与 IPv6 均接受**，自动剥离端口与 IPv6 方括号（`[2001:db8::1]:1234`），`::ffff:` 映射地址还原为 IPv4；非法值回退 socket 地址。这使限流、锁定、封禁、审计所用 IP 不可被普通客户端伪造。
+- **IP 封禁**（[ipBanMatcher.js](../../src/modules/security/ipBanMatcher.js) + [ipBan.js](../../src/middleware/ipBan.js)）：`ip_bans` 表支持精确与 CIDR 匹配，**IPv4/IPv6 均支持**（BigInt 128 位运算，含 `::` 压缩、内嵌 IPv4、zone id 处理）；管理端录入路由（`POST /api/admin/ip-bans`）同样接受 IPv4/IPv6——`net.isIP` 判族，CIDR 前缀按族限制（IPv4 0–32 / IPv6 0–128）；跨地址族永不匹配；过期封禁在匹配时跳过。封禁列表缓存于 Redis `ip_bans_cache`（5min TTL），管理端增删改后调用 `refreshCache` 失效。检查失败时**fail open**（记录日志放行），保证封禁子系统故障不影响可用性。中间件在 CSRF 之前挂载，封禁 IP 在到达 API 前即被 403。
 
 ## 管理端 RBAC
 
@@ -110,7 +111,9 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 
 ## HTTP 安全头与生产校验
 
-[app.js](../../src/app.js) Helmet 配置：生产启用 HSTS（1 年、includeSubDomains、preload）；CSP 关键指令 `default-src 'self'`、`object-src 'none'`、`frame-ancestors 'none'`（防点击劫持）、`connect-src` 限定 ALLOWED_ORIGINS。**注意 `script-src` 仍允许 `'unsafe-inline'`**：public/ 下遗留的静态 error/docs 页面含内联脚本，收紧前需先将其外置。配置 `CDN_URL` 时自动加入 script/style/img/font 源。CORS 按 `ALLOWED_ORIGINS` 白名单校验 Origin，`credentials: true`。
+[app.js](../../src/app.js) Helmet 配置：生产启用 HSTS（1 年、includeSubDomains、preload）；CSP 关键指令 `default-src 'self'`、`object-src 'none'`、`frame-ancestors 'none'`（防点击劫持）、`connect-src` 限定 ALLOWED_ORIGINS。**注意 `script-src` 仍允许 `'unsafe-inline'`**：public/ 下遗留的静态 error/docs 页面含内联脚本，收紧前需先将其外置。配置 `CDN_URL` 时自动加入 script/style/img/font 源。
+
+CORS 策略（app.js，`credentials: true`）：**同源请求（Origin host 与请求 Host 一致）始终放行**——浏览器对 fetch/crossorigin 资源在同站下也会附带 Origin 头，拒绝它们会打挂站点自身；跨域来源按 `ALLOWED_ORIGINS` 白名单放行；白名单外来源返回**不带 CORS 头的正常响应**（由浏览器阻止跨域读取），而非服务端 500。
 
 [validate.js](../../src/config/validate.js) 启动强校验（生产环境命中即抛错拒绝启动）：
 

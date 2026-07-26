@@ -182,6 +182,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/login` | POST | Admin login |
 | `/users` | GET/PUT/DELETE | User management |
 | `/clients` | GET/POST/PUT/DELETE | OAuth client management |
+| `/clients/:id/rotate-secret` | POST | Rotate client secret (one-time display) |
 | `/stats` | GET | System statistics |
 | `/email-config` | GET/PUT | SMTP configuration |
 | `/login-logs` | GET | Login logs |
@@ -307,7 +308,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `validation.js` | `isValidEmail`, `isValidPassword` (rules from `system_config`: `password_min_length` default 6, `password_require_complexity` default off), `getPasswordValidationError`, `isValidUsername`, `getUsernameValidationError`, `escapeHtml` |
 | `email.js` | `sendEmail`, `sendVerificationEmail`, `sendPasswordResetEmail` |
 | `crypto.js` | `timingSafeCompare` |
-| `request.js` | `getClientIp` (trusted proxy support) |
+| `request.js` | `getClientIp` (trusted proxy support; proxy-header values accept IPv4/IPv6, ports and brackets stripped, `::ffff:` unmapped), `normalizeIpCandidate` |
 | `datetime.js` | `formatMySQLDateTime` |
 | `cleanup.js` | Scheduled cleanup of expired tokens |
 | `aliyunSms.js` | `sendSmsCode(phone)`, `checkSmsCode(phone, code)` |
@@ -382,17 +383,20 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 
 - bcrypt password hashing (cost=12; login still verifies older cost-10 hashes)
 - Session tokens: SHA-256 hashed in DB, raw only in cookies
+- Session auth degrades to MySQL when Redis is down (treated as cache miss; cache re-fill is best-effort); admin sessions are Redis-only and **fail closed** (401, not 500)
 - OAuth access/refresh tokens: SHA-256 hashed at rest (Redis/MySQL)
 - Password-reset & email-verification tokens: SHA-256 hashed at rest; raw value only in the emailed link
 - Failed-login lockout is **always temporary** (15min → 1h → 2h cap, auto-expires); a hard indefinite block is only ever applied by an admin via `ban_status` — a single IP cannot permanently lock an account
 - CSRF signed double-submit cookie (HMAC of a random nonce)
 - Rate limiting (Redis + memory fallback); every limiter has a unique keyPrefix; OAuth `/token` `/refresh` `/authorize` `/introspect` `/revoke` are rate-limited
 - Timing-safe secret comparison (incl. client_secret)
-- Trusted proxy IP validation (proxy headers untrusted by default)
+- Trusted proxy IP validation (proxy headers untrusted by default; header values accept IPv4 **and IPv6**)
+- CORS: same-origin requests (Origin host == request Host) are always allowed; unknown origins get a normal response without CORS headers (browser blocks the read) instead of a 500; cross-origin allowlist via `ALLOWED_ORIGINS`
 - PKCE S256 support (OAuth)
 - Replay attack detection (OAuth); `/introspect` and `/revoke` are bound to the requesting client (a client cannot probe/revoke another client's tokens)
 - SSRF protection (private IP redirect_uri blocked in clientRegistry)
-- IP ban matching with CIDR support for **IPv4 and IPv6** (128-bit via BigInt)
+- IP ban matching with CIDR support for **IPv4 and IPv6** (128-bit via BigInt); admin input endpoint accepts both families with per-family CIDR limits (0-32 / 0-128)
+- Revoking an authorization (admin or user) also revokes the pair's refresh tokens (MySQL) and access tokens (Redis) via `oauthIssuer.revokeAuthorization`
 - Admin RBAC with last-super-admin / self-demotion protection on delete, ban, and role change
 - Helmet CSP headers (note: `script-src` still allows `'unsafe-inline'` — legacy static error/docs pages use inline scripts; tightening requires externalizing them first)
 - Config validation on startup (strict in production; blocks memory Redis, wildcard CORS, short ADMIN_SECRET)
@@ -402,4 +406,4 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - SMTP password / Aliyun SMS access-key-secret stored plaintext at rest (回显已脱敏). Encrypting at rest needs app-level key management.
 
 ---
-*Last updated: 2026-07-26*
+*Last updated: 2026-07-27*
