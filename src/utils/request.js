@@ -194,15 +194,25 @@ function normalizeIpCandidate(value) {
 }
 
 /**
+ * Normalize trusted-proxy list entries so loopback / mapped forms compare consistently.
+ * @param {string} value
+ * @returns {string|null}
+ */
+function normalizeTrustedProxyEntry(value) {
+  const normalized = normalizeIpCandidate(value);
+  if (!normalized) return null;
+  if (normalized === '::1') return '127.0.0.1';
+  return normalized;
+}
+
+/**
  * Check if request comes from a trusted proxy
  * @param {Express.Request} req - Express request object
  * @returns {boolean} True if request is from trusted proxy
  */
 function isTrustedProxy(req) {
   const remoteAddr = req.connection?.remoteAddress || req.socket?.remoteAddress;
-
-  // Handle IPv6-mapped IPv4 addresses (::ffff:192.168.1.1)
-  const cleanRemoteAddr = remoteAddr?.replace(/^::ffff:/, '') || '';
+  const normalizedRemoteAddr = normalizeTrustedProxyEntry(remoteAddr);
 
   // If trusted proxy not enabled, don't trust any proxy headers
   if (!config.trustedProxy?.enabled) {
@@ -210,15 +220,17 @@ function isTrustedProxy(req) {
   }
 
   // Check against explicit whitelist
-  const trustedIps = config.trustedProxy.ips || [];
-  if (trustedIps.includes(cleanRemoteAddr)) {
+  const trustedIps = (config.trustedProxy.ips || [])
+    .map(normalizeTrustedProxyEntry)
+    .filter(Boolean);
+  if (normalizedRemoteAddr && trustedIps.includes(normalizedRemoteAddr)) {
     return true;
   }
 
   // Check Cloudflare IP ranges if enabled
   if (config.trustedProxy.trustCloudflare) {
     for (const cidr of [...CLOUDFLARE_IPV4_RANGES, ...CLOUDFLARE_IPV6_RANGES]) {
-      if (isIpInCidr(cleanRemoteAddr, cidr)) {
+      if (normalizedRemoteAddr && isIpInCidr(normalizedRemoteAddr, cidr)) {
         return true;
       }
     }

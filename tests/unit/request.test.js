@@ -31,6 +31,41 @@ function makeReq(remoteAddress, headers = {}) {
   };
 }
 
+function withRequestModule(env, fn) {
+  const prevEnabled = process.env.TRUSTED_PROXY_ENABLED;
+  const prevIps = process.env.TRUSTED_PROXY_IPS;
+  const prevCloudflare = process.env.TRUST_CLOUDFLARE;
+
+  if (env.enabled === undefined) delete process.env.TRUSTED_PROXY_ENABLED;
+  else process.env.TRUSTED_PROXY_ENABLED = env.enabled;
+
+  if (env.ips === undefined) delete process.env.TRUSTED_PROXY_IPS;
+  else process.env.TRUSTED_PROXY_IPS = env.ips;
+
+  if (env.cloudflare === undefined) delete process.env.TRUST_CLOUDFLARE;
+  else process.env.TRUST_CLOUDFLARE = env.cloudflare;
+
+  delete require.cache[require.resolve('../../src/config')];
+  delete require.cache[require.resolve('../../src/utils/request')];
+  const mod = require('../../src/utils/request');
+
+  try {
+    fn(mod);
+  } finally {
+    if (prevEnabled === undefined) delete process.env.TRUSTED_PROXY_ENABLED;
+    else process.env.TRUSTED_PROXY_ENABLED = prevEnabled;
+
+    if (prevIps === undefined) delete process.env.TRUSTED_PROXY_IPS;
+    else process.env.TRUSTED_PROXY_IPS = prevIps;
+
+    if (prevCloudflare === undefined) delete process.env.TRUST_CLOUDFLARE;
+    else process.env.TRUST_CLOUDFLARE = prevCloudflare;
+
+    delete require.cache[require.resolve('../../src/config')];
+    delete require.cache[require.resolve('../../src/utils/request')];
+  }
+}
+
 // ─── normalizeIpCandidate ────────────────────────────────────
 
 test('normalizeIpCandidate accepts plain IPv4', () => {
@@ -140,38 +175,32 @@ test('getClientIp strips IPv6-mapped prefix on fallback', () => {
   assert.equal(getClientIp(req), UNTRUSTED_REMOTE);
 });
 
+test('getClientIp trusts IPv6 loopback when whitelist uses 127.0.0.1', () => {
+  withRequestModule({ enabled: 'true', ips: '127.0.0.1' }, ({ getClientIp: loopbackGetClientIp }) => {
+    const req = makeReq('::1', { 'x-forwarded-for': '198.51.100.7' });
+    assert.equal(loopbackGetClientIp(req), '198.51.100.7');
+  });
+});
+
+test('getClientIp trusts IPv6-mapped loopback when whitelist uses 127.0.0.1', () => {
+  withRequestModule({ enabled: 'true', ips: '127.0.0.1' }, ({ getClientIp: loopbackGetClientIp }) => {
+    const req = makeReq('::ffff:127.0.0.1', { 'x-forwarded-for': '198.51.100.8' });
+    assert.equal(loopbackGetClientIp(req), '198.51.100.8');
+  });
+});
+
 test('getClientIp trusts Cloudflare IPv6 proxy ranges when enabled', () => {
-  delete require.cache[require.resolve('../../src/config')];
-  delete require.cache[require.resolve('../../src/utils/request')];
-  process.env.TRUSTED_PROXY_ENABLED = 'true';
-  process.env.TRUSTED_PROXY_IPS = '';
-  process.env.TRUST_CLOUDFLARE = 'true';
-
-  const { getClientIp: cfGetClientIp } = require('../../src/utils/request');
-  const req = makeReq('2400:cb00::1234', { 'cf-connecting-ip': '203.0.113.77' });
-  assert.equal(cfGetClientIp(req), '203.0.113.77');
-
-  delete require.cache[require.resolve('../../src/config')];
-  delete require.cache[require.resolve('../../src/utils/request')];
-  process.env.TRUSTED_PROXY_ENABLED = 'true';
-  process.env.TRUSTED_PROXY_IPS = '10.0.0.1';
-  delete process.env.TRUST_CLOUDFLARE;
+  withRequestModule({ enabled: 'true', ips: '', cloudflare: 'true' }, ({ getClientIp: cfGetClientIp }) => {
+    const req = makeReq('2400:cb00::1234', { 'cf-connecting-ip': '203.0.113.77' });
+    assert.equal(cfGetClientIp(req), '203.0.113.77');
+  });
 });
 
 test('getClientIp accepts IPv6 trusted proxy addresses from TRUSTED_PROXY_IPS', () => {
-  delete require.cache[require.resolve('../../src/config')];
-  delete require.cache[require.resolve('../../src/utils/request')];
-  process.env.TRUSTED_PROXY_ENABLED = 'true';
-  process.env.TRUSTED_PROXY_IPS = '2001:db8:abcd::42';
-
-  const { getClientIp: ipv6GetClientIp } = require('../../src/utils/request');
-  const req = makeReq('2001:db8:abcd::42', { 'x-forwarded-for': '198.51.100.7' });
-  assert.equal(ipv6GetClientIp(req), '198.51.100.7');
-
-  delete require.cache[require.resolve('../../src/config')];
-  delete require.cache[require.resolve('../../src/utils/request')];
-  process.env.TRUSTED_PROXY_ENABLED = 'true';
-  process.env.TRUSTED_PROXY_IPS = '10.0.0.1';
+  withRequestModule({ enabled: 'true', ips: '2001:db8:abcd::42' }, ({ getClientIp: ipv6GetClientIp }) => {
+    const req = makeReq('2001:db8:abcd::42', { 'x-forwarded-for': '198.51.100.7' });
+    assert.equal(ipv6GetClientIp(req), '198.51.100.7');
+  });
 });
 
 test('getClientIp returns IPv6 remote address on fallback', () => {
