@@ -79,8 +79,8 @@ const config = {
   trustedProxy: {
     // Enable proxy header trust (set to true when behind CDN/reverse proxy)
     enabled: process.env.TRUSTED_PROXY_ENABLED === 'true' || false,
-    // Whitelist of trusted proxy IPs (comma-separated)
-    // Only accept proxy headers from these IPs
+    // Whitelist of trusted proxy IPs or CIDR ranges (comma-separated)
+    // Only accept proxy headers from these sources
     ips: process.env.TRUSTED_PROXY_IPS
       ? process.env.TRUSTED_PROXY_IPS.split(',').map(ip => ip.trim())
       : [],

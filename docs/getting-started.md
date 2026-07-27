@@ -145,7 +145,7 @@ npm run verify     # lint + typecheck + build 一条龙
 - **Redis 未启动**：`npm run dev` 在 "MySQL database migrated" 之后卡在 Redis 连接（重试报 `ECONNREFUSED`）。先 `node scripts/test-redis.js` 排查，或临时在 `.env` 加 `USE_MEMORY_REDIS=1`（生产被 `validate.js` 阻断）。
 - **数据库不存在**：迁移只建表不建库，`Unknown database 'mindauth'` 说明忘了第 2 步。
 - **限流 keyPrefix 必须唯一**：新增 rate limiter 时必须给独立的 `keyPrefix`（见 `src/config/index.js` 的 rateLimit 配置），否则不同端点会互相消耗/重置对方的配额——这是硬性约定。
-- **本地反代下 IP 全是代理 IP**：trusted proxy 默认关闭（`TRUSTED_PROXY_ENABLED=false`），代理头不被信任，登录日志/限流看到的都是代理机 IP。本地在 Nginx 后调试时需配置 `TRUSTED_PROXY_ENABLED=true` + `TRUSTED_PROXY_IPS`。
+- **本地反代下 IP 全是代理 IP**：trusted proxy 默认关闭（`TRUSTED_PROXY_ENABLED=false`），代理头不被信任，登录日志/限流看到的都是代理机 IP。本地在 Nginx 后调试时需配置 `TRUSTED_PROXY_ENABLED=true` + `TRUSTED_PROXY_IPS`（支持 CIDR）；如果线上走阿里云 ESA 直连回源，可改用 `ALIYUN_ESA_AUTO_TRUST=true` + `ALIYUN_ESA_SITE_ID`。
 - **`public/js/` 是旧版 SPA 遗留**：当前前端在 `frontend/`（Vite 构建到 `dist/client/`）。不要给 `public/js/` 下的旧文件加功能或修 bug。
 - **生产环境启动强校验**：`NODE_ENV=production` 时 `src/config/validate.js` 会直接拒绝启动：`ADMIN_SECRET` 少于 32 字符、`BASE_URL` 指向 localhost、`ALLOWED_ORIGINS=*`、`USE_MEMORY_REDIS=1` 均为致命错误。开发环境同类问题只 warn，容易在部署时才暴露。
 - **改完前端页面没变化**：Express 服务的是 `dist/client/` 的构建产物，直连 4001 时需重新 `npm run build`；或改用 5173 的 Vite dev server。

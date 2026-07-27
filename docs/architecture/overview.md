@@ -104,7 +104,7 @@ MindAuth 是社区的**统一身份提供方（OAuth 2.0 SSO Provider）**：
 
 ## 关键设计决策
 
-1. **`app.set('trust proxy', false)` 是有意为之**。Express 默认的 `trust proxy` 机制会让任何客户端通过伪造 `X-Forwarded-For` 篡改 `req.ip`，从而绕过按 IP 的限流和封禁。MindAuth 关闭它，IP 提取统一走 `src/utils/request.js` 的 `getClientIp()`，只有 `TRUSTED_PROXY_ENABLED` + `TRUSTED_PROXY_IPS` 显式配置的可信代理（或 Cloudflare 模式）发来的转发头才被采信。
+1. **`app.set('trust proxy', false)` 是有意为之**。Express 默认的 `trust proxy` 机制会让任何客户端通过伪造 `X-Forwarded-For` 篡改 `req.ip`，从而绕过按 IP 的限流和封禁。MindAuth 关闭它，IP 提取统一走 `src/utils/request.js` 的 `getClientIp()`，只有 `TRUSTED_PROXY_ENABLED` + `TRUSTED_PROXY_IPS` 显式配置的可信代理、Aliyun ESA 自动拉取的 origin-protection 白名单，或 Cloudflare 模式命中的转发头才被采信。
 2. **深模块原则**。`src/modules/` 下每个模块（`sessionManager`、`oauthIssuer`、`tokenStore`、`clientRegistry` 等）是其领域的**唯一接缝**：路由只调模块导出的接口，模块内部直接操作 MySQL/Redis，其他代码不得绕过模块直连存储。这使得会话哈希、令牌存储格式等实现细节可以在模块内部演进。
 3. **限流 keyPrefix 唯一约束**。`src/middleware/rateLimit.js` 的每个限流器必须使用唯一的 `keyPrefix`（如 `ratelimit:login`、`ratelimit:register`），避免不同端点共享/互相消耗配额，或通过某端点重置另一端点的计数。
 4. **旧 vanilla SPA 用白名单隔离**。`public/js/` 时代的遗留静态页仅通过 `src/app.js` 中的 `LEGACY_FILES` 显式白名单（`/error.html`、`/oauth-error.html`、`/robots.txt`、`/docs.html`，仅 GET）对外可见，而不是整目录 `express.static(public/)`，防止遗留文件（尤其旧 index.html/admin.html）遮蔽 React 构建产物或意外暴露。

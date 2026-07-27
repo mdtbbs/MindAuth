@@ -218,7 +218,7 @@ DB 后备的动态配置（`system_config` 表）读写，带进程内缓存。�
 | `notify.js` | `createNotification(opts)` | legacy 薄包装 → `notificationCenter.create()` |
 | `phone.js` | `maskPhone(phone)` | 手机号脱敏 |
 | `publicFiles.js` | `safePublicPath(relative)`, `tryRemovePublicFile(relative)` | `public/` 下文件的路径穿越校验与安全删除（自 account.js 提取；头像/横幅/登录页背景换图时删旧文件用） |
-| `request.js` | `getClientIp(req)`, `isValidIpv4(ip)`, `isTrustedProxy(req)`, `normalizeIpCandidate(value)` | 客户端 IP 提取；代理头默认不信任，支持可信代理与 Cloudflare 网段；代理头值 IPv4/IPv6 均接受（剥端口与方括号、`::ffff:` 映射还原为 IPv4） |
+| `request.js` | `getClientIp(req)`, `isValidIpv4(ip)`, `isTrustedProxy(req)`, `normalizeIpCandidate(value)` | 客户端 IP 提取；代理头默认不信任，支持可信代理、Aliyun ESA 自动白名单与 Cloudflare 网段；代理头值 IPv4/IPv6 均接受（剥端口与方括号、`::ffff:` 映射还原为 IPv4） |
 | `smsAudit.js` | `logSmsAudit(data)` | 写 `sms_audit_logs` |
 | `token.js` | `generateToken()`（32 字节）, `generateShortToken()`（16 字节）, `hashToken(rawToken)` | 随机令牌生成与 SHA-256 哈希 |
 | `userAudit.js` | `logUserAudit({user_id, action, ...})`, `getUserAuditLogs(userId, limit)`, `VALID_ACTIONS` | 用户审计写入/查询，action 白名单 |

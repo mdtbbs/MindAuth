@@ -72,8 +72,12 @@
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `TRUSTED_PROXY_ENABLED` | `false` | 是否信任代理头提取真实 IP |
-| `TRUSTED_PROXY_IPS` | 空 | 受信代理 IP 白名单（逗号分隔），仅从这些 IP 接受代理头 |
+| `TRUSTED_PROXY_IPS` | 空 | 受信代理 IP / CIDR 白名单（逗号分隔），仅从这些来源接受代理头 |
 | `TRUST_CLOUDFLARE` | `false` | 信任 Cloudflare IP 段（自动提取 `CF-Connecting-IP`） |
+| `ALIYUN_ESA_AUTO_TRUST` | `false` | 自动从 ESA origin protection 拉取受信回源 IP 白名单 |
+| `ALIYUN_ESA_SITE_ID` | 空 | ESA 站点 ID；开启自动匹配时必填 |
+| `ALIYUN_ESA_REGION_ID` | `cn-hangzhou` | ESA OpenAPI 区域 |
+| `ALIYUN_ESA_REFRESH_INTERVAL_MS` | `600000` | ESA 受信白名单后台刷新间隔（毫秒） |
 
 ### 阿里云短信（`src/utils/aliyunSms.js` 读取，不在 config 对象内）
 

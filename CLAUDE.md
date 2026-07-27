@@ -308,7 +308,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `validation.js` | `isValidEmail`, `isValidPassword` (rules from `system_config`: `password_min_length` default 6, `password_require_complexity` default off), `getPasswordValidationError`, `isValidUsername`, `getUsernameValidationError`, `escapeHtml` |
 | `email.js` | `sendEmail`, `sendVerificationEmail`, `sendPasswordResetEmail` |
 | `crypto.js` | `timingSafeCompare` |
-| `request.js` | `getClientIp` (trusted proxy support; proxy-header values accept IPv4/IPv6, ports and brackets stripped, `::ffff:` unmapped), `normalizeIpCandidate` |
+| `request.js` | `getClientIp` (trusted proxy support; exact IP + CIDR allowlists, Aliyun ESA auto-trust, proxy-header values accept IPv4/IPv6, ports and brackets stripped, `::ffff:` unmapped), `normalizeIpCandidate` |
 | `datetime.js` | `formatMySQLDateTime` |
 | `cleanup.js` | Scheduled cleanup of expired tokens |
 | `aliyunSms.js` | `sendSmsCode(phone)`, `checkSmsCode(phone, code)` |
@@ -335,9 +335,12 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `ALLOWED_ORIGINS` | localhost:3000,4000,4001 | CORS allowed origins |
 | `TRUST_CLOUDFLARE` | false | Trust Cloudflare IP headers |
 | `TRUSTED_PROXY_ENABLED` | false | Enable trusted proxy IP extraction |
-| `TRUSTED_PROXY_IPS` | - | Comma-separated trusted proxy IPs |
-| `ALIYUN_ACCESS_KEY_ID/SECRET` | - | Aliyun SMS credentials |
-| `ALIYUN_SMS_SIGN_NAME/TEMPLATE_CODE` | - | Aliyun SMS sign and template |
+| `TRUSTED_PROXY_IPS` | - | Comma-separated trusted proxy IPs or CIDR ranges |
+| `ALIYUN_ESA_AUTO_TRUST` | false | Auto-load trusted ESA origin-protection IP ranges |
+| `ALIYUN_ESA_SITE_ID` | - | ESA site ID used for trusted proxy auto-trust |
+| `ALIYUN_ESA_REGION_ID` | cn-hangzhou | ESA OpenAPI region for trusted proxy auto-trust |
+| `ALIYUN_ESA_REFRESH_INTERVAL_MS` | 600000 | Background refresh interval for ESA trusted proxy cache |
+| `ALIYUN_ACCESS_KEY_ID/SECRET` | - | Aliyun SMS credentials and ESA API credentials |
 
 ### Runtime Constants
 | Setting | Value |

@@ -21,6 +21,11 @@ const { pool, closePool, runMigrations, seedTestFixtures } = require('./db');
 const { client, connectRedis, closeRedis } = require('./redis');
 const { createApp } = require('./app');
 const { startCleanupScheduler } = require('./utils/cleanup');
+const {
+  refreshAliyunEsaTrustedProxyCache,
+  startAliyunEsaTrustedProxyRefresh,
+  stopAliyunEsaTrustedProxyRefresh,
+} = require('./utils/aliyunEsaTrustedProxy');
 
 /**
  * Start the application.
@@ -46,6 +51,10 @@ async function start() {
   await connectRedis();
   console.log('Redis connected');
 
+  // 4.5. Warm trusted proxy cache from Aliyun ESA if enabled
+  await refreshAliyunEsaTrustedProxyCache();
+  startAliyunEsaTrustedProxyRefresh();
+
   // 5. Create the Express app
   const app = createApp();
 
@@ -63,6 +72,7 @@ async function start() {
 
   async function closeResourcesAndExit(code) {
     try {
+      stopAliyunEsaTrustedProxyRefresh();
       await closePool();
       console.log('MySQL pool closed');
       await closeRedis();

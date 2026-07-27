@@ -72,12 +72,17 @@ function validateConfig(config) {
   const proxyEnabled = config.trustedProxy?.enabled === true;
   const trustedProxyIps = config.trustedProxy?.ips || [];
   const trustCloudflare = config.trustedProxy?.trustCloudflare === true;
+  const aliyunEsaAutoTrust = process.env.ALIYUN_ESA_AUTO_TRUST === 'true';
 
   if (isProduction) {
     if (!proxyEnabled) {
       warnings.push('TRUSTED_PROXY_ENABLED=false in production — if the app is behind ESA/nginx, client IPs will fall back to the proxy address (often 127.0.0.1)');
-    } else if (trustedProxyIps.length === 0 && !trustCloudflare) {
-      warnings.push('TRUSTED_PROXY_ENABLED=true but no trusted proxy sources are configured — set TRUSTED_PROXY_IPS for ESA/nginx or enable TRUST_CLOUDFLARE only when actually behind Cloudflare');
+    } else if (trustedProxyIps.length === 0 && !trustCloudflare && !aliyunEsaAutoTrust) {
+      warnings.push('TRUSTED_PROXY_ENABLED=true but no trusted proxy sources are configured — set TRUSTED_PROXY_IPS / TRUST_CLOUDFLARE, or enable ALIYUN_ESA_AUTO_TRUST for ESA');
+    }
+
+    if (aliyunEsaAutoTrust && !process.env.ALIYUN_ESA_SITE_ID) {
+      warnings.push('ALIYUN_ESA_AUTO_TRUST=true but ALIYUN_ESA_SITE_ID is missing — ESA trusted proxy auto-matching will stay empty');
     }
   }
 

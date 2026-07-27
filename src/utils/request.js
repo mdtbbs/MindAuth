@@ -4,6 +4,7 @@
 
 const net = require('net');
 const config = require('../config');
+const { getCachedEntries: getAliyunEsaTrustedEntries, isEnabled: isAliyunEsaAutoTrustEnabled } = require('./aliyunEsaTrustedProxy');
 
 // Cloudflare IP ranges (as of 2024)
 // See: https://www.cloudflare.com/ips/
@@ -206,6 +207,24 @@ function normalizeTrustedProxyEntry(value) {
 }
 
 /**
+ * Check whether a trusted-proxy entry matches a remote address.
+ * Supports exact IPs and CIDR ranges.
+ * @param {string} remoteAddr
+ * @param {string} trustedEntry
+ * @returns {boolean}
+ */
+function matchesTrustedProxyEntry(remoteAddr, trustedEntry) {
+  if (!remoteAddr || !trustedEntry) return false;
+
+  if (trustedEntry.includes('/')) {
+    return isIpInCidr(remoteAddr, trustedEntry);
+  }
+
+  const normalizedEntry = normalizeTrustedProxyEntry(trustedEntry);
+  return normalizedEntry === remoteAddr;
+}
+
+/**
  * Check if request comes from a trusted proxy
  * @param {Express.Request} req - Express request object
  * @returns {boolean} True if request is from trusted proxy
@@ -220,11 +239,17 @@ function isTrustedProxy(req) {
   }
 
   // Check against explicit whitelist
-  const trustedIps = (config.trustedProxy.ips || [])
-    .map(normalizeTrustedProxyEntry)
-    .filter(Boolean);
-  if (normalizedRemoteAddr && trustedIps.includes(normalizedRemoteAddr)) {
+  const trustedIps = (config.trustedProxy.ips || []).filter(Boolean);
+  if (normalizedRemoteAddr && trustedIps.some((entry) => matchesTrustedProxyEntry(normalizedRemoteAddr, entry))) {
     return true;
+  }
+
+  // Check cached Aliyun ESA origin-protection entries if enabled
+  if (normalizedRemoteAddr && isAliyunEsaAutoTrustEnabled()) {
+    const esaEntries = getAliyunEsaTrustedEntries();
+    if (esaEntries.some((entry) => matchesTrustedProxyEntry(normalizedRemoteAddr, entry))) {
+      return true;
+    }
   }
 
   // Check Cloudflare IP ranges if enabled

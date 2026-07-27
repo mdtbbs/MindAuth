@@ -92,18 +92,24 @@ npm start              # node src/server.js，监听 PORT（默认 4001）
 ### 配置方法
 
 ```bash
-# 必须先打开总开关（TRUST_CLOUDFLARE 单独设置无效——
+# 必须先打开总开关（下面这些模式单独设置无效——
 # isTrustedProxy() 在 enabled=false 时直接返回 false）
 TRUSTED_PROXY_ENABLED=true
 
-# 方式一：显式列出可信代理 IP（nginx 所在机器的地址，逗号分隔）
-TRUSTED_PROXY_IPS=127.0.0.1
+# 方式一：显式列出可信代理 IP 或 CIDR（nginx 所在机器的地址，逗号分隔）
+TRUSTED_PROXY_IPS=127.0.0.1,10.0.0.0/24
 
-# 方式二（可叠加）：信任 Cloudflare 内置 IPv4 网段
+# 方式二（可叠加）：对阿里云 ESA 自动拉取 origin protection 回源白名单
+ALIYUN_ESA_AUTO_TRUST=true
+ALIYUN_ESA_SITE_ID=123456
+# 可选，默认 cn-hangzhou
+ALIYUN_ESA_REGION_ID=cn-hangzhou
+
+# 方式三（可叠加）：信任 Cloudflare 内置 IPv4/IPv6 网段
 TRUST_CLOUDFLARE=true
 ```
 
-仅当请求的 TCP 对端 IP 在可信列表（或 Cloudflare 网段）内，才会按 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For`（取第一个 IP）的优先级解析真实客户端 IP；头部值须为合法 IPv4 或 IPv6（自动剥离端口与 IPv6 方括号，`::ffff:` 映射地址还原为 IPv4），否则回退到连接地址。
+仅当请求的 TCP 对端 IP 在可信列表、Aliyun ESA origin-protection 白名单，或 Cloudflare 网段内，才会按 `CF-Connecting-IP` → `X-Real-IP` → `X-Forwarded-For`（取第一个 IP）的优先级解析真实客户端 IP；头部值须为合法 IPv4 或 IPv6（自动剥离端口与 IPv6 方括号，`::ffff:` 映射地址还原为 IPv4），否则回退到连接地址。ESA 白名单在启动时预热，并默认每 10 分钟后台刷新一次。
 
 ### nginx 最小配置片段
 

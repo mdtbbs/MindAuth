@@ -35,6 +35,7 @@ function withRequestModule(env, fn) {
   const prevEnabled = process.env.TRUSTED_PROXY_ENABLED;
   const prevIps = process.env.TRUSTED_PROXY_IPS;
   const prevCloudflare = process.env.TRUST_CLOUDFLARE;
+  const prevAliyunAutoTrust = process.env.ALIYUN_ESA_AUTO_TRUST;
 
   if (env.enabled === undefined) delete process.env.TRUSTED_PROXY_ENABLED;
   else process.env.TRUSTED_PROXY_ENABLED = env.enabled;
@@ -45,7 +46,11 @@ function withRequestModule(env, fn) {
   if (env.cloudflare === undefined) delete process.env.TRUST_CLOUDFLARE;
   else process.env.TRUST_CLOUDFLARE = env.cloudflare;
 
+  if (env.aliyunAutoTrust === undefined) delete process.env.ALIYUN_ESA_AUTO_TRUST;
+  else process.env.ALIYUN_ESA_AUTO_TRUST = env.aliyunAutoTrust;
+
   delete require.cache[require.resolve('../../src/config')];
+  delete require.cache[require.resolve('../../src/utils/aliyunEsaTrustedProxy')];
   delete require.cache[require.resolve('../../src/utils/request')];
   const mod = require('../../src/utils/request');
 
@@ -61,7 +66,11 @@ function withRequestModule(env, fn) {
     if (prevCloudflare === undefined) delete process.env.TRUST_CLOUDFLARE;
     else process.env.TRUST_CLOUDFLARE = prevCloudflare;
 
+    if (prevAliyunAutoTrust === undefined) delete process.env.ALIYUN_ESA_AUTO_TRUST;
+    else process.env.ALIYUN_ESA_AUTO_TRUST = prevAliyunAutoTrust;
+
     delete require.cache[require.resolve('../../src/config')];
+    delete require.cache[require.resolve('../../src/utils/aliyunEsaTrustedProxy')];
     delete require.cache[require.resolve('../../src/utils/request')];
   }
 }
@@ -189,6 +198,20 @@ test('getClientIp trusts IPv6-mapped loopback when whitelist uses 127.0.0.1', ()
   });
 });
 
+test('getClientIp accepts IPv4 CIDR trusted proxy ranges', () => {
+  withRequestModule({ enabled: 'true', ips: '172.16.0.0/12' }, ({ getClientIp: cidrGetClientIp }) => {
+    const req = makeReq('172.16.8.23', { 'x-forwarded-for': '198.51.100.9' });
+    assert.equal(cidrGetClientIp(req), '198.51.100.9');
+  });
+});
+
+test('getClientIp ignores out-of-range CIDR trusted proxy entries', () => {
+  withRequestModule({ enabled: 'true', ips: '172.16.0.0/12' }, ({ getClientIp: cidrGetClientIp }) => {
+    const req = makeReq('173.16.8.23', { 'x-forwarded-for': '198.51.100.10' });
+    assert.equal(cidrGetClientIp(req), '173.16.8.23');
+  });
+});
+
 test('getClientIp trusts Cloudflare IPv6 proxy ranges when enabled', () => {
   withRequestModule({ enabled: 'true', ips: '', cloudflare: 'true' }, ({ getClientIp: cfGetClientIp }) => {
     const req = makeReq('2400:cb00::1234', { 'cf-connecting-ip': '203.0.113.77' });
@@ -206,6 +229,36 @@ test('getClientIp accepts IPv6 trusted proxy addresses from TRUSTED_PROXY_IPS', 
 test('getClientIp returns IPv6 remote address on fallback', () => {
   const req = makeReq('2001:db8::42');
   assert.equal(getClientIp(req), '2001:db8::42');
+});
+
+test('getClientIp trusts cached Aliyun ESA proxy entries when auto trust is enabled', () => {
+  withRequestModule({ enabled: 'true', ips: '', cloudflare: 'false', aliyunAutoTrust: 'true' }, ({ getClientIp: esaGetClientIp }) => {
+    const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
+    esaProxy._setCachedEntries(['203.0.113.0/24']);
+
+    const req = makeReq('203.0.113.77', { 'x-forwarded-for': '198.51.100.11' });
+    assert.equal(esaGetClientIp(req), '198.51.100.11');
+  });
+});
+
+test('getClientIp ignores uncached Aliyun ESA proxies when auto trust is enabled', () => {
+  withRequestModule({ enabled: 'true', ips: '', cloudflare: 'false', aliyunAutoTrust: 'true' }, ({ getClientIp: esaGetClientIp }) => {
+    const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
+    esaProxy._setCachedEntries(['203.0.113.0/24']);
+
+    const req = makeReq('198.51.100.77', { 'x-forwarded-for': '198.51.100.12' });
+    assert.equal(esaGetClientIp(req), '198.51.100.77');
+  });
+});
+
+test('getClientIp still falls back to explicit whitelist before Aliyun ESA cache', () => {
+  withRequestModule({ enabled: 'true', ips: '127.0.0.1', cloudflare: 'false', aliyunAutoTrust: 'true' }, ({ getClientIp: mixedGetClientIp }) => {
+    const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
+    esaProxy._setCachedEntries(['203.0.113.0/24']);
+
+    const req = makeReq('127.0.0.1', { 'x-forwarded-for': '198.51.100.13' });
+    assert.equal(mixedGetClientIp(req), '198.51.100.13');
+  });
 });
 
 // ─── isValidIpv4 (backward compat) ───────────────────────────

@@ -47,7 +47,7 @@
 ### 限流误伤（全站共享一个 IP）
 - **现象**：大量互不相关用户同时被 429/锁定；`node scripts/check-redis.js` 显示某个限流键计数异常高，且该 IP 是 CDN/反代地址。
 - **原因**：经反代部署但未配置可信代理，`getClientIp` 默认不信任代理头，所有请求识别为反代 IP。
-- **修复**：`.env` 设置 `TRUSTED_PROXY_ENABLED=true` + `TRUSTED_PROXY_IPS=<反代IP列表>`（Cloudflare 用 `TRUST_CLOUDFLARE=true`），重启；用非生产环境的 `POST /api/admin/test/clear-rate-limits`（需 ADMIN_SECRET）或手工 `DEL ratelimit:*` 清残留计数。
+- **修复**：`.env` 设置 `TRUSTED_PROXY_ENABLED=true` + `TRUSTED_PROXY_IPS=<反代IP/CIDR列表>`，或在 ESA 回源场景启用 `ALIYUN_ESA_AUTO_TRUST=true` + `ALIYUN_ESA_SITE_ID=<siteId>`（Cloudflare 用 `TRUST_CLOUDFLARE=true`），重启；用非生产环境的 `POST /api/admin/test/clear-rate-limits`（需 ADMIN_SECRET）或手工 `DEL ratelimit:*` 清残留计数。
 
 ### SMTP 发信失败
 1. 管理后台「设置」页检查 SMTP 配置：`GET/PUT /api/admin/email-config`（DB `email_config` 表优先于环境变量）。
