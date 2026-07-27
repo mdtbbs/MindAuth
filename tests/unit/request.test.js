@@ -122,58 +122,37 @@ test('isTrustedProxy true only for whitelisted remote address', () => {
 
 // ─── getClientIp: trusted proxy paths ────────────────────────
 
-test('getClientIp reads IPv4 from X-Forwarded-For via trusted proxy', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '198.51.100.7' });
+test('getClientIp reads IPv4 from ali-real-client-ip via trusted proxy', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': '198.51.100.7' });
   assert.equal(getClientIp(req), '198.51.100.7');
 });
 
-test('getClientIp reads IPv6 from X-Forwarded-For via trusted proxy', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '2001:db8::1' });
+test('getClientIp reads IPv6 from ali-real-client-ip via trusted proxy', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': '2001:db8::1' });
   assert.equal(getClientIp(req), '2001:db8::1');
 });
 
-test('getClientIp takes first entry of X-Forwarded-For chain', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '2001:db8::1, 10.0.0.1' });
+test('getClientIp handles bracketed IPv6 with port in ali-real-client-ip', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': '[2001:db8::1]:1234' });
   assert.equal(getClientIp(req), '2001:db8::1');
 });
 
-test('getClientIp handles bracketed IPv6 with port in X-Forwarded-For', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '[2001:db8::1]:1234' });
-  assert.equal(getClientIp(req), '2001:db8::1');
-});
-
-test('getClientIp handles IPv4 with port in X-Forwarded-For', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '198.51.100.7:52341' });
+test('getClientIp handles IPv4 with port in ali-real-client-ip', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': '198.51.100.7:52341' });
   assert.equal(getClientIp(req), '198.51.100.7');
 });
 
-test('getClientIp reads IPv6 from CF-Connecting-IP and X-Real-IP', () => {
-  const cfReq = makeReq(TRUSTED_PROXY, { 'cf-connecting-ip': '2001:db8::cafe' });
-  assert.equal(getClientIp(cfReq), '2001:db8::cafe');
-
-  const realIpReq = makeReq(TRUSTED_PROXY, { 'x-real-ip': '2001:db8::beef' });
-  assert.equal(getClientIp(realIpReq), '2001:db8::beef');
-});
-
-test('getClientIp header priority: CF-Connecting-IP > X-Real-IP > X-Forwarded-For', () => {
-  const req = makeReq(TRUSTED_PROXY, {
-    'cf-connecting-ip': '192.0.2.1',
-    'x-real-ip': '192.0.2.2',
-    'x-forwarded-for': '192.0.2.3',
-  });
-  assert.equal(getClientIp(req), '192.0.2.1');
-});
-
-test('getClientIp falls back to remote address when header value is garbage', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': 'unknown, junk' });
+test('getClientIp falls back to remote address when ali-real-client-ip is garbage', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': 'unknown' });
   assert.equal(getClientIp(req), TRUSTED_PROXY);
 });
 
 // ─── getClientIp: untrusted paths ────────────────────────────
 
-test('getClientIp ignores proxy headers from untrusted remote', () => {
+test('getClientIp ignores ali-real-client-ip from untrusted remote', () => {
   const req = makeReq(UNTRUSTED_REMOTE, {
-    'x-forwarded-for': '1.2.3.4',
+    'ali-real-client-ip': '1.2.3.4',
+    'x-forwarded-for': '5.6.7.8',
     'cf-connecting-ip': '2001:db8::1',
   });
   assert.equal(getClientIp(req), UNTRUSTED_REMOTE);
@@ -186,21 +165,21 @@ test('getClientIp strips IPv6-mapped prefix on fallback', () => {
 
 test('getClientIp trusts IPv6 loopback when whitelist uses 127.0.0.1', () => {
   withRequestModule({ enabled: 'true', ips: '127.0.0.1' }, ({ getClientIp: loopbackGetClientIp }) => {
-    const req = makeReq('::1', { 'x-forwarded-for': '198.51.100.7' });
+    const req = makeReq('::1', { 'ali-real-client-ip': '198.51.100.7' });
     assert.equal(loopbackGetClientIp(req), '198.51.100.7');
   });
 });
 
 test('getClientIp trusts IPv6-mapped loopback when whitelist uses 127.0.0.1', () => {
   withRequestModule({ enabled: 'true', ips: '127.0.0.1' }, ({ getClientIp: loopbackGetClientIp }) => {
-    const req = makeReq('::ffff:127.0.0.1', { 'x-forwarded-for': '198.51.100.8' });
+    const req = makeReq('::ffff:127.0.0.1', { 'ali-real-client-ip': '198.51.100.8' });
     assert.equal(loopbackGetClientIp(req), '198.51.100.8');
   });
 });
 
 test('getClientIp accepts IPv4 CIDR trusted proxy ranges', () => {
   withRequestModule({ enabled: 'true', ips: '172.16.0.0/12' }, ({ getClientIp: cidrGetClientIp }) => {
-    const req = makeReq('172.16.8.23', { 'x-forwarded-for': '198.51.100.9' });
+    const req = makeReq('172.16.8.23', { 'ali-real-client-ip': '198.51.100.9' });
     assert.equal(cidrGetClientIp(req), '198.51.100.9');
   });
 });
@@ -214,14 +193,14 @@ test('getClientIp ignores out-of-range CIDR trusted proxy entries', () => {
 
 test('getClientIp trusts Cloudflare IPv6 proxy ranges when enabled', () => {
   withRequestModule({ enabled: 'true', ips: '', cloudflare: 'true' }, ({ getClientIp: cfGetClientIp }) => {
-    const req = makeReq('2400:cb00::1234', { 'cf-connecting-ip': '203.0.113.77' });
+    const req = makeReq('2400:cb00::1234', { 'ali-real-client-ip': '203.0.113.77' });
     assert.equal(cfGetClientIp(req), '203.0.113.77');
   });
 });
 
 test('getClientIp accepts IPv6 trusted proxy addresses from TRUSTED_PROXY_IPS', () => {
   withRequestModule({ enabled: 'true', ips: '2001:db8:abcd::42' }, ({ getClientIp: ipv6GetClientIp }) => {
-    const req = makeReq('2001:db8:abcd::42', { 'x-forwarded-for': '198.51.100.7' });
+    const req = makeReq('2001:db8:abcd::42', { 'ali-real-client-ip': '198.51.100.7' });
     assert.equal(ipv6GetClientIp(req), '198.51.100.7');
   });
 });
@@ -236,7 +215,7 @@ test('getClientIp trusts cached Aliyun ESA proxy entries when auto trust is enab
     const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
     esaProxy._setCachedEntries(['203.0.113.0/24']);
 
-    const req = makeReq('203.0.113.77', { 'x-forwarded-for': '198.51.100.11' });
+    const req = makeReq('203.0.113.77', { 'ali-real-client-ip': '198.51.100.11' });
     assert.equal(esaGetClientIp(req), '198.51.100.11');
   });
 });
@@ -246,7 +225,7 @@ test('getClientIp ignores uncached Aliyun ESA proxies when auto trust is enabled
     const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
     esaProxy._setCachedEntries(['203.0.113.0/24']);
 
-    const req = makeReq('198.51.100.77', { 'x-forwarded-for': '198.51.100.12' });
+    const req = makeReq('198.51.100.77', { 'ali-real-client-ip': '198.51.100.12' });
     assert.equal(esaGetClientIp(req), '198.51.100.77');
   });
 });
@@ -256,7 +235,7 @@ test('getClientIp still falls back to explicit whitelist before Aliyun ESA cache
     const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
     esaProxy._setCachedEntries(['203.0.113.0/24']);
 
-    const req = makeReq('127.0.0.1', { 'x-forwarded-for': '198.51.100.13' });
+    const req = makeReq('127.0.0.1', { 'ali-real-client-ip': '198.51.100.13' });
     assert.equal(mixedGetClientIp(req), '198.51.100.13');
   });
 });

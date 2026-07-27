@@ -273,26 +273,9 @@ function isTrustedProxy(req) {
 function getClientIp(req) {
   // Only read proxy headers if request comes from trusted proxy
   if (isTrustedProxy(req)) {
-    // Cloudflare specific header (highest priority)
-    const cfIp = normalizeIpCandidate(req.headers['cf-connecting-ip']);
-    if (cfIp) {
-      return cfIp;
-    }
-
-    // X-Real-IP header (nginx, some proxies)
-    const realIp = normalizeIpCandidate(req.headers['x-real-ip']);
-    if (realIp) {
-      return realIp;
-    }
-
-    // X-Forwarded-For header (standard proxy header)
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (forwardedFor) {
-      // Take first IP in the chain (original client)
-      const firstIp = normalizeIpCandidate(forwardedFor.split(',')[0]);
-      if (firstIp) {
-        return firstIp;
-      }
+    const esaRealIp = normalizeIpCandidate(req.headers['ali-real-client-ip']);
+    if (esaRealIp) {
+      return esaRealIp;
     }
   }
 
