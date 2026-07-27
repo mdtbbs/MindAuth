@@ -119,7 +119,7 @@ export function DashboardPage() {
     }
     setSmsLoading(true);
     try {
-      await api.post('/api/sms/verify', { code: smsCode.trim() });
+      await api.post('/api/sms/verify', { phone: smsPhone.trim(), code: smsCode.trim() });
       toast('success', '手机号绑定成功');
       await loadCurrentUser();
       setSmsSent(false);

@@ -68,6 +68,19 @@ function validateConfig(config) {
     errors.push('REDIS_HOST is required');
   }
 
+  // --- Trusted proxy config ---
+  const proxyEnabled = config.trustedProxy?.enabled === true;
+  const trustedProxyIps = config.trustedProxy?.ips || [];
+  const trustCloudflare = config.trustedProxy?.trustCloudflare === true;
+
+  if (isProduction) {
+    if (!proxyEnabled) {
+      warnings.push('TRUSTED_PROXY_ENABLED=false in production — if the app is behind ESA/nginx, client IPs will fall back to the proxy address (often 127.0.0.1)');
+    } else if (trustedProxyIps.length === 0 && !trustCloudflare) {
+      warnings.push('TRUSTED_PROXY_ENABLED=true but no trusted proxy sources are configured — set TRUSTED_PROXY_IPS for ESA/nginx or enable TRUST_CLOUDFLARE only when actually behind Cloudflare');
+    }
+  }
+
   // --- Upload directory ---
   const uploadsDir = path.join(__dirname, '../../public/uploads');
   try {
