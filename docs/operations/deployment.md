@@ -85,7 +85,7 @@ npm start              # node src/server.js，监听 PORT（默认 4001）
 
 ## 反向代理要求（重点）
 
-`src/app.js` 显式设置 `app.set('trust proxy', false)`，客户端 IP 提取完全由 `src/utils/request.js` 的 `getClientIp()` 接管：**默认不信任任何代理头**，直接取 TCP 连接的对端地址。只有请求来自可信代理时，才会采信 ESA 注入的 `ali-real-client-ip`。
+`src/app.js` 显式设置 `app.set('trust proxy', false)`，客户端 IP 提取完全由 `src/utils/request.js` 的 `getClientIp()` 接管：**默认不信任任何代理头**，直接取 TCP 连接的对端地址。只有请求来自可信代理时，才会优先采信 ESA 注入的 `ali-real-client-ip`，并在其缺失时回退到 `X-Forwarded-For`。
 
 这意味着：**如果 MindAuth 前面有 nginx / CDN 而你未配置可信代理，所有请求的"客户端 IP"都会是代理自身的 IP**。后果是 IP 封禁与限流（登录 5 次/5 分钟等）作用在代理 IP 上，一个用户触发限流会误伤全站用户；封禁一个"IP"等于封掉所有人。
 
@@ -109,7 +109,7 @@ ALIYUN_ESA_REGION_ID=cn-hangzhou
 TRUST_CLOUDFLARE=true
 ```
 
-仅当请求的 TCP 对端 IP 在可信列表、Aliyun ESA origin-protection 白名单，或 Cloudflare 网段内，才会采信 `ali-real-client-ip`；头值须为合法 IPv4 或 IPv6（自动剥离端口与 IPv6 方括号，`::ffff:` 映射地址还原为 IPv4），否则回退到连接地址。ESA 白名单在启动时预热，并默认每 10 分钟后台刷新一次。
+仅当请求的 TCP 对端 IP 在可信列表、Aliyun ESA origin-protection 白名单，或 Cloudflare 网段内，才会优先采信 `ali-real-client-ip`，并在其缺失时回退到 `X-Forwarded-For` 首项；头值须为合法 IPv4 或 IPv6（自动剥离端口与 IPv6 方括号，`::ffff:` 映射地址还原为 IPv4），否则回退到连接地址。ESA 白名单在启动时预热，并默认每 10 分钟后台刷新一次。
 
 ### nginx 最小配置片段
 

@@ -82,7 +82,7 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 
 ## IP 处理与封禁
 
-- **可信代理模型**（[request.js](../../src/utils/request.js)）：`app.set('trust proxy', false)`，默认不信任任何代理头。仅当 `TRUSTED_PROXY_ENABLED=true` 且 TCP 对端在显式白名单（`TRUSTED_PROXY_IPS`，支持 IPv4/IPv6 与 CIDR）、Aliyun ESA 自动拉取的 origin-protection 白名单（`ALIYUN_ESA_AUTO_TRUST=true`）或（开启 `TRUST_CLOUDFLARE` 时）Cloudflare IPv4/IPv6 网段内，才采信 ESA 注入的 `ali-real-client-ip`；头值经 `normalizeIpCandidate` 校验归一化后才使用——**IPv4 与 IPv6 均接受**，自动剥离端口与 IPv6 方括号（`[2001:db8::1]:1234`），`::ffff:` 映射地址还原为 IPv4；非法值回退 socket 地址。ESA 白名单在启动时预热，并按固定间隔后台刷新。这使限流、锁定、封禁、审计所用 IP 不可被普通客户端伪造。
+- **可信代理模型**（[request.js](../../src/utils/request.js)）：`app.set('trust proxy', false)`，默认不信任任何代理头。仅当 `TRUSTED_PROXY_ENABLED=true` 且 TCP 对端在显式白名单（`TRUSTED_PROXY_IPS`，支持 IPv4/IPv6 与 CIDR）、Aliyun ESA 自动拉取的 origin-protection 白名单（`ALIYUN_ESA_AUTO_TRUST=true`）或（开启 `TRUST_CLOUDFLARE` 时）Cloudflare IPv4/IPv6 网段内，才采信 ESA 注入的 `ali-real-client-ip`；其缺失时才回退到 `X-Forwarded-For` 首项。头值经 `normalizeIpCandidate` 校验归一化后才使用——**IPv4 与 IPv6 均接受**，自动剥离端口与 IPv6 方括号（`[2001:db8::1]:1234`），`::ffff:` 映射地址还原为 IPv4；非法值回退 socket 地址。ESA 白名单在启动时预热，并按固定间隔后台刷新。这使限流、锁定、封禁、审计所用 IP 不可被普通客户端伪造。
 - **IP 封禁**（[ipBanMatcher.js](../../src/modules/security/ipBanMatcher.js) + [ipBan.js](../../src/middleware/ipBan.js)）：`ip_bans` 表支持精确与 CIDR 匹配，**IPv4/IPv6 均支持**（BigInt 128 位运算，含 `::` 压缩、内嵌 IPv4、zone id 处理）；管理端录入路由（`POST /api/admin/ip-bans`）同样接受 IPv4/IPv6——`net.isIP` 判族，CIDR 前缀按族限制（IPv4 0–32 / IPv6 0–128）；跨地址族永不匹配；过期封禁在匹配时跳过。封禁列表缓存于 Redis `ip_bans_cache`（5min TTL），管理端增删改后调用 `refreshCache` 失效。检查失败时**fail open**（记录日志放行），保证封禁子系统故障不影响可用性。中间件在 CSRF 之前挂载，封禁 IP 在到达 API 前即被 403。
 
 ## 管理端 RBAC

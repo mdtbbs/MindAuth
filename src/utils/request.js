@@ -277,6 +277,14 @@ function getClientIp(req) {
     if (esaRealIp) {
       return esaRealIp;
     }
+
+    const forwardedFor = req.headers['x-forwarded-for'];
+    if (forwardedFor) {
+      const firstIp = normalizeIpCandidate(forwardedFor.split(',')[0]);
+      if (firstIp) {
+        return firstIp;
+      }
+    }
   }
 
   // Fallback to Express req.ip or connection remote address

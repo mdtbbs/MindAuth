@@ -127,8 +127,18 @@ test('getClientIp reads IPv4 from ali-real-client-ip via trusted proxy', () => {
   assert.equal(getClientIp(req), '198.51.100.7');
 });
 
+test('getClientIp falls back to X-Forwarded-For when ali-real-client-ip is missing', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '198.51.100.7' });
+  assert.equal(getClientIp(req), '198.51.100.7');
+});
+
 test('getClientIp reads IPv6 from ali-real-client-ip via trusted proxy', () => {
   const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': '2001:db8::1' });
+  assert.equal(getClientIp(req), '2001:db8::1');
+});
+
+test('getClientIp takes first entry of X-Forwarded-For chain when ali-real-client-ip is missing', () => {
+  const req = makeReq(TRUSTED_PROXY, { 'x-forwarded-for': '2001:db8::1, 10.0.0.1' });
   assert.equal(getClientIp(req), '2001:db8::1');
 });
 
@@ -142,14 +152,17 @@ test('getClientIp handles IPv4 with port in ali-real-client-ip', () => {
   assert.equal(getClientIp(req), '198.51.100.7');
 });
 
-test('getClientIp falls back to remote address when ali-real-client-ip is garbage', () => {
-  const req = makeReq(TRUSTED_PROXY, { 'ali-real-client-ip': 'unknown' });
+test('getClientIp falls back to remote address when ali-real-client-ip and X-Forwarded-For are garbage', () => {
+  const req = makeReq(TRUSTED_PROXY, {
+    'ali-real-client-ip': 'unknown',
+    'x-forwarded-for': 'junk, more-junk',
+  });
   assert.equal(getClientIp(req), TRUSTED_PROXY);
 });
 
 // ─── getClientIp: untrusted paths ────────────────────────────
 
-test('getClientIp ignores ali-real-client-ip from untrusted remote', () => {
+test('getClientIp ignores ali-real-client-ip and X-Forwarded-For from untrusted remote', () => {
   const req = makeReq(UNTRUSTED_REMOTE, {
     'ali-real-client-ip': '1.2.3.4',
     'x-forwarded-for': '5.6.7.8',
