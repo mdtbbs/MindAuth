@@ -49,7 +49,7 @@ export function RegisterPage() {
   const { user, login } = useAuth();
   const { toast } = useToast();
 
-  const redirectUri = params.get('redirect_uri') || '';
+  const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
   const stateParam = params.get('state') || '';

@@ -86,6 +86,39 @@
 |--------|------|----------|
 | 500 | `登出失败` | 服务器错误 |
 
+### `GET /logout`（顶层路径，不在 `/api` 下）
+
+SLO（Single Logout）端点：跨域 SPA（如 MindFourm）通过浏览器跳转调用。销毁 MindAuth 会话后，按注册白名单重定向回调用方。
+
+- 认证/限流：无需登录（幂等）；无专属限流
+- 实现：`src/routes/sloLogout.js`，在 `src/app.js` 顶层挂载
+
+Query 参数（**两者都必填**，否则跳回本站 `/login`）：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `redirect_uri` | string | 必须**严格相等**匹配 `client_id` 注册过的回调地址 |
+| `client_id` | string | OAuth 客户端的 public client_id（如 `forum`） |
+
+行为：
+1. 若请求带 `session` cookie：尽力撤销会话（MySQL + Redis + cookie），错误被吞掉以保持幂等
+2. 校验 `redirect_uri` + `client_id`：查 `clients` 表，严格相等匹配注册的 `redirect_uri`，再做协议校验（仅允许 http/https）
+3. 任何校验失败 → 跳本站 `/login`（永不跳不可信 URI，杜绝 open redirect）
+
+示例（成功）：
+```
+GET /logout?redirect_uri=https%3A%2F%2Fmdtbbs.cn%2Fapi%2Fauth%2Fcallback&client_id=forum
+→ 302 Location: https://mdtbbs.cn/api/auth/callback
+```
+
+示例（失败：redirect_uri 不匹配注册值）：
+```
+GET /logout?redirect_uri=https%3A%2F%2Fevil.example.com%2Fsteal&client_id=forum
+→ 302 Location: /login
+```
+
+注记：MindFourm 当前调用时**不带 `client_id`**，会触发失败回落到 `/login`。MindFourm 侧需要配套加上 `client_id` 参数才能正确返回论坛。
+
 ### `GET /api/me`
 
 获取当前登录用户信息。

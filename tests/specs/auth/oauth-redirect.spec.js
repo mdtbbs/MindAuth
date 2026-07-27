@@ -83,4 +83,33 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     expect(registerHref).toContain(`client_id=${FORUM_CLIENT_ID}`);
     expect(registerHref).toContain('redirect_uri=');
   });
+
+  // MindFourm 历史上使用 `redirect` 作为参数名（非 OAuth 标准的 `redirect_uri`）。
+  // MindAuth LoginPage/RegisterPage 已兼容两种名字，避免登录完停留在 MindAuth。
+  test('登录页使用 `redirect` 参数名也能正确进入 OAuth 流程', async ({ page }) => {
+    const testUser = `oauth_redir_${Date.now()}`;
+    const reg = await page.request.post('/api/register', {
+      data: { username: testUser, email: `${testUser}@test.com`, password: 'TestPass123' }
+    });
+    expect(reg.status()).toBe(201);
+
+    // Note: uses `redirect=` instead of `redirect_uri=`
+    const loginUrl = `/login?redirect=${encodeURIComponent(FORUM_CALLBACK)}&client_id=${FORUM_CLIENT_ID}&state=%2F`;
+    await page.goto(loginUrl);
+    await page.waitForSelector('#login-form', { timeout: 5000 });
+
+    const callbackRequestPromise = page.waitForRequest(request =>
+      request.url().startsWith(FORUM_CALLBACK) && request.url().includes('code='),
+      { timeout: 20000 }
+    );
+
+    await page.fill('#username', testUser);
+    await page.fill('#password', 'TestPass123');
+    await page.click('#login-form button[type="submit"]');
+
+    const callbackRequest = await callbackRequestPromise;
+    const finalUrl = callbackRequest.url();
+    expect(finalUrl).toContain('code=');
+    expect(finalUrl).toContain('state=');
+  });
 });

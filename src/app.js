@@ -23,6 +23,7 @@ const { client } = require('./redis');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const oauthRoutes = require('./routes/oauth');
+const { sloLogoutHandler } = require('./routes/sloLogout');
 const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
@@ -292,6 +293,13 @@ function createApp(deps = {}) {
   // Serve the React user app for all remaining routes.
   // This MUST come after API routes and static asset middleware so that
   // /api/*, /uploads/*, and /assets/* are never intercepted.
+  //
+  // SLO logout (GET /logout) is mounted here — before the wildcard — so that
+  // cross-origin browser logouts from SPAs like MindFourm work correctly.
+  // The handler validates redirect_uri against the registered client's value
+  // to prevent open redirect; any failure redirects to /login.
+  app.get('/logout', sloLogoutHandler);
+
   app.get('*', (req, res, next) => {
     // In development, always serve fresh HTML (no caching)
     if (process.env.NODE_ENV !== 'production') {

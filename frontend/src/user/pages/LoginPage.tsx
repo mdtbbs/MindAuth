@@ -12,7 +12,7 @@ export function LoginPage() {
   const { login, user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  const redirectUri = params.get('redirect_uri') || '';
+  const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
   const state = params.get('state') || '';

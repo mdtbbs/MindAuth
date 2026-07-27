@@ -751,4 +751,6 @@ module.exports = {
   listAuthorizations,
   revokeAuthorization,
   verify,
+  // Exposed for cross-route use (e.g. SLO logout endpoint)
+  lookupClient,
 };

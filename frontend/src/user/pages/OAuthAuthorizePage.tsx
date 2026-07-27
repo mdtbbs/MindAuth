@@ -10,7 +10,7 @@ export function OAuthAuthorizePage() {
   const { user, loading: authLoading } = useAuth();
 
   const clientId = params.get('client_id') || '';
-  const redirectUri = params.get('redirect_uri') || '';
+  const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const state = params.get('state') || '';
   const scope = params.get('scope') || '';
   const clientName = params.get('client_name') || '';

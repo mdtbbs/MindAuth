@@ -137,6 +137,11 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/me` | GET | Current user info | Session |
 | `/login-logs` | GET | Login history | Session |
 
+### SLO (top-level, not under `/api`)
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/logout` | GET | Browser-initiated SLO logout for cross-origin SPAs (e.g. MindFourm). Validates `redirect_uri` against registered client value (strict equality) + `client_id` (both required); any failure falls back to `/login`. Idempotent. Implementation in `src/routes/sloLogout.js`. | None (both query params required) |
+
 ### OAuth 2.0 (`/api`)
 | Endpoint | Method | Description | Standard |
 |----------|--------|-------------|----------|
