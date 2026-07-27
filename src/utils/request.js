@@ -265,26 +265,44 @@ function isTrustedProxy(req) {
 }
 
 /**
- * Extract client IP address from request with security validation
- * Only trusts proxy headers when request comes from a trusted proxy
+ * Extract client IP address from request.
+ * Unconditionally reads common CDN / reverse-proxy headers in priority order,
+ * mirroring how other CDNs (NGINx `X-Real-IP`, CF `CF-Connecting-IP`, ESA
+ * `ali-real-client-ip`, standard `X-Forwarded-For`) are handled:
+ *
+ *   1. ali-real-client-ip   (Aliyun ESA / DCDN)
+ *   2. x-real-ip            (NGINX / generic CDN)
+ *   3. cf-connecting-ip     (Cloudflare)
+ *   4. x-forwarded-for      (standard, first entry)
+ *   5. req.ip / socket remoteAddress (fallback)
+ *
+ * Each header value is normalized (brackets / ports / `::ffff:` mapping
+ * stripped) and validated; the first valid IP wins.
+ *
+ * Security note: this trusts the first proxy hop. Only deploy this way when
+ * the service is actually behind a CDN / reverse proxy that overwrites these
+ * headers on the way in — otherwise an attacker can spoof any IP.
+ *
  * @param {Express.Request} req - Express request object
  * @returns {string} Client IP address
  */
 function getClientIp(req) {
-  // Only read proxy headers if request comes from trusted proxy
-  if (isTrustedProxy(req)) {
-    const esaRealIp = normalizeIpCandidate(req.headers['ali-real-client-ip']);
-    if (esaRealIp) {
-      return esaRealIp;
-    }
+  const candidates = [
+    req.headers['ali-real-client-ip'],
+    req.headers['x-real-ip'],
+    req.headers['cf-connecting-ip'],
+  ];
 
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (forwardedFor) {
-      const firstIp = normalizeIpCandidate(forwardedFor.split(',')[0]);
-      if (firstIp) {
-        return firstIp;
-      }
-    }
+  for (const raw of candidates) {
+    const ip = normalizeIpCandidate(raw);
+    if (ip) return ip;
+  }
+
+  // X-Forwarded-For may contain a comma-separated chain; take the first entry
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) {
+    const first = normalizeIpCandidate(xff.split(',')[0]);
+    if (first) return first;
   }
 
   // Fallback to Express req.ip or connection remote address
