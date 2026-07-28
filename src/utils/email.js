@@ -93,6 +93,10 @@ async function sendEmail(to, subject, htmlContent) {
   }
 
   // Production mode: use SMTP
+  if (!config || !config.host || !config.user || !config.password) {
+    throw new Error('邮件服务未配置，请在管理后台设置 SMTP 或配置环境变量');
+  }
+
   const transporter = createTransporter(config);
 
   try {

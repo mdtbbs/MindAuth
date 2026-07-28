@@ -62,6 +62,9 @@ router.post('/send', requireAuth, sendRateLimiter, async (req, res) => {
     res.json({ success: true, message: '验证邮件已发送' });
   } catch (err) {
     console.error('Send verification error:', err);
+    if (err.message && err.message.includes('邮件服务未配置')) {
+      return res.status(503).json({ success: false, message: '邮件服务暂时不可用，请联系管理员配置 SMTP' });
+    }
     res.status(500).json({ success: false, message: '发送验证邮件失败' });
   }
 });
