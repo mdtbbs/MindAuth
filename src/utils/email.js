@@ -68,10 +68,17 @@ function createTransporter(config) {
     return null;
   }
 
+  // secure 在数据库里可能是 TINYINT (1/0)、布尔值、或字符串 ("1"/"0")
+  // 统一转换为布尔值，避免 === 1 在 mysql2 返回 boolean 时永远 false
+  const secureFlag = config.secure === true || config.secure === 1 || config.secure === '1';
+
+  // secure: true  → 端口 465 implicit TLS，连接本身就要求 TLS
+  // secure: false → 端口 587 STARTTLS，requireTLS 强制升级，拒绝裸连
   return nodemailer.createTransport({
     host: config.host,
     port: config.port,
-    secure: config.secure === 1,
+    secure: secureFlag,
+    requireTLS: !secureFlag,
     auth: {
       user: config.user,
       pass: config.password
