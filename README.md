@@ -4,7 +4,7 @@ OAuth 2.0 SSO 认证服务，为 Mindustry 社区应用提供统一登录。
 
 ## 功能
 
-- 用户注册/登录（邮箱 + 密码）、邮箱验证、密码重置
+- 用户注册/登录（邮箱 + 密码）、注册强制邮箱验证码、邮箱验证、密码重置
 - 手机短信验证（阿里云 SMS）、挑战问题验证
 - OAuth 2.0 授权码模式（支持 PKCE S256）+ OIDC Discovery（`/.well-known/openid-configuration`）
 - 管理后台（用户管理、OAuth 客户端、IP 封禁 CIDR、审计日志、运行时配置）

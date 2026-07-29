@@ -34,6 +34,16 @@ test.describe('OAuth Authorization Code Flow', () => {
     await page.fill('#username', testUsername);
     await page.fill('#email', testEmail);
     await page.fill('#password', testPassword);
+    // 新流程：先点击发送验证码（dev 模式自动回填），再提交
+    await page.click('[data-testid="register-send-code"]');
+    await page.waitForSelector('[data-testid="register-email-code"]', { timeout: 5000 });
+    await page.waitForFunction(
+      () => {
+        const input = document.querySelector('[data-testid="register-email-code"]');
+        return input && input.value.length === 6;
+      },
+      { timeout: 5000 }
+    );
     await page.click('#register-form button[type="submit"]');
 
     // Step 2: 注册成功后应用自动登录并跳转 /dashboard —

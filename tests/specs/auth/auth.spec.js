@@ -21,6 +21,16 @@ async function registerUser(page, prefix) {
   await page.fill('#username', username);
   await page.fill('#email', `${username}@test.com`);
   await page.fill('#password', 'TestPass123');
+  // 新流程：先点击发送验证码（dev 模式自动回填），再提交
+  await page.click('[data-testid="register-send-code"]');
+  await page.waitForSelector('[data-testid="register-email-code"]', { timeout: 5000 });
+  await page.waitForFunction(
+    () => {
+      const input = document.querySelector('[data-testid="register-email-code"]');
+      return input && input.value.length === 6;
+    },
+    { timeout: 5000 }
+  );
   await page.click('#register-form button[type="submit"]');
   await page.waitForURL('**/dashboard', { timeout: 10000 });
   return username;
@@ -54,6 +64,15 @@ test.describe('用户认证流程', () => {
     await page.fill('#username', 'pw_user_' + Date.now());
     await page.fill('#email', 'pw_' + Date.now() + '@test.com');
     await page.fill('#password', 'TestPass123');
+    await page.click('[data-testid="register-send-code"]');
+    await page.waitForSelector('[data-testid="register-email-code"]', { timeout: 5000 });
+    await page.waitForFunction(
+      () => {
+        const input = document.querySelector('[data-testid="register-email-code"]');
+        return input && input.value.length === 6;
+      },
+      { timeout: 5000 }
+    );
     await page.click('#register-form button[type="submit"]');
 
     await expect(toastWith(page, '注册成功')).toBeVisible({ timeout: 5000 });
@@ -244,11 +263,21 @@ test.describe('API端点测试', () => {
   });
 
   test('POST /api/register 成功', async ({ page }) => {
+    const email = 'api_' + Date.now() + '@test.com';
+    const username = 'api_user_' + Date.now();
+    const sendRes = await page.request.post('/api/register/send-code', {
+      data: { email }
+    });
+    expect(sendRes.status()).toBe(200);
+    const sendBody = await sendRes.json();
+    expect(sendBody.code).toBeTruthy();
+
     const response = await page.request.post('/api/register', {
       data: {
-        username: 'api_user_' + Date.now(),
-        email: 'api_' + Date.now() + '@test.com',
-        password: 'TestPass123'
+        username,
+        email,
+        password: 'TestPass123',
+        email_code: sendBody.code
       }
     });
     expect(response.status()).toBe(201);

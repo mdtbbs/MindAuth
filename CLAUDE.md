@@ -131,7 +131,8 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 ### User Authentication (`/api`)
 | Endpoint | Method | Description | Auth |
 |----------|--------|-------------|------|
-| `/register` | POST | User registration | None |
+| `/register/send-code` | POST | Send 6-digit email verification code for registration. Dev mode returns the code in response body. | None |
+| `/register` | POST | User registration. Requires valid `email_code` from `/register/send-code`. Creates account with `email_verified=1`. | None |
 | `/login` | POST | User login | None |
 | `/logout` | POST | User logout | Session |
 | `/me` | GET | Current user info | Session |
@@ -242,6 +243,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `sms_audit_logs` | SMS audit trail | user_id, action, phone_masked, success, code, ip_address |
 | `sms_config` | Aliyun SMS settings (single row id=1) | access_key_id, access_key_secret, sign_name, template_code |
 | `email_verification_tokens` | Email verification tokens (MySQL fallback beside Redis) | user_id, token_hash, expires_at |
+| `registration_email_codes` | Pending registration email codes (MySQL fallback for `register_email_code:{hash}`). Keyed by SHA-256(email); stores SHA-256(code) | email_hash (PK), email, code_hash, expires_at |
 
 Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`. Migration `003_auth_background_config.sql` seeds the `auth_background_url` key (`runtimeConfig.set` is UPDATE-only, so config keys must be seeded by migration).
 
@@ -254,6 +256,8 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `authcode:{code}` | 5min | OAuth authorization code |
 | `accesstoken:{token}` | 1h | OAuth access token |
 | `verify:{sha256(token)}` | 1h | Email verification token (hashed at rest) |
+| `register_email_code:{sha256(email)}` | 5min | Pending registration email code payload: `{ email, codeHash, failures }`. Code itself is stored as SHA-256, never plaintext |
+| `register_email_cooldown:{sha256(email)}` | 1min | Per-email send-code cooldown flag (prevents spamming same address) |
 | `reset:{sha256(token)}` | 1h | Password reset token (hashed at rest) |
 | `ratelimit:{ip}` | Variable | Rate limit counter |
 | `sms:code:{phone}` | 5min | SMS verification code (dysmsapi) |
@@ -283,7 +287,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - Signed double-submit cookie pattern (`csrf_token` = `random.HMAC(random)`, so only server-minted tokens validate)
 - `csrf_token` cookie (httpOnly=false)
 - Validates `X-CSRF-Token` header (timing-safe compare + signature check)
-- Exempt paths (15): OAuth `/token` `/refresh` `/introspect` `/revoke` `/verify`, `/login`, `/register`, `/admin/login`, `/challenge/random` `/challenge/verify`, `/email-verification/verify`, and the non-production `/admin/test/*` endpoints
+- Exempt paths (16): OAuth `/token` `/refresh` `/introspect` `/revoke` `/verify`, `/login`, `/register`, `/register/send-code`, `/admin/login`, `/challenge/random` `/challenge/verify`, `/email-verification/verify`, and the non-production `/admin/test/*` endpoints
 
 ### `rateLimit.js`
 - Redis fixed-window counter + memory fallback (memory Map pruned; counter always gets a TTL)
@@ -291,6 +295,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - Configurable limits:
   - Login: 5/5min (`ratelimit:login`)
   - Register: 5/hour (`ratelimit:register`)
+  - Register send-code: 3/10min per IP (`ratelimit:register_send_code`) + 1/min per email cooldown (`register_email_cooldown:{hash}`)
   - Admin login: 3/15min (`ratelimit:admin_login`)
   - Challenge, password-reset, and admin test-send endpoints each have their own prefix
 

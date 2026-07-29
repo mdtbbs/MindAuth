@@ -3,32 +3,60 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { pool, transaction, isDuplicateError } = require('../db');
 const { client } = require('../redis');
-const { generateToken, hashToken } = require('../utils/token');
+const { hashToken } = require('../utils/token');
 const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
-const { sendVerificationEmail } = require('../utils/email');
 const { maskPhone } = require('../utils/phone');
-const { logAudit } = require('../utils/auditLog');
-const notificationCenter = require('../modules/notifications/notificationCenter');
 const { logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
 const challengeManager = require('../modules/challenges/challengeManager');
+const notificationCenter = require('../modules/notifications/notificationCenter');
 const config = require('../config');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
-const TOKEN_EXPIRY = 60 * 60; // 1 hour in seconds (Redis TTL)
-const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const loginRateLimiter = createRateLimiter(config.rateLimit.login);
 const registerRateLimiter = createRateLimiter(config.rateLimit.register);
 
-// Register
-router.post('/register', registerRateLimiter, async (req, res) => {
-  const { username, email, password, challenge_id, challenge_answer } = req.body;
+const REGISTER_CODE_MAX_FAILURES = 5;
 
-  if (!username || !email || !password) {
-    return res.status(400).json({ success: false, message: '所有字段必填' });
+function emailKey(email) {
+  return hashToken(email.toLowerCase().trim());
+}
+
+async function removeCodeFromMysql(emailHash) {
+  try {
+    await pool.execute('DELETE FROM registration_email_codes WHERE email_hash = ?', [emailHash]);
+  } catch (err) {
+    console.warn('[Register] MySQL remove failed:', err.message);
+  }
+}
+
+// Register
+//
+// Accounts are only created after a successful email-code verification.
+// The code is issued by POST /api/register/send-code and stored as
+// SHA-256 in Redis (primary) + MySQL fallback. The account is inserted
+// with email_verified = 1, so no post-registration verification email
+// is sent.
+router.post('/register', registerRateLimiter, async (req, res) => {
+  const { username, email, password, email_code, challenge_id, challenge_answer } = req.body;
+
+  if (!username || !email || !password || !email_code) {
+    return res.status(400).json({
+      success: false,
+      code: 'MISSING_FIELD',
+      message: !email_code ? '请先获取邮箱验证码' : '所有字段必填',
+    });
+  }
+
+  if (typeof email_code !== 'string' || !/^\d{6}$/.test(email_code)) {
+    return res.status(400).json({
+      success: false,
+      code: 'EMAIL_CODE_INVALID',
+      message: '验证码为 6 位数字',
+    });
   }
 
   // Check if any challenge questions are enabled; if so, verification is mandatory
@@ -60,7 +88,6 @@ router.post('/register', registerRateLimiter, async (req, res) => {
       });
     }
   } else if (challengeRequired) {
-    // Should not reach here (already handled above), but guard defensively
     return res.status(400).json({ success: false, code: 'CHALLENGE_REQUIRED', message: '请先完成验证问答' });
   }
 
@@ -68,7 +95,8 @@ router.post('/register', registerRateLimiter, async (req, res) => {
     return res.status(400).json({ success: false, message: '用户名需2-50字符' });
   }
 
-  if (!isValidEmail(email)) {
+  const emailLower = String(email).toLowerCase().trim();
+  if (!isValidEmail(emailLower)) {
     return res.status(400).json({ success: false, message: '邮箱格式不正确' });
   }
 
@@ -76,31 +104,89 @@ router.post('/register', registerRateLimiter, async (req, res) => {
     return res.status(400).json({ success: false, message: getPasswordValidationError(password) || '密码不符合要求' });
   }
 
+  // ── Email code verification ───────────────────────────────────
+  // Look up the stored code hash by email. Check Redis first, fall back
+  // to MySQL in case of a Redis restart. Compare hashes (timing-safe via
+  // plain equality — hash length is fixed, and the code itself is short
+  // so any leak is bounded to 6 digits with a 5-minute TTL).
+  const eHash = emailKey(emailLower);
+  const presentedHash = hashToken(email_code);
+  let record = null;
+
+  try {
+    const redisData = await client.get(`register_email_code:${eHash}`);
+    if (redisData) {
+      record = JSON.parse(redisData);
+    } else {
+      const [rows] = await pool.execute(
+        'SELECT email, code_hash FROM registration_email_codes WHERE email_hash = ? AND expires_at > NOW() LIMIT 1',
+        [eHash]
+      );
+      if (rows[0]) {
+        record = { email: rows[0].email, codeHash: rows[0].code_hash, failures: 0 };
+      }
+    }
+  } catch (err) {
+    console.error('[Register] code lookup error:', err);
+    return res.status(500).json({ success: false, message: '验证码校验失败' });
+  }
+
+  if (!record) {
+    return res.status(400).json({
+      success: false,
+      code: 'EMAIL_CODE_INVALID',
+      message: '验证码无效或已过期，请重新获取',
+    });
+  }
+
+  if (record.codeHash !== presentedHash) {
+    // Track failures so brute-forcing a 6-digit code is bounded.
+    const failures = (record.failures || 0) + 1;
+    if (failures >= REGISTER_CODE_MAX_FAILURES) {
+      await client.del(`register_email_code:${eHash}`).catch(() => {});
+      await removeCodeFromMysql(eHash);
+      return res.status(400).json({
+        success: false,
+        code: 'EMAIL_CODE_MAX_FAILURES',
+        message: '验证码错误次数过多，请重新获取',
+      });
+    }
+    // Persist the incremented failure count.
+    try {
+      const ttl = await client.ttl(`register_email_code:${eHash}`);
+      if (ttl > 0) {
+        await client.setEx(
+          `register_email_code:${eHash}`,
+          ttl,
+          JSON.stringify({ ...record, failures })
+        );
+      }
+    } catch {}
+    return res.status(400).json({
+      success: false,
+      code: 'EMAIL_CODE_MISMATCH',
+      message: '验证码不正确',
+    });
+  }
+
+  // ── Code validated. Consume it and create the account. ────────
+  // Delete the code BEFORE inserting the user so a concurrent retry
+  // cannot reuse the same code.
+  await client.del(`register_email_code:${eHash}`).catch(() => {});
+  await removeCodeFromMysql(eHash);
+
   try {
     const passwordHash = await bcrypt.hash(password, 12);
-    const verifyToken = generateToken();
 
-    // Use transaction for atomicity
     await transaction(async (conn) => {
       const [userResult] = await conn.execute(
-        'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-        [username, email, passwordHash]
+        'INSERT INTO users (username, email, password_hash, email_verified) VALUES (?, ?, ?, 1)',
+        [username, emailLower, passwordHash]
       );
-      const userId = userResult.insertId;
-
-      // Store verification token hash in Redis (raw token goes in the link)
-      await client.setEx(`verify:${hashToken(verifyToken)}`, TOKEN_EXPIRY, JSON.stringify({
-        user_id: userId,
-        email: email
-      }));
+      return userResult.insertId;
     });
 
-    const verifyLink = `${BASE_URL}/#/verify-email?token=${verifyToken}`;
-    sendVerificationEmail(email, verifyLink).catch(err =>
-      console.error('Failed to send verification email:', err)
-    );
-
-    res.status(201).json({ success: true, message: '注册成功，验证邮件已发送到您的邮箱' });
+    res.status(201).json({ success: true, message: '注册成功' });
   } catch (err) {
     if (isDuplicateError(err)) {
       // Generic message — do not reveal WHICH field is taken, to avoid

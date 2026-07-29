@@ -51,6 +51,16 @@ async function registerUser(page, prefix) {
   await page.fill('#username', username);
   await page.fill('#email', `${username}@test.com`);
   await page.fill('#password', 'TestPass123');
+  // 新流程：先点击发送验证码（dev 模式自动回填）
+  await page.click('[data-testid="register-send-code"]');
+  await page.waitForSelector('[data-testid="register-email-code"]', { timeout: 5000 });
+  await page.waitForFunction(
+    () => {
+      const input = document.querySelector('[data-testid="register-email-code"]');
+      return input && input.value.length === 6;
+    },
+    { timeout: 5000 }
+  );
   await page.click('#register-form button[type="submit"]');
   await page.waitForURL('**/dashboard', { timeout: 10000 });
   return username;

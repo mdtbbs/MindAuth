@@ -13,6 +13,25 @@ test.beforeAll(async ({ request }) => {
   }
 });
 
+/** 通过注册页 UI 注册新用户（新 email-code 流程） */
+async function registerViaUI(page, testUser) {
+  await page.goto('/#register');
+  await page.waitForSelector('#register-form', { timeout: 5000 });
+  await page.fill('#username', testUser);
+  await page.fill('#email', `${testUser}@test.com`);
+  await page.fill('#password', 'TestPass123');
+  await page.click('[data-testid="register-send-code"]');
+  await page.waitForSelector('[data-testid="register-email-code"]', { timeout: 5000 });
+  await page.waitForFunction(
+    () => {
+      const input = document.querySelector('[data-testid="register-email-code"]');
+      return input && input.value.length === 6;
+    },
+    { timeout: 5000 }
+  );
+  await page.click('#register-form button[type="submit"]');
+}
+
 test.describe('已登录用户自动跳转', () => {
   test.beforeEach(async ({ context }) => {
     // 清除所有 cookies，确保测试开始时用户未登录
@@ -22,12 +41,7 @@ test.describe('已登录用户自动跳转', () => {
   test('已登录用户访问登录页应跳转到Dashboard', async ({ page }) => {
     // 注册（注册成功后自动登录并进入 dashboard）
     const testUser = `redirect_test_${Date.now()}`;
-    await page.goto('/#register');
-    await page.waitForSelector('#register-form', { timeout: 5000 });
-    await page.fill('#username', testUser);
-    await page.fill('#email', `${testUser}@test.com`);
-    await page.fill('#password', 'TestPass123');
-    await page.click('#register-form button[type="submit"]');
+    await registerViaUI(page, testUser);
 
     await expect(page.locator('.toast', { hasText: '注册成功' }).first()).toBeVisible({ timeout: 5000 });
     await page.waitForURL('**/dashboard', { timeout: 5000 });
@@ -41,12 +55,7 @@ test.describe('已登录用户自动跳转', () => {
 
   test('已登录用户访问首页应跳转到Dashboard', async ({ page }) => {
     const testUser = `redirect_home_${Date.now()}`;
-    await page.goto('/#register');
-    await page.waitForSelector('#register-form', { timeout: 5000 });
-    await page.fill('#username', testUser);
-    await page.fill('#email', `${testUser}@test.com`);
-    await page.fill('#password', 'TestPass123');
-    await page.click('#register-form button[type="submit"]');
+    await registerViaUI(page, testUser);
     await page.waitForURL('**/dashboard', { timeout: 8000 });
 
     // 访问首页 - 已登录应跳转到 dashboard
@@ -58,12 +67,7 @@ test.describe('已登录用户自动跳转', () => {
 
   test('已登录用户访问注册页应跳转到Dashboard', async ({ page }) => {
     const testUser = `redirect_reg_${Date.now()}`;
-    await page.goto('/#register');
-    await page.waitForSelector('#register-form', { timeout: 5000 });
-    await page.fill('#username', testUser);
-    await page.fill('#email', `${testUser}@test.com`);
-    await page.fill('#password', 'TestPass123');
-    await page.click('#register-form button[type="submit"]');
+    await registerViaUI(page, testUser);
     await page.waitForURL('**/dashboard', { timeout: 8000 });
 
     // 访问注册页 - 已登录应跳转到 dashboard

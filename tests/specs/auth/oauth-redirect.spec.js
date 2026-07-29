@@ -28,8 +28,16 @@ test.describe('OAuth 登录后跳转回原页面', () => {
   test('模拟论坛完整登录流程：登录后应跳转到回调地址（带 code）', async ({ page }) => {
     // Step 1: 通过 API 注册用户（避免注册页自动登录干扰未登录前提）
     const testUser = `oauth_e2e_${Date.now()}`;
+    const testEmail = `${testUser}@test.com`;
+
+    const sendCode = await page.request.post('/api/register/send-code', {
+      data: { email: testEmail }
+    });
+    expect(sendCode.status()).toBe(200);
+    const sendBody = await sendCode.json();
+
     const reg = await page.request.post('/api/register', {
-      data: { username: testUser, email: `${testUser}@test.com`, password: 'TestPass123' }
+      data: { username: testUser, email: testEmail, password: 'TestPass123', email_code: sendBody.code }
     });
     expect(reg.status()).toBe(201);
 
@@ -88,8 +96,16 @@ test.describe('OAuth 登录后跳转回原页面', () => {
   // MindAuth LoginPage/RegisterPage 已兼容两种名字，避免登录完停留在 MindAuth。
   test('登录页使用 `redirect` 参数名也能正确进入 OAuth 流程', async ({ page }) => {
     const testUser = `oauth_redir_${Date.now()}`;
+    const testEmail = `${testUser}@test.com`;
+
+    const sendCode = await page.request.post('/api/register/send-code', {
+      data: { email: testEmail }
+    });
+    expect(sendCode.status()).toBe(200);
+    const sendBody = await sendCode.json();
+
     const reg = await page.request.post('/api/register', {
-      data: { username: testUser, email: `${testUser}@test.com`, password: 'TestPass123' }
+      data: { username: testUser, email: testEmail, password: 'TestPass123', email_code: sendBody.code }
     });
     expect(reg.status()).toBe(201);
 

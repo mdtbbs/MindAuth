@@ -156,4 +156,26 @@ async function sendVerificationEmail(email, verifyLink) {
   return sendEmail(email, subject, html);
 }
 
-module.exports = { sendPasswordResetEmail, sendVerificationEmail, sendEmail, getEmailConfig };
+/**
+ * Send a 6-digit email verification code for registration.
+ * Used by POST /api/register/send-code before account creation.
+ * @param {string} email - recipient email address
+ * @param {string} code - 6-digit numeric code (plaintext, valid 5 min)
+ * @returns {Promise<object>} send result
+ */
+async function sendRegistrationCodeEmail(email, code) {
+  const subject = '注册邮箱验证码';
+  const html = `
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #3b82f6;">邮箱验证码</h2>
+      <p>您正在注册 MindAuth 账户，请使用以下验证码完成注册：</p>
+      <p style="margin: 20px 0; font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; color: #3b82f6;">
+        ${code}
+      </p>
+      <p style="color: #666; font-size: 12px;">验证码将在 5 分钟后失效。如果您未请求注册，请忽略此邮件。</p>
+    </div>
+  `;
+  return sendEmail(email, subject, html);
+}
+
+module.exports = { sendPasswordResetEmail, sendVerificationEmail, sendRegistrationCodeEmail, sendEmail, getEmailConfig };

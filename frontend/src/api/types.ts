@@ -42,11 +42,23 @@ export interface RegisterRequest {
   username: string;
   email: string;
   password: string;
+  email_code: string;
 }
 
 export interface RegisterResponse {
   success: boolean;
   message: string;
+}
+
+export interface SendRegistrationCodeRequest {
+  email: string;
+}
+
+export interface SendRegistrationCodeResponse {
+  success: boolean;
+  message: string;
+  /** 6-digit code, only present in dev/test mode */
+  code?: string;
 }
 
 // ─── OAuth / Clients ─────────────────────────────────────────────────────────

@@ -27,8 +27,15 @@ async function registerAndLoginUser(request, prefix = 'e2e_user') {
   const password = 'TestPass123';
   const email = `${username}@test.com`;
 
+  const sendRes = await request.post('/api/register/send-code', {
+    data: { email },
+  });
+  expect(sendRes.status()).toBe(200);
+  const sendBody = await sendRes.json();
+  expect(sendBody.code).toBeTruthy();
+
   const registerRes = await request.post('/api/register', {
-    data: { username, email, password },
+    data: { username, email, password, email_code: sendBody.code },
   });
   expect(registerRes.status()).toBe(201);
 

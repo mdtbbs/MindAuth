@@ -78,6 +78,7 @@ function validateCsrf(req, res, next) {
     '/api/challenge/verify', // Challenge answer verification
     '/api/email-verification/verify', // Email verification uses a one-time token
     '/api/register',     // User registration (no session needed)
+    '/api/register/send-code', // Registration email code (pre-auth, rate-limited)
     '/api/login',        // User login (creates session, rate-limited)
     '/api/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
     '/api/admin/test/clear-rate-limits', // Test endpoint (non-production only)

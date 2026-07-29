@@ -85,8 +85,16 @@ test.describe('GET /logout (SLO endpoint)', () => {
   test('active session is revoked after GET /logout', async ({ page, request }) => {
     // 1. Create a fresh user and log in via the API to obtain a session cookie.
     const testUser = `slo_e2e_${Date.now()}`;
+    const testEmail = `${testUser}@test.com`;
+
+    const sendCode = await request.post('/api/register/send-code', {
+      data: { email: testEmail }
+    });
+    expect(sendCode.status()).toBe(200);
+    const sendBody = await sendCode.json();
+
     const reg = await request.post('/api/register', {
-      data: { username: testUser, email: `${testUser}@test.com`, password: 'TestPass123' }
+      data: { username: testUser, email: testEmail, password: 'TestPass123', email_code: sendBody.code }
     });
     expect(reg.status()).toBe(201);
 

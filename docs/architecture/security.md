@@ -56,7 +56,7 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 |------|----------|
 | `/api/token` `/api/refresh` `/api/introspect` `/api/revoke` | 服务端到服务端，凭 `client_secret` 认证，不依赖浏览器 Cookie |
 | `/api/verify` | 会话校验接口，凭请求体 token |
-| `/api/login` `/api/register` `/api/admin/login` | 尚无会话可劫持；有独立限流 |
+| `/api/login` `/api/register` `/api/register/send-code` `/api/admin/login` | 尚无会话可劫持；有独立限流 |
 | `/api/challenge/random` `/api/challenge/verify` | 注册前置问答，无会话 |
 | `/api/email-verification/verify` | 凭一次性邮件 token |
 | `/api/admin/test/*`（4 项） | 测试端点，非生产环境使用且受 ADMIN_SECRET 保护 |
@@ -69,6 +69,8 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 |------|------|-----------|
 | 登录 | 5 / 5min | `ratelimit:login` |
 | 注册 | 5 / 1h | `ratelimit:register` |
+| 注册发送验证码 | 3 / 10min（IP）+ 1/min（email 冷却） | `ratelimit:register_send_code` + `register_email_cooldown:{hash}` |
+| 注册验证码校验 | 5 / code（email+IP），超限 DEL | 内嵌于 `routes/auth.js` 的 `failures` 计数器 |
 | 管理员登录 | 3 / 15min | `ratelimit:admin_login` |
 | 管理员创建 | 3 / 1h | `ratelimit:admin_create` |
 | OAuth `/authorize` `/token` `/refresh` `/introspect` `/revoke` | 各 60 / min | `ratelimit:oauth_*` |

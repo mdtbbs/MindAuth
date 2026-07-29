@@ -34,8 +34,16 @@ async function registerUser(request) {
   const email = `${username}@test.com`;
   const password = 'TestPass123';
 
+  // Send registration email code (dev mode returns the code).
+  const sendRes = await request.post('/api/register/send-code', {
+    data: { email }
+  });
+  expect(sendRes.status()).toBe(200);
+  const sendBody = await sendRes.json();
+  expect(sendBody.code).toBeTruthy();
+
   const res = await request.post('/api/register', {
-    data: { username, email, password }
+    data: { username, email, password, email_code: sendBody.code }
   });
   expect(res.status()).toBe(201);
   return { username, email, password };

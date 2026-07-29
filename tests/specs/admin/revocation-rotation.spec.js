@@ -31,9 +31,16 @@ async function getCsrf(request) {
 async function registerAndLoginUser(request, prefix) {
   const username = `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
   const password = 'TestPass123';
+  const email = `${username}@test.com`;
+
+  const sendRes = await request.post('/api/register/send-code', {
+    data: { email },
+  });
+  expect(sendRes.status()).toBe(200);
+  const sendBody = await sendRes.json();
 
   const registerRes = await request.post('/api/register', {
-    data: { username, email: `${username}@test.com`, password },
+    data: { username, email, password, email_code: sendBody.code },
   });
   expect(registerRes.status()).toBe(201);
 

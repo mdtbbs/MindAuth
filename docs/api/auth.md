@@ -1,14 +1,45 @@
 # 认证域 API
 
-本文档覆盖 MindAuth 认证域的全部端点，来源路由文件：`src/routes/auth.js`（挂载于 `/api`）、`src/routes/challenge.js`（挂载于 `/api/challenge`）、`src/routes/password.js`（挂载于 `/api/password`）、`src/routes/email-verification.js`（挂载于 `/api/email-verification`）。通用约定（错误响应格式、CSRF、Cookie 等）见 [README.md](README.md)。
+本文档覆盖 MindAuth 认证域的全部端点，来源路由文件：`src/routes/auth.js`（挂载于 `/api`）、`src/routes/registerEmailCode.js`（挂载于 `/api/register`）、`src/routes/challenge.js`（挂载于 `/api/challenge`）、`src/routes/password.js`（挂载于 `/api/password`）、`src/routes/email-verification.js`（挂载于 `/api/email-verification`）。通用约定（错误响应格式、CSRF、Cookie 等）见 [README.md](README.md)。
 
-> **维护提示**：修改 src/routes/auth.js、challenge.js、password.js、email-verification.js 时需同步更新本文档。
+> **维护提示**：修改 src/routes/auth.js、registerEmailCode.js、challenge.js、password.js、email-verification.js 时需同步更新本文档。
 
 ## 用户认证（src/routes/auth.js → /api）
 
+### `POST /api/register/send-code`
+
+注册前发送 6 位数字邮箱验证码（挂载于 `src/routes/registerEmailCode.js`）。验证码在 Redis 与 MySQL fallback 表中以 **SHA-256 哈希** 存储，5 分钟 TTL。账号创建发生在后续 `POST /api/register` 中，本端点不创建用户。
+
+- 认证/限流：无需认证；按 IP 3/10 分钟（`ratelimit:register_send_code`）；按 email 1 分钟冷却（`register_email_cooldown:{hash}`）；CSRF 豁免
+- 存储：Redis `register_email_code:{sha256(lower(email))}`（payload `{ email, codeHash, failures }`）；MySQL `registration_email_codes` 表（fallback）
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 合法邮箱格式（大小写不敏感，会自动 trim/lowercase） |
+
+成功响应（`200`）：
+
+```json
+{ "success": true, "message": "验证码已发送到您的邮箱" }
+```
+
+> 仅在 `NODE_ENV !== 'production'` 时，响应体额外包含 `code` 字段（明文 6 位码），便于 E2E 测试使用；生产环境不会返回。
+
+| 状态码 | code | 触发条件 |
+|--------|------|----------|
+| 400 | `INVALID_EMAIL` | 邮箱格式不合规 |
+| 409 | `EMAIL_ALREADY_REGISTERED` | 该邮箱已在 `users` 表中注册；本端点**故意**暴露此信息以便用户区分"已注册"与"待注册"，代价是邮箱枚举风险 |
+| 429 | `EMAIL_COOLDOWN` | 同一邮箱 1 分钟内重复请求 |
+| 429 | `ratelimit:register_send_code` | 同一 IP 10 分钟内超过 3 次 |
+| 503 | `SMTP_UNAVAILABLE` | 邮件服务未配置（`email_config` 无 host/密码） |
+| 503 | `SMTP_SEND_FAILED` | SMTP 发信失败（已清理本次生成的 code 与 cooldown，允许立即重试） |
+| 500 | `发送验证码失败` | 服务器错误 |
+
+注记：发信失败会回滚 Redis/MySQL 中已写入的 code 与 cooldown 键，避免下一次重试被 1 分钟冷却阻塞。
+
 ### `POST /api/register`
 
-注册新用户，成功后异步发送验证邮件（验证令牌 SHA-256 哈希存 Redis，TTL 1 小时）。
+注册新用户。**必须在提交前通过 `POST /api/register/send-code` 获取验证码**；本端点对 code 进行原子校验，通过后创建账号（`email_verified = 1`），不再发送 post-registration 验证链接邮件。
 
 - 认证/限流：无需认证；限流 5/小时（`ratelimit:register`）；CSRF 豁免
 
@@ -17,25 +48,32 @@
 | `username` | string | 是 | 2–50 字符，仅允许字母、数字、下划线、连字符及中日文字符 |
 | `email` | string | 是 | 合法邮箱格式 |
 | `password` | string | 是 | 至少 8 字符，须含大写字母、小写字母和数字 |
+| `email_code` | string | 是 | 6 位数字验证码，由 `/api/register/send-code` 发送到邮箱 |
 | `challenge_id` | number | 条件必填 | 题库中存在启用的问答题时必填（先经 `GET /api/challenge/random` 获取） |
 | `challenge_answer` | string | 条件必填 | 问答题答案（比对时 trim + 小写化） |
 
 成功响应（`201`）：
 
 ```json
-{ "success": true, "message": "注册成功，验证邮件已发送到您的邮箱" }
+{ "success": true, "message": "注册成功" }
 ```
 
 | 状态码 | code / 消息 | 触发条件 |
 |--------|-------------|----------|
-| 400 | `所有字段必填` | username/email/password 缺失 |
+| 400 | `MISSING_FIELD` | username/email/password/email_code 缺失（缺 `email_code` 时提示"请先获取邮箱验证码"） |
+| 400 | `EMAIL_CODE_INVALID` | 验证码非 6 位数字、或已过期、或已被消费 |
+| 400 | `EMAIL_CODE_MISMATCH` | 验证码不正确（失败计数 +1） |
+| 400 | `EMAIL_CODE_MAX_FAILURES` | 同一 email+IP 连续错码 5 次，code 被 DEL |
 | 400 | `CHALLENGE_REQUIRED` | 启用了问答题但未携带 `challenge_id` |
-| 400 | `CHALLENGE_EXPIRED` / `CHALLENGE_MISMATCH` / `CHALLENGE_NOT_FOUND` / `CHALLENGE_FAILED` | 问答验证失败（会话过期 / 题目与会话不符 / 题目不存在或被禁用 / 答案错误） |
-| 400 | `用户名需2-50字符` 等 | 用户名 / 邮箱 / 密码格式不合规（密码错误消息来自 `getPasswordValidationError`） |
+| 400 | `CHALLENGE_EXPIRED` / `CHALLENGE_MISMATCH` / `CHALLENGE_NOT_FOUND` / `CHALLENGE_FAILED` | 问答验证失败 |
+| 400 | `用户名需2-50字符` 等 | 用户名 / 邮箱 / 密码格式不合规 |
 | 409 | `用户名或邮箱已被使用` | 唯一键冲突；刻意不区分是哪个字段，防枚举 |
 | 500 | `注册失败` | 服务器错误 |
 
-注记：问答会话绑定 `csrf_token` cookie（无 cookie 时按 `anonymous`）；注册用的 `verifyForRegistration` 答错**不发新题**、直接失败，答对即消费会话。发信失败不影响注册成功（仅记录日志）。
+注记：
+- 问答会话绑定 `csrf_token` cookie（无 cookie 时按 `anonymous`）；注册用的 `verifyForRegistration` 答错**不发新题**、直接失败，答对即消费会话。
+- **新注册账号直接为 `email_verified=1`**，登录后 `GET /api/me` 返回 `email_verified: true`，无需 post-registration 邮箱验证。
+- 老用户（本次变更前注册）的 `email_verified` 不变，仍可通过 `POST /api/email-verification/send` + `/verify` 完成邮箱验证。
 
 ### `POST /api/login`
 

@@ -31,6 +31,7 @@ const smsRoutes = require('./routes/sms');
 const challengeRoutes = require('./routes/challenge');
 const sessionsRoutes = require('./routes/sessions');
 const notificationsRoutes = require('./routes/notifications');
+const registerEmailCodeRoutes = require('./routes/registerEmailCode');
 
 // Middleware
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
@@ -173,6 +174,9 @@ function createApp(deps = {}) {
   app.use(validateCsrf);   // Validate CSRF on POST/PUT/DELETE
 
   // Mount routes
+  // Registration email code must mount BEFORE authRoutes so /api/register/send-code
+  // is handled here; /api/register then falls through to authRoutes.
+  app.use('/api/register', registerEmailCodeRoutes);
   app.use('/api', authRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api', oauthRoutes);

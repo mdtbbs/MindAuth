@@ -32,6 +32,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | `user_sessions` | 活跃会话追踪（Web 登录态） | `session_token` 存 SHA-256 哈希（UNIQUE），`ip_address`、`user_agent`、`device_info`、`expires_at`（绝对过期，002 引入）、`last_active_at` |
 | `login_logs` | 登录历史 | `ip`、`device`、`login_type`（`web`/`oauth`），供用户端"登录记录"与管理端统计使用 |
 | `email_verification_tokens` | 邮箱验证令牌的 MySQL 兜底（Redis 重启丢数据时回查） | `token`（主键，存哈希）、`email`（待验证/待变更邮箱）、`expires_at` |
+| `registration_email_codes` | 注册邮箱验证码的 MySQL 兜底（`register_email_code:{hash}` Redis 键的持久副本） | `email_hash`（主键，`SHA-256(lower(email))`）、`email`、`code_hash`（`SHA-256(code)`，永远不存明文 6 位码）、`expires_at` |
 
 ### OAuth
 
@@ -92,6 +93,8 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | `accesstoken:{sha256(token)}` | 1h | OAuth 访问令牌（哈希存储） | `modules/oauth/tokenStore.js` |
 | `accesstokens_by_userclient:{userId}:{clientId}` | 无 | 用户+客户端→访问令牌哈希索引 SET | `modules/oauth/tokenStore.js` |
 | `verify:{sha256(token)}` | 1h | 邮箱验证令牌（注册/重发流程哈希存储；MySQL 兜底表同步写入） | `routes/auth.js`、`routes/email-verification.js`、`routes/account.js` |
+| `register_email_code:{sha256(email)}` | 5min | 注册邮箱验证码（payload `{ email, codeHash, failures }`，code 永远不存明文） | `routes/registerEmailCode.js`、`routes/auth.js` |
+| `register_email_cooldown:{sha256(email)}` | 1min | 同邮箱发送冷却标志，防 SMTP 轰炸 | `routes/registerEmailCode.js` |
 | `reset:{sha256(token)}` | 1h | 密码重置令牌（哈希存储） | `routes/password.js` |
 | `login_fail:{username}:{ip}` | 5min | 登录失败计数（按用户名+IP 键控；满 5 次触发 15min→1h→2h 递增锁定后删除） | `routes/auth.js` |
 | `ratelimit:{name}:{ip}` | 随窗口 | 固定窗口限流计数；每个限流器必须有唯一 `keyPrefix`（如 `ratelimit:login` 5/5min、`ratelimit:register` 5/h、`ratelimit:admin_login` 3/15min、`ratelimit:oauth_token` 60/min 等，共约 20 个前缀） | `middleware/rateLimit.js`（前缀定义在 `config/index.js` 与各路由） |

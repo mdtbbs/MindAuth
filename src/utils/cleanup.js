@@ -54,13 +54,19 @@ async function cleanupExpiredData() {
       [now]
     );
 
+    // Clean expired registration email codes (Redis fallback table)
+    const [regCodeResult] = await pool.execute(
+      'DELETE FROM registration_email_codes WHERE expires_at < ?',
+      [now]
+    );
+
     // Clean expired user audit logs (same retention as admin audit logs)
     const [userAuditResult] = await pool.execute(
       'DELETE FROM user_audit_logs WHERE created_at < ?',
       [auditCutoff]
     );
 
-    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${userAuditResult.affectedRows} user_audit_logs from MySQL`);
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${regCodeResult.affectedRows} registration_codes, ${userAuditResult.affectedRows} user_audit_logs from MySQL`);
 
     // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
     // are stored in Redis and cleaned automatically via TTL

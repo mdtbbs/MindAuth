@@ -24,6 +24,19 @@ async function clearRateLimits(request) {
   } catch { /* ignore */ }
 }
 
+/** Helper: register a user with the new email-code flow */
+async function registerUser(request, username, email) {
+  const sendRes = await request.post('/api/register/send-code', {
+    data: { email }
+  });
+  expect(sendRes.status()).toBe(200);
+  const sendBody = await sendRes.json();
+  const regRes = await request.post('/api/register', {
+    data: { username, email, password: 'TestPass123', email_code: sendBody.code }
+  });
+  expect(regRes.status()).toBe(201);
+}
+
 /** Helper: login as admin and return cookie header string */
 async function getAdminCookieHeader(request) {
   await clearRateLimits(request);
@@ -55,13 +68,13 @@ test.describe('CSRF protection — state-changing routes require token', () => {
   test('POST to protected route without CSRF token returns 403', async ({ request }) => {
     // Register a user first (we need an authenticated context)
     const ts = Date.now();
-    await request.post('/api/register', {
-      data: { username: `csrf_test_${ts}`, email: `csrf_${ts}@test.com`, password: 'TestPass123' }
-    });
+    const username = `csrf_test_${ts}`;
+    const email = `csrf_${ts}@test.com`;
+    await registerUser(request, username, email);
 
     // Login (sets session cookie)
     await request.post('/api/login', {
-      data: { username: `csrf_test_${ts}`, password: 'TestPass123' }
+      data: { username, password: 'TestPass123' }
     });
 
     // POST to a CSRF-protected route without X-CSRF-Token header
@@ -76,10 +89,9 @@ test.describe('CSRF protection — state-changing routes require token', () => {
   test('POST to protected route WITH valid CSRF token succeeds', async ({ request }) => {
     const ts = Date.now();
     const username = `csrf_ok_${ts}`;
+    const email = `${username}@test.com`;
 
-    await request.post('/api/register', {
-      data: { username, email: `${username}@test.com`, password: 'TestPass123' }
-    });
+    await registerUser(request, username, email);
 
     await request.post('/api/login', {
       data: { username, password: 'TestPass123' }
@@ -101,10 +113,9 @@ test.describe('CSRF protection — state-changing routes require token', () => {
   test('POST with wrong CSRF token returns 403', async ({ request }) => {
     const ts = Date.now();
     const username = `csrf_bad_${ts}`;
+    const email = `${username}@test.com`;
 
-    await request.post('/api/register', {
-      data: { username, email: `${username}@test.com`, password: 'TestPass123' }
-    });
+    await registerUser(request, username, email);
 
     await request.post('/api/login', {
       data: { username, password: 'TestPass123' }
@@ -180,8 +191,22 @@ test.describe('CSRF exempt paths — no CSRF token required', () => {
 
   test('POST /api/register does not require CSRF', async ({ request }) => {
     const ts = Date.now();
+    const email = `csrf_exempt_${ts}@test.com`;
+    // Send code (also CSRF-exempt)
+    const sendRes = await request.post('/api/register/send-code', {
+      data: { email }
+    });
+    expect(sendRes.status()).not.toBe(403);
+    expect(sendRes.status()).toBe(200);
+    const sendBody = await sendRes.json();
+    // Register (also CSRF-exempt)
     const res = await request.post('/api/register', {
-      data: { username: `csrf_exempt_${ts}`, email: `csrf_exempt_${ts}@test.com`, password: 'TestPass123' }
+      data: {
+        username: `csrf_exempt_${ts}`,
+        email,
+        password: 'TestPass123',
+        email_code: sendBody.code,
+      }
     });
     expect(res.status()).not.toBe(403);
     expect(res.status()).toBe(201);
