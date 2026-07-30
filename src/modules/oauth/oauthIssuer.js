@@ -737,6 +737,242 @@ async function verify(sessionToken) {
   };
 }
 
+// ─── Device Authorization (RFC 8628) ──────────────────────────
+
+const DEVICE_CODE_TTL_S = parseInt(process.env.MINDAUTH_DEVICE_CODE_TTL_SECONDS) || 900; // 15 minutes
+const DEVICE_POLL_INTERVAL_S = parseInt(process.env.MINDAUTH_DEVICE_POLL_INTERVAL_SECONDS) || 5;
+const VERIFICATION_URI = process.env.MINDAUTH_VERIFICATION_URI || process.env.BASE_URL || 'http://localhost:4001';
+
+// User code character set: excludes 0, O, 1, I to avoid confusion
+const USER_CODE_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const USER_CODE_MAX_RETRIES = 10;
+
+/**
+ * Generate a user code in the format LL-XXXX-XXXX.
+ *
+ * @returns {string}
+ */
+function generateUserCode() {
+  const bytes = crypto.randomBytes(8);
+  let code = 'LL-';
+  for (let i = 0; i < 8; i++) {
+    if (i === 4) code += '-';
+    code += USER_CODE_CHARSET[bytes[i] % USER_CODE_CHARSET.length];
+  }
+  return code;
+}
+
+/**
+ * Issue a device authorization code (RFC 8628 §3.1).
+ *
+ * @param {object} params
+ * @param {string} params.clientId
+ * @param {string} [params.scope]
+ * @returns {Promise<{ deviceCode: string, userCode: string, verificationUri: string, verificationUriComplete: string, expiresIn: number, interval: number }>}
+ */
+async function issueDeviceCode({ clientId, scope }) {
+  // 1. Validate client
+  const clientData = await lookupClient(clientId);
+
+  // 2. Validate scope
+  if (scope) {
+    const requestedScopes = scope.split(' ').filter(s => s);
+    const invalidScopes = requestedScopes.filter(s => !VALID_SCOPES.includes(s));
+    if (invalidScopes.length > 0) {
+      throw new OAuthError(400, 'invalid_scope', '无效的 scope: ' + invalidScopes.join(', '));
+    }
+  }
+  const effectiveScope = scope || 'openid profile email';
+
+  // 3. Generate device code (32 bytes hex)
+  const deviceCode = crypto.randomBytes(32).toString('hex');
+
+  // 4. Generate user code with collision retry
+  let userCode;
+  for (let i = 0; i < USER_CODE_MAX_RETRIES; i++) {
+    userCode = generateUserCode();
+    const existing = await tokenStore.getDeviceCodeByUserCode(userCode);
+    if (!existing) break;
+    if (i === USER_CODE_MAX_RETRIES - 1) {
+      throw new OAuthError(500, 'server_error', '无法生成用户码，请重试');
+    }
+  }
+
+  // 5. Store device code in Redis
+  const deviceData = {
+    client_id: clientId,
+    scope: effectiveScope,
+    user_id: null,
+    approved: false,
+    created_at: Date.now(),
+  };
+  await tokenStore.storeDeviceCode(deviceCode, deviceData, DEVICE_CODE_TTL_S);
+
+  // 6. Store user code mapping
+  await tokenStore.storeUserCode(userCode, deviceCode, DEVICE_CODE_TTL_S);
+
+  // 7. Build response
+  const verificationUri = VERIFICATION_URI;
+  const verificationUriComplete = `${verificationUri}/oauth/device?user_code=${userCode}`;
+
+  return {
+    deviceCode,
+    userCode,
+    verificationUri,
+    verificationUriComplete,
+    expiresIn: DEVICE_CODE_TTL_S,
+    interval: DEVICE_POLL_INTERVAL_S,
+  };
+}
+
+/**
+ * Look up a device code by user code (for the verify page).
+ *
+ * @param {object} params
+ * @param {string} params.userCode
+ * @returns {Promise<object|null>} Device code data or null.
+ */
+async function getDeviceCodeByUserCode({ userCode }) {
+  const deviceCode = await tokenStore.getDeviceCodeByUserCode(userCode);
+  if (!deviceCode) return null;
+
+  const deviceData = await tokenStore.getDeviceCode(deviceCode);
+  if (!deviceData) return null;
+
+  return { deviceCode, ...deviceData };
+}
+
+/**
+ * Approve a device authorization request.
+ *
+ * @param {object} params
+ * @param {string} params.userCode
+ * @param {number} params.userId
+ * @returns {Promise<boolean>}
+ */
+async function approveDeviceCode({ userCode, userId }) {
+  const deviceCode = await tokenStore.getDeviceCodeByUserCode(userCode);
+  if (!deviceCode) return false;
+
+  const deviceData = await tokenStore.getDeviceCode(deviceCode);
+  if (!deviceData) return false;
+
+  // Calculate remaining TTL
+  const elapsed = Math.floor((Date.now() - deviceData.created_at) / 1000);
+  const remainingTtl = Math.max(0, DEVICE_CODE_TTL_S - elapsed);
+
+  // Update device code with user_id and approved flag
+  deviceData.user_id = userId;
+  deviceData.approved = true;
+  await tokenStore.updateDeviceCode(deviceCode, deviceData, remainingTtl);
+
+  return true;
+}
+
+/**
+ * Deny a device authorization request.
+ *
+ * @param {object} params
+ * @param {string} params.userCode
+ * @returns {Promise<boolean>}
+ */
+async function denyDeviceCode({ userCode }) {
+  const deviceCode = await tokenStore.getDeviceCodeByUserCode(userCode);
+  if (!deviceCode) return false;
+
+  await tokenStore.deleteDeviceCode(deviceCode);
+  await tokenStore.deleteUserCode(userCode);
+
+  return true;
+}
+
+/**
+ * Exchange a device code for tokens (RFC 8628 §3.4).
+ *
+ * @param {object} params
+ * @param {string} params.clientId
+ * @param {string} params.deviceCode
+ * @returns {Promise<{ access_token: string, refresh_token: string, token_type: string, expires_in: number, scope: string }>}
+ */
+async function exchangeDeviceToken({ clientId, deviceCode }) {
+  // 1. Verify client exists (no secret required for public clients)
+  const clientData = await lookupClient(clientId);
+
+  // 2. Look up device code
+  const deviceData = await tokenStore.getDeviceCode(deviceCode);
+  if (!deviceData) {
+    throw new OAuthError(400, 'expired_token', '设备码已过期');
+  }
+
+  // 3. Verify client_id matches
+  if (deviceData.client_id !== clientId) {
+    throw new OAuthError(400, 'invalid_grant', '设备码与 client_id 不匹配');
+  }
+
+  // 4. Check if approved
+  if (!deviceData.approved) {
+    throw new OAuthError(400, 'authorization_pending', '等待用户授权');
+  }
+
+  // 5. Check if denied (approved but no user_id means denied)
+  if (!deviceData.user_id) {
+    throw new OAuthError(400, 'access_denied', '用户拒绝授权');
+  }
+
+  // 6. Get user info
+  const [userRows] = await pool.execute(
+    'SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?',
+    [deviceData.user_id]
+  );
+  const user = userRows[0];
+  if (!user) {
+    throw new OAuthError(400, 'access_denied', '用户不存在');
+  }
+
+  // 7. Generate tokens (reuse existing token issuance logic)
+  const accessToken = generateToken();
+  const refreshToken = generateToken();
+  const refreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
+  const effectiveScope = deviceData.scope || 'openid profile email';
+
+  // 8. Store access token in Redis
+  await tokenStore.storeAccessToken(accessToken, {
+    user_id: user.id,
+    client_id: clientId,
+    scope: effectiveScope,
+    token_type: 'Bearer',
+  }, ACCESS_TOKEN_TTL_S);
+
+  // 9. Store refresh token in MySQL (hashed)
+  await pool.execute(
+    'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at) VALUES (?, ?, ?, ?, ?)',
+    [user.id, clientId, hashRefreshToken(refreshToken), effectiveScope, refreshExpiresAt]
+  );
+
+  // 10. Delete device code (single-use)
+  const userCode = Object.keys(await tokenStore.getDeviceCode(deviceCode) || {}).userCode;
+  if (userCode) {
+    await tokenStore.deleteUserCode(userCode);
+  }
+  await tokenStore.deleteDeviceCode(deviceCode);
+
+  // 11. Upsert authorization record
+  await pool.execute(`
+    INSERT INTO authorizations (user_id, client_id, scope, last_used_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON DUPLICATE KEY UPDATE last_used_at = CURRENT_TIMESTAMP, scope = ?
+  `, [user.id, clientId, effectiveScope, effectiveScope]);
+
+  // 12. Return RFC 6749 compliant response
+  return {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    refresh_token: refreshToken,
+    expires_in: ACCESS_TOKEN_EXPIRY_MS / 1000,
+    scope: effectiveScope,
+  };
+}
+
 // ─── Exports ──────────────────────────────────────────────────
 
 module.exports = {
@@ -751,6 +987,11 @@ module.exports = {
   listAuthorizations,
   revokeAuthorization,
   verify,
+  issueDeviceCode,
+  getDeviceCodeByUserCode,
+  approveDeviceCode,
+  denyDeviceCode,
+  exchangeDeviceToken,
   // Exposed for cross-route use (e.g. SLO logout endpoint)
   lookupClient,
 };

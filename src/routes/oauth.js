@@ -33,6 +33,11 @@ const refreshLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000,
 const introspectLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_introspect' });
 const revokeLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_revoke' });
 
+// Device authorization flow limiters (RFC 8628)
+const deviceCodeLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_code' });
+const deviceTokenLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_token' });
+const deviceApproveLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_approve' });
+
 // Standard RFC 6749 error response
 function oauthError(res, statusCode, error, description) {
   return res.status(statusCode).json({
@@ -275,6 +280,222 @@ router.post('/verify', verifyEndpointLimiter, async (req, res) => {
     res.json(result);
   } catch (err) {
     handleOAuthError(res, err, 'Verify error');
+  }
+});
+
+// ─── Device Authorization Flow (RFC 8628) ─────────────────────
+
+// POST /device/code - Issue device and user codes
+router.post('/device/code', deviceCodeLimiter, async (req, res) => {
+  try {
+    const { client_id, scope } = req.body;
+
+    if (!client_id) {
+      return oauthError(res, 400, 'invalid_request', '缺少 client_id');
+    }
+
+    const result = await oauthIssuer.issueDeviceCode({
+      clientId: client_id,
+      scope,
+    });
+
+    res.json({
+      device_code: result.deviceCode,
+      user_code: result.userCode,
+      verification_uri: result.verificationUri,
+      verification_uri_complete: result.verificationUriComplete,
+      expires_in: result.expiresIn,
+      interval: result.interval,
+    });
+  } catch (err) {
+    handleOAuthError(res, err, 'Device code issuance error');
+  }
+});
+
+// GET /device/verify - Show device verification page
+router.get('/device/verify', requireAuth, async (req, res) => {
+  try {
+    const { user_code } = req.query;
+
+    if (!user_code) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html lang="zh">
+        <head><meta charset="UTF-8"><title>错误</title></head>
+        <body><h1>缺少用户码</h1><p>请从设备页面获取用户码。</p></body>
+        </html>
+      `);
+    }
+
+    const deviceData = await oauthIssuer.getDeviceCodeByUserCode({ userCode: user_code });
+    if (!deviceData) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html lang="zh">
+        <head><meta charset="UTF-8"><title>错误</title></head>
+        <body><h1>无效的用户码</h1><p>用户码无效或已过期。</p></body>
+        </html>
+      `);
+    }
+
+    // Look up client name
+    let clientName = '未知应用';
+    try {
+      const clientData = await oauthIssuer.lookupClient(deviceData.client_id);
+      clientName = clientData.name || clientName;
+    } catch {
+      // Client not found, use default
+    }
+
+    // Show verification page
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="zh">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>设备授权</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+          .card { border: 1px solid #ddd; border-radius: 8px; padding: 24px; background: #f9f9f9; }
+          .user-code { font-size: 32px; font-weight: bold; letter-spacing: 2px; text-align: center; margin: 20px 0; padding: 16px; background: white; border-radius: 4px; font-family: monospace; }
+          .actions { display: flex; gap: 12px; margin-top: 24px; }
+          button { flex: 1; padding: 12px; font-size: 16px; border: none; border-radius: 4px; cursor: pointer; }
+          .approve { background: #4CAF50; color: white; }
+          .deny { background: #f44336; color: white; }
+          .info { margin: 16px 0; }
+          .info dt { font-weight: bold; margin-top: 8px; }
+          .info dd { margin-left: 0; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>设备授权请求</h1>
+          <p>请输入以下用户码到您的设备：</p>
+          <div class="user-code">${user_code}</div>
+          <dl class="info">
+            <dt>应用名称</dt>
+            <dd>${clientName}</dd>
+            <dt>请求的权限</dt>
+            <dd>${deviceData.scope}</dd>
+          </dl>
+          <form method="POST" action="/api/oauth/device/approve">
+            <input type="hidden" name="user_code" value="${user_code}">
+            <div class="actions">
+              <button type="submit" name="action" value="deny" class="deny">拒绝</button>
+              <button type="submit" name="action" value="approve" class="approve">授权</button>
+            </div>
+          </form>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error('Device verify error:', err);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html lang="zh">
+      <head><meta charset="UTF-8"><title>错误</title></head>
+      <body><h1>服务器错误</h1><p>请稍后重试。</p></body>
+      </html>
+    `);
+  }
+});
+
+// POST /device/approve - Approve or deny device authorization
+router.post('/device/approve', requireAuth, deviceApproveLimiter, async (req, res) => {
+  try {
+    const { user_code, action } = req.body;
+
+    if (!user_code || !action) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html lang="zh">
+        <head><meta charset="UTF-8"><title>错误</title></head>
+        <body><h1>缺少参数</h1><p>缺少用户码或操作。</p></body>
+        </html>
+      `);
+    }
+
+    let success = false;
+    let message = '';
+
+    if (action === 'approve') {
+      success = await oauthIssuer.approveDeviceCode({
+        userCode: user_code,
+        userId: req.user.id,
+      });
+      message = success ? '授权成功！请返回设备继续操作。' : '授权失败，用户码无效或已过期。';
+    } else if (action === 'deny') {
+      success = await oauthIssuer.denyDeviceCode({ userCode: user_code });
+      message = success ? '已拒绝授权。' : '操作失败，用户码无效或已过期。';
+    } else {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html lang="zh">
+        <head><meta charset="UTF-8"><title>错误</title></head>
+        <body><h1>无效操作</h1><p>操作必须是 approve 或 deny。</p></body>
+        </html>
+      `);
+    }
+
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="zh">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${action === 'approve' ? '授权成功' : '已拒绝'}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+          .card { border: 1px solid #ddd; border-radius: 8px; padding: 24px; background: #f9f9f9; }
+          .success { color: #4CAF50; }
+          .error { color: #f44336; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1 class="${success ? 'success' : 'error'}">${action === 'approve' ? '✓ 授权成功' : '✗ 已拒绝'}</h1>
+          <p>${message}</p>
+          <p>您可以关闭此页面。</p>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error('Device approve error:', err);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html lang="zh">
+      <head><meta charset="UTF-8"><title>错误</title></head>
+      <body><h1>服务器错误</h1><p>请稍后重试。</p></body>
+      </html>
+    `);
+  }
+});
+
+// POST /device/token - Exchange device code for tokens
+router.post('/device/token', deviceTokenLimiter, async (req, res) => {
+  try {
+    const { client_id, device_code, grant_type } = req.body;
+
+    // Validate grant_type
+    if (!grant_type || grant_type !== 'urn:ietf:params:oauth:grant-type:device_code') {
+      return oauthError(res, 400, 'unsupported_grant_type', '不支持的 grant_type');
+    }
+
+    if (!client_id || !device_code) {
+      return oauthError(res, 400, 'invalid_request', '缺少必需参数');
+    }
+
+    const result = await oauthIssuer.exchangeDeviceToken({
+      clientId: client_id,
+      deviceCode: device_code,
+    });
+
+    res.json(result);
+  } catch (err) {
+    handleOAuthError(res, err, 'Device token exchange error');
   }
 });
 

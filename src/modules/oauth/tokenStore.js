@@ -122,6 +122,85 @@ async function revokeAccessTokensForUserClient(userId, clientId) {
   await client.del(indexKey).catch(() => {});
 }
 
+// ─── Device Authorization Codes (RFC 8628) ────────────────────
+
+/**
+ * Store a device authorization code in Redis with a TTL.
+ *
+ * @param {string} deviceCode - The device code (32 bytes hex).
+ * @param {object} data - Payload (client_id, scope, user_id, approved, created_at).
+ * @param {number} ttlSeconds - Time-to-live in seconds (typically 900 = 15 min).
+ */
+async function storeDeviceCode(deviceCode, data, ttlSeconds) {
+  await client.setEx(`device:${deviceCode}`, ttlSeconds, JSON.stringify(data));
+}
+
+/**
+ * Look up a device authorization code in Redis.
+ *
+ * @param {string} deviceCode
+ * @returns {Promise<object|null>} Parsed payload or null.
+ */
+async function getDeviceCode(deviceCode) {
+  const raw = await client.get(`device:${deviceCode}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Update a device authorization code (e.g., set user_id and approved).
+ *
+ * @param {string} deviceCode
+ * @param {object} data - Updated payload.
+ * @param {number} ttlSeconds - Remaining TTL in seconds.
+ */
+async function updateDeviceCode(deviceCode, data, ttlSeconds) {
+  await client.setEx(`device:${deviceCode}`, ttlSeconds, JSON.stringify(data));
+}
+
+/**
+ * Delete a device authorization code.
+ *
+ * @param {string} deviceCode
+ */
+async function deleteDeviceCode(deviceCode) {
+  await client.del(`device:${deviceCode}`);
+}
+
+/**
+ * Store a mapping from user_code to device_code.
+ *
+ * @param {string} userCode - The user-facing code (LL-XXXX-XXXX).
+ * @param {string} deviceCode - The device code.
+ * @param {number} ttlSeconds - Time-to-live in seconds.
+ */
+async function storeUserCode(userCode, deviceCode, ttlSeconds) {
+  await client.setEx(`device_code:${userCode}`, ttlSeconds, deviceCode);
+}
+
+/**
+ * Look up a device code by user code.
+ *
+ * @param {string} userCode
+ * @returns {Promise<string|null>} The device code or null.
+ */
+async function getDeviceCodeByUserCode(userCode) {
+  return await client.get(`device_code:${userCode}`);
+}
+
+/**
+ * Delete a user code mapping.
+ *
+ * @param {string} userCode
+ */
+async function deleteUserCode(userCode) {
+  await client.del(`device_code:${userCode}`);
+}
+
 module.exports = {
   storeAuthCode,
   consumeAuthCode,
@@ -130,4 +209,11 @@ module.exports = {
   getAccessTokenTtl,
   revokeAccessToken,
   revokeAccessTokensForUserClient,
+  storeDeviceCode,
+  getDeviceCode,
+  updateDeviceCode,
+  deleteDeviceCode,
+  storeUserCode,
+  getDeviceCodeByUserCode,
+  deleteUserCode,
 };
