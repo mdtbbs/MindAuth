@@ -21,6 +21,72 @@ const registerRateLimiter = createRateLimiter(config.rateLimit.register);
 
 const REGISTER_CODE_MAX_FAILURES = 5;
 
+// ---- 服务间 API：用户名密码验证（供 MindFourm 调用）----
+
+router.post('/service/validate-credentials', async (req, res) => {
+  // 验证服务间 API Key
+  const serviceApiKey = req.headers['x-service-api-key'];
+  const expectedKey = process.env.SERVICE_API_KEY;
+
+  if (!expectedKey || serviceApiKey !== expectedKey) {
+    return res.status(403).json({
+      success: false,
+      code: 'SERVICE_API_KEY_INVALID',
+      message: 'Invalid service API key',
+    });
+  }
+
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({
+      success: false,
+      code: 'MISSING_CREDENTIALS',
+      message: 'Username and password required',
+    });
+  }
+
+  try {
+    // 查询用户
+    const [users] = await pool.execute(
+      'SELECT id, username, email, password_hash, avatar_url, phone_verified, phone_verified_at FROM users WHERE username = ? LIMIT 1',
+      [username]
+    );
+
+    if (!users || users.length === 0) {
+      return res.status(401).json({ valid: false });
+    }
+
+    const user = users[0];
+
+    // 验证密码
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ valid: false });
+    }
+
+    // 返回用户信息（不包含敏感字段）
+    return res.json({
+      valid: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatar_url: user.avatar_url || '',
+        phone_verified: !!user.phone_verified,
+        phone_verified_at: user.phone_verified_at || null,
+      }
+    });
+  } catch (err) {
+    console.error('[Service API] validate-credentials error:', err);
+    return res.status(500).json({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: 'Validation failed',
+    });
+  }
+});
+
 function emailKey(email) {
   return hashToken(email.toLowerCase().trim());
 }

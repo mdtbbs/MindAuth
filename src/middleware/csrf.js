@@ -82,6 +82,7 @@ function validateCsrf(req, res, next) {
     '/api/register',     // User registration (no session needed)
     '/api/register/send-code', // Registration email code (pre-auth, rate-limited)
     '/api/login',        // User login (creates session, rate-limited)
+    '/api/service/validate-credentials', // Service-to-service validation (has service API key)
     '/api/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
     '/api/admin/test/clear-rate-limits', // Test endpoint (non-production only)
     '/api/admin/test/get-user-id',       // Test endpoint (ADMIN_SECRET protected)
