@@ -73,6 +73,8 @@ function validateCsrf(req, res, next) {
     '/api/refresh',      // OAuth refresh (has client_secret)
     '/api/introspect',   // OAuth introspect (has client_secret)
     '/api/revoke',       // OAuth revoke (has client_secret)
+    '/api/oauth/device/code',  // Device authorization code request (RFC 8628, has client_secret)
+    '/api/oauth/device/token', // Device authorization token exchange (RFC 8628, has client_secret)
     '/api/verify',       // Session verification (no CSRF needed)
     '/api/challenge/random', // Challenge question retrieval (no session needed)
     '/api/challenge/verify', // Challenge answer verification
