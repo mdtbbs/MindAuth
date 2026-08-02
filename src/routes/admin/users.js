@@ -352,6 +352,14 @@ router.put('/:id', requireAdmin, requireAdminPermission('users.write'), async (r
       if (usernameError) {
         return res.status(400).json({ success: false, message: usernameError });
       }
+      // Check uniqueness before update
+      const [existingRows] = await pool.execute(
+        'SELECT id FROM users WHERE username = ? AND id != ?',
+        [username.trim(), id]
+      );
+      if (existingRows.length > 0) {
+        return res.status(409).json({ success: false, message: '该用户名已被其他用户使用' });
+      }
       updates.push('username = ?');
       params.push(username.trim());
     }

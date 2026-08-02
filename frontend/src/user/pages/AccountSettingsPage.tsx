@@ -56,6 +56,33 @@ export function AccountSettingsPage() {
     }
   }, [authLoading, user, navigate, toast]);
 
+  const [newUsername, setNewUsername] = useState('');
+  const [usernameLoading, setUsernameLoading] = useState(false);
+  const [usernameError, setUsernameError] = useState('');
+
+  async function handleChangeUsername(e: FormEvent) {
+    e.preventDefault();
+    setUsernameError('');
+    if (!user || !newUsername || newUsername === user.username) {
+      setUsernameError('请输入新的用户名');
+      return;
+    }
+    setUsernameLoading(true);
+    try {
+      await api.post('/api/account/change-username', {
+        new_username: newUsername,
+      });
+      toast('success', '用户名已更新，请重新登录');
+      // Sessions revoked, user will be redirected to login by 401 handler
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '修改失败';
+      setUsernameError(msg);
+      toast('error', msg);
+    } finally {
+      setUsernameLoading(false);
+    }
+  }
+
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [pwdLoading, setPwdLoading] = useState(false);
@@ -383,6 +410,37 @@ export function AccountSettingsPage() {
                       </div>
                     </div>
                   </div>
+                </Card>
+
+                <Card>
+                  <CardTitle>更改用户名</CardTitle>
+                  <CardDescription>
+                    用户名用于登录和展示，每 30 天可更改一次。更改后需要重新登录。
+                  </CardDescription>
+                  <form
+                    id="change-username-form"
+                    onSubmit={handleChangeUsername}
+                    data-testid="change-username-form"
+                    style={{ marginTop: 'var(--space-5)' }}
+                  >
+                    <div className="stack">
+                      <TextField
+                        id="new_username"
+                        label="新用户名"
+                        name="new_username"
+                        value={newUsername}
+                        onChange={(e) => setNewUsername(e.target.value)}
+                        error={usernameError}
+                        hint="2-50 个字符，支持字母、数字、下划线、连字符和中文"
+                        autoComplete="username"
+                      />
+                      <div className="cluster">
+                        <Button type="submit" loading={usernameLoading}>
+                          更改用户名
+                        </Button>
+                      </div>
+                    </div>
+                  </form>
                 </Card>
               </div>
             ) : null}

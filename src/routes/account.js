@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { pool, transaction } = require('../db');
 const { client } = require('../redis');
-const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
+const { isValidPassword, isValidEmail, getPasswordValidationError, getUsernameValidationError } = require('../utils/validation');
 const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
@@ -82,6 +82,90 @@ router.post('/change-password', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Change password error:', err);
     res.status(500).json({ success: false, message: '修改密码失败' });
+  }
+});
+
+// POST /change-username - Change username
+router.post('/change-username', requireAuth, async (req, res) => {
+  try {
+    const { new_username } = req.body;
+    const user = req.user;
+
+    // Validate format
+    const validationError = getUsernameValidationError(new_username);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
+    }
+
+    const trimmedUsername = new_username.trim();
+
+    // Check rate limit (30 days) — query directly from DB since session cache
+    // does not include username_changed_at
+    const USERNAME_CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+    const [tsRows] = await pool.execute(
+      'SELECT username_changed_at FROM users WHERE id = ?',
+      [user.id]
+    );
+    const lastChangedAt = tsRows[0]?.username_changed_at;
+    if (lastChangedAt) {
+      const lastChanged = new Date(lastChangedAt).getTime();
+      const elapsed = Date.now() - lastChanged;
+      if (elapsed < USERNAME_CHANGE_COOLDOWN_MS) {
+        const daysLeft = Math.ceil((USERNAME_CHANGE_COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000));
+        return res.status(429).json({
+          success: false,
+          message: `用户名更改太频繁，请 ${daysLeft} 天后再试`,
+        });
+      }
+    }
+
+    // Check uniqueness
+    const [existingRows] = await pool.execute(
+      'SELECT id FROM users WHERE username = ? AND id != ?',
+      [trimmedUsername, user.id]
+    );
+    if (existingRows.length > 0) {
+      return res.status(409).json({ success: false, message: '该用户名已被其他用户使用' });
+    }
+
+    const oldUsername = user.username;
+
+    await transaction(async (conn) => {
+      await conn.execute(
+        'UPDATE users SET username = ?, username_changed_at = NOW() WHERE id = ?',
+        [trimmedUsername, user.id]
+      );
+    });
+
+    // Revoke all sessions (like change-password)
+    await sessionManager.revokeAllUserSessions(user.id);
+    await sessionManager.revokeAdminSessionsForUser(user.id);
+
+    // Notification
+    await notificationCenter.create({
+      user_id: user.id,
+      type: 'username_changed',
+      title: '用户名已修改',
+      content: `您的用户名已从 "${oldUsername}" 更改为 "${trimmedUsername}"，请重新登录。`,
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+      sendEmail: true,
+    }).catch(err => console.warn('[Account] username notification failed:', err.message));
+
+    res.clearCookie('session', { path: '/' });
+
+    logUserAudit({
+      user_id: user.id,
+      action: 'username_changed',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'],
+      details: { old_username: oldUsername, new_username: trimmedUsername },
+    });
+
+    res.json({ success: true, message: '用户名已更新，请重新登录' });
+  } catch (err) {
+    console.error('Change username error:', err);
+    res.status(500).json({ success: false, message: '修改用户名失败' });
   }
 });
 

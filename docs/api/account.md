@@ -34,6 +34,31 @@ MindAuth 账户自服务域 API 参考，覆盖账户安全、会话管理、手
 
 特殊行为：新密码以 bcrypt cost=12 哈希；调用 `revokeAllUserSessions` 与 `revokeAdminSessionsForUser` 吊销全部会话并清除 `session` Cookie；创建 `password_changed` 通知（同时发送邮件）；写入用户审计日志（action=`password_changed`）。
 
+### POST /api/account/change-username
+
+修改当前用户的登录用户名。成功后吊销全部会话并要求重新登录。
+
+- 认证：会话 Cookie + CSRF
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|------|------|------|------|------|
+| `new_username` | body | string | 是 | 新用户名，须通过 `getUsernameValidationError` 校验（2-50 字符，字母/数字/下划线/连字符/中文/日文） |
+
+成功响应：
+
+```json
+{ "success": true, "message": "用户名已更新，请重新登录" }
+```
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 参数缺失或用户名格式不符要求（message 为具体校验错误） |
+| 409 | 该用户名已被其他用户使用 |
+| 429 | 用户名更改太频繁（距上次更改不足 30 天，message 含剩余天数） |
+| 500 | 修改用户名失败 |
+
+特殊行为：频率限制以 MySQL `users.username_changed_at` 为准（30 天冷却期），直接从数据库查询而非依赖会话缓存；调用 `revokeAllUserSessions` 与 `revokeAdminSessionsForUser` 吊销全部会话并清除 `session` Cookie；创建 `username_changed` 通知（同时发送邮件，内容含旧/新用户名）；写入用户审计日志（action=`username_changed`，details 含 `old_username`/`new_username`）。
+
 ### POST /api/account/change-email
 
 发起邮箱更换：向新邮箱发送验证链接，用户点击链接后才真正完成更换。

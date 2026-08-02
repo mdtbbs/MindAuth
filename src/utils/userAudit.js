@@ -18,6 +18,7 @@ const VALID_ACTIONS = new Set([
   'password_reset',
   'email_change_requested',
   'email_changed',
+  'username_changed',
   'session_terminated',
   'avatar_changed',
   'account_deleted',
