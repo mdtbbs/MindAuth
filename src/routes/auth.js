@@ -269,15 +269,21 @@ router.post('/login', loginRateLimiter, async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return res.status(400).json({ success: false, message: '用户名和密码必填' });
+    return res.status(400).json({ success: false, message: '用户名/邮箱和密码必填' });
   }
 
   try {
-    const [rows] = await pool.execute('SELECT * FROM users WHERE username = ?', [username]);
+    // Support login with email or username
+    const isEmail = isValidEmail(username);
+    const loginIdentifier = isEmail ? username.toLowerCase().trim() : username;
+    const query = isEmail
+      ? 'SELECT * FROM users WHERE email = ?'
+      : 'SELECT * FROM users WHERE username = ?';
+    const [rows] = await pool.execute(query, [loginIdentifier]);
     const user = rows[0];
 
     if (!user) {
-      return res.status(401).json({ success: false, message: '用户名或密码错误' });
+      return res.status(401).json({ success: false, message: '用户名/邮箱或密码错误' });
     }
 
     // Check ban status
@@ -367,7 +373,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
         });
       }
 
-      return res.status(401).json({ success: false, message: '用户名或密码错误' });
+      return res.status(401).json({ success: false, message: '用户名/邮箱或密码错误' });
     }
 
     // Reset the login limiter only — other limiters (admin login, register,

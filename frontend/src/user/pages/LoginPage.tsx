@@ -69,7 +69,7 @@ export function LoginPage() {
     setFormError('');
 
     if (!username.trim() || !password) {
-      setFormError('请输入用户名和密码');
+      setFormError('请输入用户名/邮箱和密码');
       return;
     }
 
@@ -126,12 +126,12 @@ export function LoginPage() {
           ) : null}
           <TextField
             id="username"
-            label="用户名"
+            label="用户名或邮箱"
             name="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="请输入用户名"
-            hint="请输入您的 MindAuth 用户名"
+            placeholder="请输入用户名或邮箱"
+            hint="请输入您的 MindAuth 用户名或邮箱"
             autoComplete="username"
             autoFocus
           />
