@@ -128,7 +128,7 @@ export interface LoginLog {
 // ─── Account ─────────────────────────────────────────────────────────────────
 
 export interface ChangePasswordRequest {
-  current_password: string;
+  old_password: string;
   new_password: string;
 }
 
@@ -158,7 +158,7 @@ export interface PasswordResetRequest {
 
 export interface PasswordResetConfirm {
   token: string;
-  password: string;
+  new_password: string;
 }
 
 // ─── Email Verification ──────────────────────────────────────────────────────

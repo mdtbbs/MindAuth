@@ -30,7 +30,7 @@ export function ResetPasswordPage() {
     setError('');
 
     try {
-      await api.post('/api/password/reset', { token, password });
+      await api.post('/api/password/reset', { token, new_password: password });
       setSuccess(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '重置失败';
