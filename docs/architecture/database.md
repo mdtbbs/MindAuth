@@ -18,7 +18,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 |------|---------|
 | [`001_initial_schema.sql`](../../src/db/migrations/001_initial_schema.sql) | 全量初始 schema：18 张表 + `email_config`/`sms_config` 的单行种子 + `system_config` 的 6 个种子键 |
 | [`002_security_hardening.sql`](../../src/db/migrations/002_security_hardening.sql) | 安全加固：`user_sessions` 增加 `expires_at` 列（存量回填 30 天）并将 token 索引改为 UNIQUE（`uniq_sessions_token`）、新增 `idx_sessions_expires`；`refresh_tokens.token` 存量值 `SHA2(token, 256)` 哈希化；删除 `clients` 的 `idx_clients_credentials` 复合索引（含 secret）；删除 `users.session_token` 列及 `idx_users_session`、冗余的 `idx_users_username`/`idx_users_email`；`ip_bans` 新增 `idx_ip_bans_ip` |
-| [`003_auth_background_config.sql`](../../src/db/migrations/003_auth_background_config.sql) | `INSERT IGNORE` 种子 `system_config` 的 `auth_background_url` 键（登录页自定义背景图 URL，空 = 默认网格背景）。必须由迁移种子的原因：`runtimeConfig.set()` 只执行 UPDATE 不插入新键，行不存在时管理端无法保存——**新增任何 system_config 配置键都须走迁移种子** |
+| [`005_username_change_tracking.sql`](../../src/db/migrations/005_username_change_tracking.sql) | `users` 增加 `username_changed_at`，用于用户名自助修改的 30 天冷却检查 |
 
 ## MySQL 表
 
@@ -28,7 +28,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
-| `users` | 用户账号主表 | `username`/`email`/`phone` 均 UNIQUE；`password_hash`（bcrypt）；`role`、`email_verified`、`phone_verified(_at)`；头像/横幅 `avatar_url`/`banner_url`；锁定 `lock_level` + `locked_until`；封禁 `ban_status`/`ban_reason`/`banned_by`/`ban_expires_at`。几乎所有表都外键指向它 |
+| `users` | 用户账号主表 | `username`/`email`/`phone` 均 UNIQUE；`username_changed_at` 记录自助改名时间并用于 30 天冷却；`password_hash`（bcrypt）；`role`、`email_verified`、`phone_verified(_at)`；头像/横幅 `avatar_url`/`banner_url`；锁定 `lock_level` + `locked_until`；封禁 `ban_status`/`ban_reason`/`banned_by`/`ban_expires_at`。几乎所有表都外键指向它 |
 | `user_sessions` | 活跃会话追踪（Web 登录态） | `session_token` 存 SHA-256 哈希（UNIQUE），`ip_address`、`user_agent`、`device_info`、`expires_at`（绝对过期，002 引入）、`last_active_at` |
 | `login_logs` | 登录历史 | `ip`、`device`、`login_type`（`web`/`oauth`），供用户端"登录记录"与管理端统计使用 |
 | `email_verification_tokens` | 邮箱验证令牌的 MySQL 兜底（Redis 重启丢数据时回查） | `token`（主键，存哈希）、`email`（待验证/待变更邮箱）、`expires_at` |

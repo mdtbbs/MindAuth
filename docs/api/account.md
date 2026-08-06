@@ -217,7 +217,7 @@ MindAuth 账户自服务域 API 参考，覆盖账户安全、会话管理、手
 |--------|------|
 | 500 | 获取字段失败 |
 
-说明：字段定义由管理员在 `user_fields` 表维护；`options` 为 JSON（如下拉选项），未填写的字段 `value` 为 `null`。
+说明：字段定义由管理员在 `user_fields` 表维护；`options` 为 JSON（如下拉选项），未填写的字段 `value` 为 `null`。例如管理员可建立 `field_key=qq`、标签为“QQ 号”的公开文本字段；字段值按用户隔离保存。
 
 ### PUT /api/account/fields
 

@@ -105,7 +105,7 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 |------|------|------|-----------|------|
 | POST | `/api/register/send-code` | 无 | 3/10分钟（IP）+ 1/分钟（email 冷却） | 注册前发送 6 位邮箱验证码 |
 | POST | `/api/register` | 无 | 5/小时 | 用户注册（需携带 `email_code`，可能要求问答验证） |
-| POST | `/api/login` | 无 | 5/5分钟 | 用户登录，下发 session Cookie |
+| POST | `/api/login` | 无 | 5/5分钟 | 用户名或邮箱登录，下发 session Cookie |
 | POST | `/api/logout` | 会话 | — | 登出并吊销当前会话 |
 | GET | `/logout` | 无（幂等） | — | SLO 浏览器登出；按注册白名单重定向回调用方（需 `redirect_uri` + `client_id`，详见 [auth.md](auth.md)） |
 | GET | `/api/me` | 会话 | — | 当前用户信息 |

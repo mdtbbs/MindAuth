@@ -87,7 +87,9 @@ function validateCsrf(req, res, next) {
     '/api/admin/test/clear-rate-limits', // Test endpoint (non-production only)
     '/api/admin/test/get-user-id',       // Test endpoint (ADMIN_SECRET protected)
     '/api/admin/test/verify-email',      // Test endpoint (ADMIN_SECRET protected)
-    '/api/admin/test/create-reset-token' // Test endpoint (ADMIN_SECRET protected)
+    '/api/admin/test/create-reset-token', // Test endpoint (ADMIN_SECRET protected)
+    // QQ OAuth: GET /api/auth/qq 和 GET /api/auth/qq/callback 不需要豁免（GET 已跳过）
+    // POST /api/auth/qq/complete 需要 CSRF 验证（使用一次性 state 作为额外防护）
   ]);
 
   if (exemptPaths.has(path)) {

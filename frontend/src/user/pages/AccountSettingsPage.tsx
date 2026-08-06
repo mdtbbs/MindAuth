@@ -9,6 +9,7 @@ import { Button } from '@/shared/Button';
 import { Dialog } from '@/shared/Dialog';
 import { LoadingState } from '@/shared/LoadingState';
 import { AccountShell } from '@/user/components/AccountShell';
+import type { SocialBindingsResponse, SocialUnbindResponse } from '@/api/types';
 
 // GET /api/account/fields 返回定义与当前值的合并结构（按 field_key 键控）
 interface AccountField {
@@ -110,6 +111,60 @@ export function AccountSettingsPage() {
       toast('error', msg);
     } finally {
       setPwdLoading(false);
+    }
+  }
+
+  // ===== QQ OAuth 绑定 =====
+  const [qqBinding, setQqBinding] = useState<{
+    id: number;
+    nickname?: string | null;
+    avatar_url?: string | null;
+  } | null>(null);
+  const [bindingsLoaded, setBindingsLoaded] = useState(false);
+  const [qqLoading, setQqLoading] = useState(false);
+  const [unbindLoading, setUnbindLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeSection !== 'security' || bindingsLoaded) return;
+    api.get<SocialBindingsResponse>('/api/account/bindings')
+      .then((res) => {
+        const qqBindingItem = res.bindings?.find((b) => b.provider === 'qq');
+        if (qqBindingItem) {
+          setQqBinding({
+            id: qqBindingItem.id,
+            nickname: qqBindingItem.nickname,
+            avatar_url: qqBindingItem.avatar_url,
+          });
+        } else {
+          setQqBinding(null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setBindingsLoaded(true));
+  }, [activeSection, bindingsLoaded]);
+
+  async function handleQqBind() {
+    setQqLoading(true);
+    try {
+      window.location.href = '/api/auth/qq?intent=bind';
+    } finally {
+      setQqLoading(false);
+    }
+  }
+
+  async function handleQqUnbind() {
+    if (!qqBinding) return;
+    if (!window.confirm('确定要解绑 QQ 账号吗？')) return;
+
+    setUnbindLoading(true);
+    try {
+      await api.del<SocialUnbindResponse>(`/api/account/bindings/${qqBinding.id}`);
+      toast('success', 'QQ 已解绑');
+      setQqBinding(null);
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '解绑失败');
+    } finally {
+      setUnbindLoading(false);
     }
   }
 
@@ -469,6 +524,44 @@ export function AccountSettingsPage() {
                   </div>
                 </Card>
 
+                <Card>
+                  <CardTitle>QQ 登录</CardTitle>
+                  <CardDescription>绑定 QQ 后可使用 QQ 快速登录 MindAuth。</CardDescription>
+                  <div className="info-list" style={{ marginTop: 'var(--space-5)' }}>
+                    <div className="info-row">
+                      <div className="info-row__main">
+                        <span className="info-row__icon info-row__icon--primary">Q</span>
+                        <div className="info-row__content">
+                          <div className="info-row__label">绑定状态</div>
+                          <div className="info-row__value">
+                            {qqBinding ? (qqBinding.nickname || '已绑定') : '未绑定'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="info-row__actions">
+                        {qqBinding ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={unbindLoading}
+                            onClick={handleQqUnbind}
+                          >
+                            解绑
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={qqLoading}
+                            onClick={handleQqBind}
+                          >
+                            绑定 QQ
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
                 <Card>
                   <CardTitle>修改邮箱</CardTitle>
                   <CardDescription>变更主邮箱后会刷新当前账户资料。</CardDescription>

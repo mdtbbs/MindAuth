@@ -34,7 +34,15 @@ const config = {
     database: parseInt(process.env.REDIS_DB) || 0
   },
 
-  // SMTP configuration (fallback when database config not set)
+  // QQ OAuth configuration
+  qq: {
+    enabled: process.env.QQ_OAUTH_ENABLED === 'true',
+    clientId: process.env.QQ_CLIENT_ID || '',
+    clientSecret: process.env.QQ_CLIENT_SECRET || '',
+    redirectUri: process.env.QQ_REDIRECT_URI || `${process.env.BASE_URL || 'http://localhost:4001'}/api/auth/qq/callback`,
+    timeoutMs: parseInt(process.env.QQ_HTTP_TIMEOUT_MS, 10) || 5000,
+  },
+
   smtp: {
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT) || 587,

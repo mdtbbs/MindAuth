@@ -125,6 +125,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `ipBanMatcher` | `security/ipBanMatcher.js` | `isBanned`, `refreshCache`, `clearCache` |
 | `auditWriter` | `audit/auditWriter.js` | `writeAdminAudit`, `writeUserAudit` |
 | `runtimeConfig` | `config/runtimeConfig.js` | `get`, `getMany`, `set`, `invalidate`, `preload` |
+| `socialLogin` | `social/socialLogin.js` | `findByQq`, `loginExisting`, `bindQq`, `listBindings`, `unbindQq`, `checkLoginAllowed`, `canUnbindQq` |
 
 ## API Endpoints
 
@@ -167,6 +168,15 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/` | DELETE | Delete account |
 | `/fields` | GET/PUT | Custom field values |
 | `/audit-logs` | GET | Current user's security audit log |
+| `/bindings` | GET | List social login bindings (QQ, etc.) |
+| `/bindings/:id` | DELETE | Unbind a social account (requires password or other login method) |
+
+### QQ OAuth (`/api/auth`)
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/qq` | GET | Start QQ OAuth flow. `intent=login` or `intent=bind`. Saves OAuth authorize context for later restoration. | None (bind requires session) |
+| `/qq/callback` | GET | QQ provider callback. Creates session for bound users, or redirects to `/qq-register` for new users. Restores OAuth context if present. | None |
+| `/qq/complete` | POST | Complete QQ registration. Requires `{ state, username, email, email_code, password }`. Creates session. | None (one-time state) |
 
 ### Password Reset (`/api/password`)
 | Endpoint | Method | Description |
@@ -244,8 +254,9 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `sms_config` | Aliyun SMS settings (single row id=1) | access_key_id, access_key_secret, sign_name, template_code |
 | `email_verification_tokens` | Email verification tokens (MySQL fallback beside Redis) | user_id, token_hash, expires_at |
 | `registration_email_codes` | Pending registration email codes (MySQL fallback for `register_email_code:{hash}`). Keyed by SHA-256(email); stores SHA-256(code) | email_hash (PK), email, code_hash, expires_at |
+| `social_accounts` | Social login provider bindings (QQ, etc.) | id, user_id, provider, provider_user_id, nickname, avatar_url, created_at, last_login_at. UNIQUE on (provider, provider_user_id) and (user_id, provider). FK to users ON DELETE CASCADE |
 
-Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`. Migration `003_auth_background_config.sql` seeds the `auth_background_url` key (`runtimeConfig.set` is UPDATE-only, so config keys must be seeded by migration).
+Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`. Migration `003_auth_background_config.sql` seeds the `auth_background_url` key (`runtimeConfig.set` is UPDATE-only, so config keys must be seeded by migration). Migration `006_social_accounts.sql` creates the `social_accounts` table for social login bindings.
 
 ### Redis Keys
 
@@ -272,6 +283,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `accesstokens_by_userclient:{userId}:{clientId}` | none | Index SET for bulk access-token revocation |
 | `challenge_session:{csrf}` | 30min | Challenge question session |
 | `ip_bans_cache` | 5min | IP ban list cache |
+| `social:state:{state}` | 10min | QQ OAuth state (one-time, consumed atomically via GETDEL). Stores intent, session hash, OAuth context, and QQ profile data |
 
 ## Middleware
 
@@ -351,6 +363,11 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `ALIYUN_ESA_REGION_ID` | cn-hangzhou | ESA OpenAPI region for trusted proxy auto-trust |
 | `ALIYUN_ESA_REFRESH_INTERVAL_MS` | 600000 | Background refresh interval for ESA trusted proxy cache |
 | `ALIYUN_ACCESS_KEY_ID/SECRET` | - | Aliyun SMS credentials and ESA API credentials |
+| `QQ_OAUTH_ENABLED` | false | Enable QQ OAuth login (requires all QQ_* variables) |
+| `QQ_CLIENT_ID` | - | QQ OAuth client ID (from QQ open platform) |
+| `QQ_CLIENT_SECRET` | - | QQ OAuth client secret |
+| `QQ_REDIRECT_URI` | - | QQ OAuth callback URL (must match QQ platform, HTTPS in production) |
+| `QQ_HTTP_TIMEOUT_MS` | 5000 | QQ API request timeout (1000-30000) |
 
 ### Runtime Constants
 | Setting | Value |
