@@ -86,7 +86,24 @@ function validateConfig(config) {
     }
   }
 
-  // --- Upload directory ---
+  // --- QQ OAuth ---
+  if (config.qq?.enabled) {
+    if (!config.qq.clientId || !config.qq.clientSecret || !config.qq.redirectUri) {
+      errors.push('QQ OAuth is enabled but QQ_CLIENT_ID, QQ_CLIENT_SECRET, or QQ_REDIRECT_URI is missing');
+    }
+    try {
+      const qqRedirect = new URL(config.qq.redirectUri);
+      if (isProduction && qqRedirect.protocol !== 'https:') {
+        errors.push('QQ_REDIRECT_URI must use HTTPS in production');
+      }
+    } catch {
+      errors.push('QQ_REDIRECT_URI is not a valid URL');
+    }
+    if (!Number.isFinite(config.qq.timeoutMs) || config.qq.timeoutMs < 1000 || config.qq.timeoutMs > 30000) {
+      errors.push('QQ_HTTP_TIMEOUT_MS must be between 1000 and 30000 milliseconds');
+    }
+  }
+
   const uploadsDir = path.join(__dirname, '../../public/uploads');
   try {
     if (!fs.existsSync(uploadsDir)) {

@@ -23,7 +23,7 @@ MindAuth 是面向公网的 OAuth 2.0 SSO 认证服务，本文档面向后端�
 - 注册与改密使用 `bcrypt.hash(password, 12)`（cost=12）；登录用 `bcrypt.compare` 验证，天然兼容旧 cost=10 哈希。
 - 所有 secret 比较（`client_secret`、CSRF token 等）走 [crypto.js](../../src/utils/crypto.js) 的 `timingSafeCompare`——基于 `crypto.timingSafeEqual`，长度不等直接返回 false，防时序侧信道。
 - OAuth 客户端认证仅按 `client_id` 查询，再对 `client_secret` 做常量时间比较，避免把 secret 放进 SQL 条件（同时 migration 002 已删除内嵌 secret 的复合索引）。
-- 登录/注册对"用户不存在""密码错误""用户名/邮箱已占用"统一返回模糊消息，防用户名枚举。
+- 登录/注册对“用户不存在”“密码错误”“用户名/邮箱已占用”统一返回模糊消息，防用户名枚举。登录标识支持用户名或邮箱；邮箱先 `trim` + 小写化后查询。
 
 ## 会话安全
 

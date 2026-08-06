@@ -48,6 +48,7 @@ export function LoginPage() {
 
   const authFlowQuery = isOAuthFlow ? buildAuthFlowParams().toString() : '';
   const registerHref = authFlowQuery ? `/register?${authFlowQuery}` : '/register';
+  const qqLoginHref = `/api/auth/qq${authFlowQuery ? `?${authFlowQuery}` : ''}`;
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -148,6 +149,10 @@ export function LoginPage() {
           <Button type="submit" fullWidth size="lg" loading={loading} data-testid="login-submit">
             登录
           </Button>
+          <div className="auth-divider" aria-hidden="true"><span>或</span></div>
+          <a className="btn btn--secondary btn--lg btn--full" href={qqLoginHref} data-testid="qq-login">
+            <span aria-hidden="true" style={{ fontWeight: 700 }}>Q</span> 使用 QQ 登录
+          </a>
         </div>
       </form>
     </AuthShell>

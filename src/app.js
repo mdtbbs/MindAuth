@@ -32,6 +32,7 @@ const challengeRoutes = require('./routes/challenge');
 const sessionsRoutes = require('./routes/sessions');
 const notificationsRoutes = require('./routes/notifications');
 const registerEmailCodeRoutes = require('./routes/registerEmailCode');
+const socialAuthRoutes = require('./routes/socialAuth');
 
 // Middleware
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
@@ -177,12 +178,14 @@ function createApp(deps = {}) {
   // Registration email code must mount BEFORE authRoutes so /api/register/send-code
   // is handled here; /api/register then falls through to authRoutes.
   app.use('/api/register', registerEmailCodeRoutes);
+  app.use('/api/auth', socialAuthRoutes);
   app.use('/api', authRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api', oauthRoutes);
   app.use('/api/password', passwordRoutes);
   app.use('/api/email-verification', emailVerificationRoutes);
   app.use('/api/account', accountRoutes);
+  // 注意：accountRoutes 已包含 /bindings 和 /bindings/:id 路由
   app.use('/api/sms', smsRoutes);
   app.use('/api/challenge', challengeRoutes);
   app.use('/api/sessions', sessionsRoutes);

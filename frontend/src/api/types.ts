@@ -141,6 +141,43 @@ export interface ChangeEmailRequest {
   password: string;
 }
 
+// ─── QQ OAuth social login ───────────────────────────────────────────────────
+
+export interface SocialBinding {
+  id: number;
+  provider: string;
+  provider_user_id: string;
+  nickname?: string | null;
+  avatar_url?: string | null;
+  created_at?: string;
+  last_login_at?: string;
+}
+
+export interface SocialBindingsResponse {
+  success: boolean;
+  bindings: SocialBinding[];
+}
+
+export interface SocialUnbindResponse {
+  success: boolean;
+}
+
+export interface QqRegistrationRequest {
+  state: string;
+  username: string;
+  email: string;
+  email_code: string;
+  password: string;
+}
+
+export interface QqRegistrationResponse {
+  success: boolean;
+  redirect: string;
+  message?: string;
+}
+
+// ─── Privacy Settings ────────────────────────────────────────────────────────
+
 export interface PrivacySettings {
   profile_public: boolean;
   email_public: boolean;

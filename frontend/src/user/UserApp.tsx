@@ -8,6 +8,8 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
 import { ErrorPage } from './pages/ErrorPage';
+import { QqConfirmPage } from './pages/QqConfirmPage';
+import { QqRegisterPage } from './pages/QqRegisterPage';
 
 /**
  * User-facing React application router.
@@ -25,6 +27,8 @@ export function UserApp() {
         <Route path="/reset-request" element={<ResetRequestPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/qq/confirm" element={<QqConfirmPage />} />
+        <Route path="/qq-register" element={<QqRegisterPage />} />
 
         {/* OAuth authorization */}
         <Route path="/authorize" element={<OAuthAuthorizePage />} />

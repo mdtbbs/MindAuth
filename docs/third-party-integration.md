@@ -193,7 +193,7 @@ Authorization: Bearer {access_token}
 
 **字段说明：**
 - `sub`：始终返回（用户 ID 的字符串形式）
-- `profile` scope：返回 `id`、`username`、`name`、`avatar_url`、`phone_verified`、`phone_verified_at`、`phone_masked`、`ban_status`、`is_muted`、`updated_at`，以及 `custom_fields`（仅公开的自定义字段，无值时省略该字段）
+- `profile` scope：返回 `id`、`username`、`name`、`avatar_url`、`phone_verified`、`phone_verified_at`、`phone_masked`、`ban_status`、`is_muted`、`updated_at`，以及 `custom_fields`（仅公开的自定义字段，无值时省略该字段）。例如管理员公开配置的 `qq` 字段会以 `custom_fields.qq` 返回；该字段是用户资料，不是认证凭据，第三方应兼容字段缺失。
 - `email` scope：返回 `email`、`email_verified`
 - 响应中**不包含** `created_at` 字段
 
@@ -469,6 +469,7 @@ async function getUserInfo() {
 
 ```bash
 # 1. 登录用户
+# username 参数也可以传已验证格式的邮箱；邮箱匹配会忽略大小写并去除首尾空格。
 curl -X POST http://localhost:4001/api/login \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser","password":"test123456"}' \

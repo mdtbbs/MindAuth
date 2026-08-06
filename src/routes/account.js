@@ -488,4 +488,50 @@ router.get('/audit-logs', requireAuth, async (req, res) => {
   }
 });
 
+// ===== 社交绑定 =====
+const socialLogin = require('../modules/social/socialLogin');
+const { logUserAudit: logAudit } = require('../utils/userAudit');
+
+// GET /bindings - 列出当前用户的社交绑定
+router.get('/bindings', requireAuth, async (req, res) => {
+  try {
+    const bindings = await socialLogin.listBindings(req.user.id);
+    return res.json({ success: true, bindings });
+  } catch (err) {
+    console.error('[Account] list bindings failed:', err.message);
+    return res.status(500).json({ success: false, message: '获取绑定失败' });
+  }
+});
+
+// DELETE /bindings/:id - 解绑
+router.delete('/bindings/:id', requireAuth, async (req, res) => {
+  try {
+    const bindingId = parseInt(req.params.id, 10);
+    if (!bindingId || Number.isNaN(bindingId)) {
+      return res.status(400).json({ success: false, code: 'INVALID_ID', message: '无效的绑定 ID' });
+    }
+
+    await socialLogin.unbindQq(bindingId, req.user.id);
+
+    logAudit({
+      user_id: req.user.id,
+      action: 'social_unbind',
+      ip_address: getClientIp(req),
+      user_agent: req.headers['user-agent'] || '',
+      details: { binding_id: bindingId },
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'BINDING_NOT_FOUND') {
+      return res.status(404).json({ success: false, code: 'BINDING_NOT_FOUND', message: '绑定不存在' });
+    }
+    if (err.code === 'CANNOT_UNBIND_LAST_LOGIN') {
+      return res.status(400).json({ success: false, code: 'CANNOT_UNBIND_LAST_LOGIN', message: err.message });
+    }
+    console.error('[Account] unbind failed:', err.message);
+    return res.status(500).json({ success: false, message: '解绑失败' });
+  }
+});
+
 module.exports = router;
