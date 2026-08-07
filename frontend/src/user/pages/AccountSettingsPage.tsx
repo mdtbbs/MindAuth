@@ -121,6 +121,7 @@ export function AccountSettingsPage() {
     avatar_url?: string | null;
   } | null>(null);
   const [bindingsLoaded, setBindingsLoaded] = useState(false);
+  const [bindingsError, setBindingsError] = useState(false);
   const [qqLoading, setQqLoading] = useState(false);
   const [unbindLoading, setUnbindLoading] = useState(false);
 
@@ -139,9 +140,11 @@ export function AccountSettingsPage() {
           setQqBinding(null);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        setBindingsError(true);
+      })
       .finally(() => setBindingsLoaded(true));
-  }, [activeSection, bindingsLoaded]);
+  }, [activeSection, bindingsLoaded, toast]);
 
   async function handleQqBind() {
     setQqLoading(true);
@@ -276,13 +279,15 @@ export function AccountSettingsPage() {
   const [fieldDefs, setFieldDefs] = useState<AccountField[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [fieldsLoading, setFieldsLoading] = useState(false);
-  const fieldsLoaded = useRef(false);
+  const [fieldsError, setFieldsError] = useState(false);
+  const fieldsLoadedRef = useRef(false);
 
   // Defer until the user opens the "自定义字段" tab (load once).
   // 单个用户端点即包含定义与当前值（不要调 /api/admin/user-fields —— 普通用户会 401）
   useEffect(() => {
-    if (activeSection !== 'fields' || fieldsLoaded.current) return;
-    fieldsLoaded.current = true;
+    if (activeSection !== 'fields' || fieldsLoadedRef.current) return;
+    fieldsLoadedRef.current = true;
+    setFieldsLoading(true);
     api
       .get<{ success: boolean; fields: AccountField[] }>('/api/account/fields')
       .then((res) => {
@@ -294,7 +299,12 @@ export function AccountSettingsPage() {
         }
         setFieldValues(map);
       })
-      .catch(() => toast('error', '获取自定义字段失败'));
+      .catch(() => {
+        setFieldsError(true);
+        fieldsLoadedRef.current = false;
+        toast('error', '获取自定义字段失败');
+      })
+      .finally(() => setFieldsLoading(false));
   }, [activeSection, toast]);
 
   async function handleSaveFields() {
@@ -534,12 +544,14 @@ export function AccountSettingsPage() {
                         <div className="info-row__content">
                           <div className="info-row__label">绑定状态</div>
                           <div className="info-row__value">
-                            {qqBinding ? (qqBinding.nickname || '已绑定') : '未绑定'}
+                            {bindingsError ? '绑定状态暂时无法获取' : !bindingsLoaded ? '正在加载…' : qqBinding ? (qqBinding.nickname || '已绑定') : '未绑定'}
                           </div>
                         </div>
                       </div>
                       <div className="info-row__actions">
-                        {qqBinding ? (
+                          {bindingsError ? (
+                            <Button variant="secondary" size="sm" onClick={() => { setBindingsError(false); setBindingsLoaded(false); }}>重试</Button>
+                          ) : qqBinding ? (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -636,7 +648,14 @@ export function AccountSettingsPage() {
                 <Card>
                   <CardTitle>自定义字段</CardTitle>
                   <CardDescription>填写管理员配置的附加资料字段。</CardDescription>
-                  {fieldDefs.length > 0 ? (
+                  {fieldsLoading ? (
+                    <LoadingState />
+                  ) : fieldsError ? (
+                    <div className="stack stack--sm">
+                      <div className="error-state">获取自定义字段失败</div>
+                      <Button size="sm" variant="secondary" onClick={() => { setFieldsError(false); fieldsLoadedRef.current = false; setActiveSection('profile'); setTimeout(() => setActiveSection('fields'), 0); }}>重试</Button>
+                    </div>
+                  ) : fieldDefs.length > 0 ? (
                     <div className="stack" style={{ marginTop: 'var(--space-5)' }}>
                       {fieldDefs.map((def) => (
                         <TextField

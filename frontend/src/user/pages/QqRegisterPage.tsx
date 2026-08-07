@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/api/client';
 import { AuthShell } from '@/user/components/AuthShell';
@@ -31,16 +31,29 @@ export function QqRegisterPage() {
   const [password, setPassword] = useState('');
   const [emailCode, setEmailCode] = useState('');
   const [codeSending, setCodeSending] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (countdown <= 0) return undefined;
+    const timer = window.setInterval(() => setCountdown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
 
   async function sendCode() {
     if (!email) {
       toast('error', '请先填写邮箱');
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      toast('error', '请输入有效邮箱');
+      return;
+    }
+    if (countdown > 0) return;
     setCodeSending(true);
     try {
       await api.post('/api/register/send-code', { email: email.trim() });
+      setCountdown(60);
       toast('success', '验证码已发送，请查收邮件');
     } catch (err: unknown) {
       toast('error', err instanceof Error ? err.message : '验证码发送失败');
@@ -56,8 +69,8 @@ export function QqRegisterPage() {
       navigate('/login', { replace: true });
       return;
     }
-    if (!username || !email || !password || !emailCode) {
-      toast('error', '请填写全部字段');
+    if (!username.trim() || !email.trim() || !/^\S+@\S+\.\S+$/.test(email.trim()) || !/^\d{6}$/.test(emailCode) || password.length < 8) {
+      toast('error', '请填写有效的用户名、邮箱、6 位验证码和至少 8 位密码');
       return;
     }
     setLoading(true);
@@ -77,7 +90,7 @@ export function QqRegisterPage() {
 
       // 跳转到后端返回的 URL，或默认 dashboard
       const redirectUrl = response.redirect || '/dashboard';
-      navigate(redirectUrl, { replace: true });
+      window.location.href = redirectUrl;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '注册失败';
       toast('error', message);
@@ -127,8 +140,8 @@ export function QqRegisterPage() {
             onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             inputMode="numeric"
           />
-          <Button type="button" variant="secondary" size="sm" loading={codeSending} onClick={sendCode}>
-            发送验证码
+          <Button type="button" variant="secondary" size="sm" loading={codeSending} disabled={codeSending || countdown > 0} onClick={sendCode}>
+            {countdown > 0 ? `重新发送 (${countdown}s)` : '发送验证码'}
           </Button>
         </div>
         <TextField

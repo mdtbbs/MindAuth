@@ -19,9 +19,10 @@ export function LoginPage() {
   const scope = params.get('scope') || '';
   const codeChallenge = params.get('code_challenge') || '';
   const codeChallengeMethod = params.get('code_challenge_method') || '';
+  const errorParam = params.get('error') || '';
+  const messageParam = params.get('message') || '';
 
   const isOAuthFlow = Boolean(redirectUri && clientId);
-  const decodedClientName = clientName ? decodeURIComponent(clientName) : '';
 
   function buildAuthorizeParams() {
     return new URLSearchParams({
@@ -93,9 +94,9 @@ export function LoginPage() {
     }
   }
 
-  const title = isOAuthFlow && decodedClientName ? `登录 ${decodedClientName}` : '登录 MindAuth';
+  const title = isOAuthFlow && clientName ? `登录 ${clientName}` : '登录 MindAuth';
   const description = isOAuthFlow
-    ? `继续后将返回 ${decodedClientName || '目标应用'} 完成授权。`
+    ? `继续后将返回 ${clientName || '目标应用'} 完成授权。`
     : '使用您的 MindAuth 账户访问控制台、账户中心与授权应用。';
 
   return (
@@ -116,13 +117,13 @@ export function LoginPage() {
     >
       <form id="login-form" onSubmit={handleSubmit} data-testid="login-form">
         <div className="stack">
-          {isOAuthFlow && decodedClientName ? (
-            <div className="status-badge status-badge--info">正在连接应用：{decodedClientName}</div>
+          {isOAuthFlow && clientName ? (
+            <div className="status-badge status-badge--info">正在连接应用：{clientName}</div>
           ) : null}
-          {formError ? (
+          {formError || errorParam || messageParam ? (
             <div className="auth-form__alert" role="alert">
               <div className="status-badge status-badge--danger">登录失败</div>
-              <p className="section-description auth-form__alert-text">{formError}</p>
+              <p className="section-description auth-form__alert-text">{formError || messageParam || errorParam}</p>
             </div>
           ) : null}
           <TextField

@@ -43,8 +43,11 @@ export function DashboardPage() {
     verified: false,
   });
 
-  const [smsPhone, setSmsPhone] = useState('');
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataErrors, setDataErrors] = useState<Record<string, boolean>>({});
   const [smsCode, setSmsCode] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [smsPhone, setSmsPhone] = useState('');
   const [smsLoading, setSmsLoading] = useState(false);
   const [smsSent, setSmsSent] = useState(false);
 
@@ -55,21 +58,26 @@ export function DashboardPage() {
     }
   }, [user, authLoading, navigate, toast]);
 
-  // Unread count is derived from the notifications list — no separate request
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
-
   const loadDashboardData = useCallback(async () => {
-    const [sessRes, notifsRes, logsRes, authsRes] = await Promise.allSettled([
+    setDataLoading(true);
+    const results = await Promise.allSettled([
       api.get<{ success: boolean; sessions: Session[] }>('/api/sessions'),
       api.get<{ success: boolean; notifications: Notification[] }>('/api/notifications'),
       api.get<{ success: boolean; logs: LoginLog[] }>('/api/login-logs'),
       api.get<{ success: boolean; authorizations: Authorization[] }>('/api/authorizations'),
+      api.get<{ success: boolean; count: number }>('/api/notifications/unread-count'),
     ]);
-
+    const [sessRes, notifsRes, logsRes, authsRes, unreadRes] = results;
+    setDataErrors({
+      sessions: sessRes.status === 'rejected', notifications: notifsRes.status === 'rejected',
+      logs: logsRes.status === 'rejected', authorizations: authsRes.status === 'rejected',
+    });
     if (sessRes.status === 'fulfilled') setSessions(sessRes.value.sessions || []);
     if (notifsRes.status === 'fulfilled') setNotifications(notifsRes.value.notifications || []);
     if (logsRes.status === 'fulfilled') setLoginLogs(logsRes.value.logs || []);
     if (authsRes.status === 'fulfilled') setAuthorizations(authsRes.value.authorizations || []);
+    if (unreadRes.status === 'fulfilled') setUnreadCount(unreadRes.value.count || 0);
+    setDataLoading(false);
   }, []);
 
   useEffect(() => {
@@ -193,6 +201,8 @@ export function DashboardPage() {
       }
     >
       <div className="account-overview-grid">
+        {dataLoading ? <div className="section-description">正在加载账户数据…</div> : null}
+        {Object.values(dataErrors).some(Boolean) ? <div className="error-state">部分数据加载失败，请刷新重试。</div> : null}
         <div className="stat-card">
           <div className="stat-card__label">未读通知</div>
           <div className="stat-card__value">{unreadCount}</div>

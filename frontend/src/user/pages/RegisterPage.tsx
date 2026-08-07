@@ -9,9 +9,8 @@ import { AuthShell } from '@/user/components/AuthShell';
 import type { SendRegistrationCodeResponse } from '@/api/types';
 
 interface ChallengeQuestion {
-  id: number;
+  challenge_id: string | number;
   question: string;
-  csrf: string;
 }
 
 // Mirrors backend rules (utils/validation.js): 8+ chars, upper + lower + digit
@@ -61,7 +60,23 @@ export function RegisterPage() {
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
   const stateParam = params.get('state') || '';
-  const decodedClientName = clientName ? decodeURIComponent(clientName) : '';
+  const scope = params.get('scope') || '';
+  const codeChallenge = params.get('code_challenge') || '';
+  const codeChallengeMethod = params.get('code_challenge_method') || '';
+  const errorParam = params.get('error') || '';
+  const messageParam = params.get('message') || '';
+  const isOAuthFlow = Boolean(clientId && redirectUri);
+  const qqRegisterParams = new URLSearchParams({
+    intent: 'login',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    ...(clientName && { client_name: clientName }),
+    ...(stateParam && { state: stateParam }),
+    ...(scope && { scope }),
+    ...(codeChallenge && { code_challenge: codeChallenge }),
+    ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+  });
+  const qqRegisterHref = `/api/auth/qq?${qqRegisterParams.toString()}`;
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -92,6 +107,7 @@ export function RegisterPage() {
   const [challenge, setChallenge] = useState<ChallengeQuestion | null>(null);
   const [challengeAnswer, setChallengeAnswer] = useState('');
   const [challengeError, setChallengeError] = useState('');
+  const [challengeLoading, setChallengeLoading] = useState(true);
 
   useEffect(() => {
     if (user) {
@@ -109,14 +125,18 @@ export function RegisterPage() {
   }, []);
 
   useEffect(() => {
+    setChallengeLoading(true);
     api
-      .get<{ success: boolean; challenge?: ChallengeQuestion }>('/api/challenge/random')
+      .get<{ success: boolean; challenge_id?: string | number | null; question?: string | null }>('/api/challenge/random')
       .then((res) => {
-        if (res.success && res.challenge) {
-          setChallenge(res.challenge);
+        if (res.success && res.challenge_id && res.question) {
+          setChallenge({ challenge_id: res.challenge_id, question: res.question });
+        } else {
+          setChallenge(null);
         }
       })
-      .catch(() => {});
+      .catch(() => setChallengeError('验证问题加载失败，请稍后重试'))
+      .finally(() => setChallengeLoading(false));
   }, []);
 
   function runValidation() {
@@ -203,26 +223,19 @@ export function RegisterPage() {
       return;
     }
 
+    if (challenge && !challengeAnswer.trim()) {
+      setChallengeError('请输入验证答案');
+      return;
+    }
+
     setLoading(true);
     try {
-      if (challenge) {
-        try {
-          await api.post('/api/challenge/verify', {
-            answer: challengeAnswer,
-            csrf: challenge.csrf,
-          });
-        } catch {
-          setChallengeError('答案不正确');
-          setLoading(false);
-          return;
-        }
-      }
-
       const res = await api.post<{ success: boolean; message: string }>('/api/register', {
         username: username.trim(),
         email: email.trim(),
         password,
         email_code: emailCode,
+        ...(challenge && { challenge_id: challenge.challenge_id, challenge_answer: challengeAnswer.trim() }),
       });
 
       if (res.success) {
@@ -236,6 +249,9 @@ export function RegisterPage() {
               client_id: clientId,
               redirect_uri: redirectUri,
               ...(stateParam && { state: stateParam }),
+              ...(scope && { scope }),
+              ...(codeChallenge && { code_challenge: codeChallenge }),
+              ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
             });
             window.location.href = `/api/authorize?${oauthParams.toString()}`;
           } else {
@@ -252,6 +268,8 @@ export function RegisterPage() {
 
       if (code === 'EMAIL_CODE_INVALID' || code === 'EMAIL_CODE_MISMATCH' || code === 'EMAIL_CODE_MAX_FAILURES') {
         setCodeError(msg);
+      } else if (code?.startsWith('CHALLENGE_')) {
+        setChallengeError(msg);
       } else {
         toast('error', msg);
       }
@@ -266,21 +284,34 @@ export function RegisterPage() {
 
   return (
     <AuthShell
-      title={clientId && decodedClientName ? `注册 ${decodedClientName}` : '创建 MindAuth 账户'}
-      description={clientId && decodedClientName
-        ? `创建账户后将继续跳转到 ${decodedClientName} 完成授权。`
+      title={clientId && clientName ? `注册 ${clientName}` : '创建 MindAuth 账户'}
+      description={clientId && clientName
+        ? `创建账户后将继续跳转到 ${clientName} 完成授权。`
         : '注册后即可统一管理账户资料、会话状态和授权应用。'}
       footer={
-        <Link to="/login" className="inline-link">
-          已有账号？登录
-        </Link>
+        <div className="stack" style={{ alignItems: 'center', gap: 'var(--space-2)' }}>
+          <Link to="/login" className="inline-link">
+            已有账号？登录
+          </Link>
+          {isOAuthFlow ? (
+            <>
+              <span className="text-muted">或</span>
+              <a className="btn btn--secondary btn--lg btn--full" href={qqRegisterHref} data-testid="qq-register">
+                <span aria-hidden="true" style={{ fontWeight: 700 }}>Q</span> 使用 QQ 注册
+              </a>
+            </>
+          ) : null}
+        </div>
       }
     >
       <form id="register-form" onSubmit={handleSubmit} data-testid="register-form">
         <div className="stack">
-          {clientId && decodedClientName ? (
-            <div className="status-badge status-badge--info">注册后将继续连接：{decodedClientName}</div>
+          {clientId && clientName ? (
+            <div className="status-badge status-badge--info">注册后将继续连接：{clientName}</div>
           ) : null}
+          {errorParam || messageParam ? <div className="auth-form__alert" role="alert">{messageParam || errorParam}</div> : null}
+          {challengeLoading ? <div className="text-muted">正在加载验证问题...</div> : null}
+          {challengeError && !challenge ? <div className="auth-form__alert" role="alert">{challengeError}</div> : null}
           <TextField
             id="username"
             label="用户名"

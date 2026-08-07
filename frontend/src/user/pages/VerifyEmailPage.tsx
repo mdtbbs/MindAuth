@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import api from '@/api/client';
+import { useAuth } from '@/auth/AuthProvider';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
 
@@ -9,6 +10,7 @@ type Status = 'loading' | 'success' | 'error' | 'no-token';
 export function VerifyEmailPage() {
   const [params] = useSearchParams();
   const token = params.get('token');
+  const { loadCurrentUser } = useAuth();
   const [status, setStatus] = useState<Status>('loading');
   const [message, setMessage] = useState('');
 
@@ -20,15 +22,19 @@ export function VerifyEmailPage() {
 
     api
       .post<{ success: boolean; message: string }>('/api/email-verification/verify', { token })
-      .then((res) => {
+      .then(async (res) => {
+        if (!res.success) {
+          throw new Error(res.message || '验证失败');
+        }
         setStatus('success');
         setMessage(res.message || '邮箱验证成功');
+        await loadCurrentUser();
       })
       .catch((err: { message?: string }) => {
         setStatus('error');
         setMessage(err.message || '验证失败');
       });
-  }, [token]);
+  }, [token, loadCurrentUser]);
 
   const statusClass =
     status === 'success'
@@ -74,9 +80,9 @@ export function VerifyEmailPage() {
       <div className="stack">
         <div className={statusClass}>{statusText}</div>
         <p className="section-description">{description}</p>
-        <Link to="/dashboard">
+        <Link to={status === 'success' ? '/dashboard' : '/login'}>
           <Button variant="primary" fullWidth>
-            前往 Dashboard
+            {status === 'success' ? '前往 Dashboard' : '返回登录'}
           </Button>
         </Link>
       </div>
