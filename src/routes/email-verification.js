@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../db');
+const { pool, transaction } = require('../db');
 const { client } = require('../redis');
 const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
@@ -53,6 +53,7 @@ router.post('/send', requireAuth, sendRateLimiter, async (req, res) => {
       user_id: user.id,
       email: user.email
     }));
+    await client.sAdd(`verify_by_user:${user.id}`, tokenHash);
     await persistTokenToMysql(tokenHash, user.id, user.email, TOKEN_TTL);
 
     // Send verification email
@@ -81,18 +82,23 @@ router.post('/verify', async (req, res) => {
     // Look up by hash of the presented token
     const tokenHash = hashToken(token);
     let record = null;
-    const tokenData = await client.get(`verify:${tokenHash}`);
+    const tokenData = await client.getDel(`verify:${tokenHash}`);
     if (tokenData) {
       record = JSON.parse(tokenData);
+      await client.sRem(`verify_by_user:${record.user_id}`, tokenHash).catch(() => {});
+      await removeTokenFromMysql(tokenHash);
     } else {
-      // Fallback to MySQL — Redis may have lost data after a restart.
-      const [rows] = await pool.execute(
-        'SELECT user_id, email, expires_at FROM email_verification_tokens WHERE token = ?',
-        [tokenHash]
-      );
-      if (rows[0] && new Date(rows[0].expires_at) > new Date()) {
-        record = { user_id: rows[0].user_id, email: rows[0].email };
-      }
+      // MySQL fallback uses a row lock so concurrent requests cannot replay it.
+      await transaction(async (conn) => {
+        const [rows] = await conn.execute(
+          'SELECT user_id, email, expires_at FROM email_verification_tokens WHERE token = ? FOR UPDATE',
+          [tokenHash]
+        );
+        if (rows[0] && new Date(rows[0].expires_at) > new Date()) {
+          record = { user_id: rows[0].user_id, email: rows[0].email };
+          await conn.execute('DELETE FROM email_verification_tokens WHERE token = ?', [tokenHash]);
+        }
+      });
     }
 
     if (!record) {
@@ -100,11 +106,17 @@ router.post('/verify', async (req, res) => {
     }
 
     // Update user email_verified and possibly email
-    await pool.execute('UPDATE users SET email_verified = 1, email = ? WHERE id = ?', [record.email, record.user_id]);
+    try {
+      await pool.execute('UPDATE users SET email_verified = 1, email = ? WHERE id = ?', [record.email, record.user_id]);
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+        return res.status(409).json({ success: false, message: '该邮箱已被其他用户使用' });
+      }
+      throw err;
+    }
 
-    // Delete token (single-use) — from both Redis and MySQL
-    await client.del(`verify:${tokenHash}`);
-    await removeTokenFromMysql(tokenHash);
+    // Token was consumed before the update, so it cannot be replayed even if
+    // the target email became occupied concurrently.
 
     // Audit: email changed / verified
     const { logUserAudit } = require('../utils/userAudit');
@@ -117,6 +129,9 @@ router.post('/verify', async (req, res) => {
     res.json({ success: true, message: '邮箱验证成功' });
   } catch (err) {
     console.error('Verify email error:', err);
+    if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+      return res.status(409).json({ success: false, message: '该邮箱已被其他用户使用' });
+    }
     res.status(500).json({ success: false, message: '验证失败' });
   }
 });

@@ -27,7 +27,7 @@ function sloLogoutHandler(req, res) {
     const token = req.cookies && req.cookies.session;
     if (token) {
       try {
-        const authResult = await sessionManager.authenticateUserSession({ token });
+        const authResult = await sessionManager.authenticateUserSession(token);
         if (authResult && authResult.user) {
           await sessionManager.revokeUserSession({ token, userId: authResult.user.id });
         }

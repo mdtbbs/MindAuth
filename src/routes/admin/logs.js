@@ -72,7 +72,7 @@ router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'
   try {
     const { page, limit, user_id, login_type } = req.query;
     const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 100;
+    const limitNum = Math.min(parseInt(limit) || 50, 100);
     const offset = (pageNum - 1) * limitNum;
 
     let query = `
@@ -82,6 +82,7 @@ router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'
     `;
     let params = [];
 
+    const countQueryBase = `SELECT COUNT(*) AS total FROM login_logs l JOIN users u ON l.user_id = u.id`;
     const conditions = [];
     if (user_id) {
       conditions.push('l.user_id = ?');
@@ -96,14 +97,33 @@ router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'
       query += ' WHERE ' + conditions.join(' AND ');
     }
 
+    const countParams = [...params];
+    let countQuery = countQueryBase;
+    if (conditions.length > 0) {
+      countQuery += ' WHERE ' + conditions.join(' AND ');
+    }
+
     query += ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?';
     params.push(limitNum, offset);
 
     // pool.query (not execute): MySQL 8 rejects numeric LIMIT/OFFSET as
     // prepared-statement params (ER_WRONG_ARGUMENTS); same pattern as ipBans.js
-    const [logs] = await pool.query(query, params);
+    const [[countRows], [logs]] = await Promise.all([
+      pool.query(countQuery, countParams),
+      pool.query(query, params),
+    ]);
+    const total = Number(countRows[0]?.total || 0);
 
-    res.json({ success: true, logs });
+    res.json({
+      success: true,
+      logs,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
   } catch (err) {
     console.error('Get login logs error:', err);
     res.status(500).json({ success: false, message: '获取登录日志失败' });

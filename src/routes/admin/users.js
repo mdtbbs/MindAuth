@@ -10,6 +10,7 @@ const { getClientIp } = require('../../utils/request');
 const { createNotification } = require('../../utils/notify');
 const config = require('../../config');
 const sessionManager = require('../../modules/sessions/sessionManager');
+const tokenStore = require('../../modules/oauth/tokenStore');
 const auditWriter = require('../../modules/audit/auditWriter');
 
 const BAN_DURATIONS = {
@@ -447,6 +448,12 @@ router.post('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async
     // Revoke all user sessions so the banned user is immediately logged out
     await sessionManager.revokeAllUserSessions(parseInt(id));
     await sessionManager.revokeAdminSessionsForUser(parseInt(id));
+    const [oauthClients] = await pool.execute(
+      'SELECT DISTINCT client_id FROM refresh_tokens WHERE user_id = ?',
+      [id]
+    );
+    await Promise.all(oauthClients.map(({ client_id }) => tokenStore.revokeAccessTokensForUserClient(parseInt(id), client_id)));
+    await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [id]);
 
     await createNotification({
       user_id: parseInt(id), type: 'account_banned', title: '账号已被封禁',

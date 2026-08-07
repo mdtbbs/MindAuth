@@ -185,6 +185,12 @@ router.post('/change-email', requireAuth, async (req, res) => {
       return res.status(409).json({ success: false, message: '该邮箱已被其他用户使用' });
     }
 
+    // A new request supersedes all outstanding verification links for this user.
+    const oldTokens = await client.sMembers(`verify_by_user:${user.id}`).catch(() => []);
+    if (oldTokens.length > 0) await Promise.all(oldTokens.map((hash) => client.del(`verify:${hash}`)));
+    await client.del(`verify_by_user:${user.id}`);
+    await pool.execute('DELETE FROM email_verification_tokens WHERE user_id = ?', [user.id]);
+
     // Generate verification token — store only its hash server-side; the raw
     // token goes into the emailed link (verify endpoint looks up by hash)
     const token = generateToken();
@@ -195,6 +201,7 @@ router.post('/change-email', requireAuth, async (req, res) => {
       user_id: user.id,
       email: new_email
     }));
+    await client.sAdd(`verify_by_user:${user.id}`, tokenHash);
     try {
       const expiresAt = new Date(Date.now() + TOKEN_TTL * 1000).toISOString().slice(0, 19).replace('T', ' ');
       await pool.execute(

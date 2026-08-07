@@ -13,10 +13,13 @@ export function OAuthAuthorizePage() {
   const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const state = params.get('state') || '';
   const scope = params.get('scope') || '';
+  const codeChallenge = params.get('code_challenge') || '';
+  const codeChallengeMethod = params.get('code_challenge_method') || '';
   const clientName = params.get('client_name') || '';
-  const decodedClientName = clientName ? decodeURIComponent(clientName) : '';
+  const errorParam = params.get('error') || '';
+  const messageParam = params.get('message') || '';
 
-  const [error, setError] = useState('');
+  const [error, setError] = useState(messageParam || errorParam ? messageParam || errorParam : '');
 
   useEffect(() => {
     if (user && !authLoading && clientId && redirectUri) {
@@ -25,10 +28,12 @@ export function OAuthAuthorizePage() {
         redirect_uri: redirectUri,
         ...(state && { state }),
         ...(scope && { scope }),
+        ...(codeChallenge && { code_challenge: codeChallenge }),
+        ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
       });
       window.location.href = `/api/authorize?${oauthParams.toString()}`;
     }
-  }, [user, authLoading, clientId, redirectUri, state, scope]);
+  }, [user, authLoading, clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -37,11 +42,13 @@ export function OAuthAuthorizePage() {
         ...(redirectUri && { redirect_uri: redirectUri }),
         ...(state && { state }),
         ...(scope && { scope }),
+        ...(codeChallenge && { code_challenge: codeChallenge }),
+        ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
         ...(clientName && { client_name: clientName }),
       });
       navigate(`/login?${loginParams.toString()}`, { replace: true });
     }
-  }, [user, authLoading, clientId, redirectUri, state, scope, clientName, navigate]);
+  }, [user, authLoading, clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod, clientName, navigate]);
 
   useEffect(() => {
     if (!clientId || !redirectUri) {
@@ -52,7 +59,7 @@ export function OAuthAuthorizePage() {
   return (
     <AuthShell
       title="应用授权"
-      description={decodedClientName ? `正在准备连接 ${decodedClientName}。` : '正在准备应用授权请求。'}
+      description={clientName ? `正在准备连接 ${clientName}。` : '正在准备应用授权请求。'}
       footer={
         <>
           <Link to="/login" className="inline-link">
@@ -76,7 +83,7 @@ export function OAuthAuthorizePage() {
       ) : (
         <div className="stack">
           <div className="status-badge status-badge--info">
-            {decodedClientName ? `正在连接应用：${decodedClientName}` : '正在处理授权请求'}
+            {clientName ? `正在连接应用：${clientName}` : '正在处理授权请求'}
           </div>
           <p className="section-description">
             {authLoading

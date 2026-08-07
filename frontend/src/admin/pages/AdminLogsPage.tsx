@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/api/client';
 import { useAdminAuth } from '../AdminAuthProvider';
 import { useToast } from '@/shared/ToastProvider';
@@ -24,6 +24,12 @@ export function AdminLogsPage() {
 
   const visibleTabs = tabs.filter((t) => hasPermission(t.perm));
 
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(visibleTabs[0].id);
+    }
+  }, [activeTab, visibleTabs.map((tab) => tab.id).join(',')]);
+
   return (
     <div>
       <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-6)' }}>
@@ -35,6 +41,10 @@ export function AdminLogsPage() {
         {visibleTabs.map((tab) => (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`logs-panel-${tab.id}`}
+            id={`logs-tab-${tab.id}`}
             onClick={() => setActiveTab(tab.id)}
             style={{
               padding: 'var(--space-2) var(--space-4)',
@@ -52,9 +62,15 @@ export function AdminLogsPage() {
         ))}
       </div>
 
-      {activeTab === 'login' && <LoginLogsSection />}
-      {activeTab === 'audit' && <AuditLogsSection />}
-      {activeTab === 'sms' && <SmsLogsSection />}
+      {activeTab === 'login' && (
+        <div role="tabpanel" id="logs-panel-login" aria-labelledby="logs-tab-login"><LoginLogsSection /></div>
+      )}
+      {activeTab === 'audit' && (
+        <div role="tabpanel" id="logs-panel-audit" aria-labelledby="logs-tab-audit"><AuditLogsSection /></div>
+      )}
+      {activeTab === 'sms' && (
+        <div role="tabpanel" id="logs-panel-sms" aria-labelledby="logs-tab-sms"><SmsLogsSection /></div>
+      )}
     </div>
   );
 }
@@ -69,8 +85,10 @@ function LoginLogsSection() {
   const [userIdFilter, setUserIdFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const debouncedUserId = useDebouncedValue(userIdFilter, 300);
+  const requestSeq = useRef(0);
 
   const loadLogs = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -82,9 +100,10 @@ function LoginLogsSection() {
       const res = await api.get<{ success: boolean; logs: AdminLoginLogEntry[] }>(
         `/api/admin/login-logs?${params.toString()}`
       );
+      if (seq !== requestSeq.current) return;
       setLogs(res.logs);
-    } catch { toast('error', '获取登录日志失败'); }
-    finally { setLoading(false); }
+    } catch { if (seq === requestSeq.current) toast('error', '获取登录日志失败'); }
+    finally { if (seq === requestSeq.current) setLoading(false); }
   }, [currentPage, debouncedUserId, typeFilter, toast]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
@@ -151,8 +170,10 @@ function AuditLogsSection() {
   const [actionFilter, setActionFilter] = useState('');
   const [targetTypeFilter, setTargetTypeFilter] = useState('');
   const debouncedAction = useDebouncedValue(actionFilter, 300);
+  const requestSeq = useRef(0);
 
   const loadLogs = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -164,10 +185,11 @@ function AuditLogsSection() {
       const res = await api.get<{ success: boolean; logs: AuditLogEntry[]; pagination?: PaginationData }>(
         `/api/admin/audit-logs?${params.toString()}`
       );
+      if (seq !== requestSeq.current) return;
       setLogs(res.logs);
       if (res.pagination) setPagination(res.pagination);
-    } catch { toast('error', '获取审计日志失败'); }
-    finally { setLoading(false); }
+    } catch { if (seq === requestSeq.current) toast('error', '获取审计日志失败'); }
+    finally { if (seq === requestSeq.current) setLoading(false); }
   }, [currentPage, debouncedAction, targetTypeFilter, toast]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
@@ -260,7 +282,10 @@ function SmsLogsSection() {
   const [phoneLast4, setPhoneLast4] = useState('');
   const debouncedPhone = useDebouncedValue(phoneLast4, 300);
 
+  const requestSeq = useRef(0);
+
   const loadLogs = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -272,10 +297,11 @@ function SmsLogsSection() {
       const res = await api.get<{ success: boolean; logs: SmsAuditLogEntry[]; pagination?: PaginationData }>(
         `/api/admin/sms-audit-logs?${params.toString()}`
       );
+      if (seq !== requestSeq.current) return;
       setLogs(res.logs);
       if (res.pagination) setPagination(res.pagination);
-    } catch { toast('error', '获取短信审计日志失败'); }
-    finally { setLoading(false); }
+    } catch { if (seq === requestSeq.current) toast('error', '获取短信审计日志失败'); }
+    finally { if (seq === requestSeq.current) setLoading(false); }
   }, [currentPage, actionFilter, debouncedPhone, toast]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);

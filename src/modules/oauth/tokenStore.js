@@ -102,7 +102,12 @@ async function getAccessTokenTtl(token) {
  * @param {string} token
  */
 async function revokeAccessToken(token) {
-  await client.del(`accesstoken:${hashToken(token)}`);
+  const tokenHash = hashToken(token);
+  const tokenData = await getAccessToken(token);
+  await client.del(`accesstoken:${tokenHash}`);
+  if (tokenData?.user_id !== undefined && tokenData?.client_id !== undefined) {
+    await client.sRem(`accesstokens_by_userclient:${tokenData.user_id}:${tokenData.client_id}`, tokenHash);
+  }
 }
 
 /**
@@ -172,6 +177,43 @@ async function deleteDeviceCode(deviceCode) {
 }
 
 /**
+ * Atomically consume an approved device code.
+ * Returns the payload only when it belongs to the client and is approved.
+ */
+async function consumeApprovedDeviceCode(deviceCode, clientId) {
+  const key = `device:${deviceCode}`;
+  let raw;
+  if (typeof client.eval === 'function') {
+    raw = await client.eval(`
+      local value = redis.call('GET', KEYS[1])
+      if not value then return false end
+      local data = cjson.decode(value)
+      if data.client_id ~= ARGV[1] or data.approved ~= true then return false end
+      redis.call('DEL', KEYS[1])
+      return value
+    `, { keys: [key], arguments: [clientId] });
+  } else {
+    // Compatibility for the in-memory/test Redis client. Production Redis
+    // uses the Lua branch above for atomic validation and deletion.
+    raw = await client.getDel(key);
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.client_id !== clientId || data.approved !== true) return null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Store a mapping from user_code to device_code.
  *
  * @param {string} userCode - The user-facing code (LL-XXXX-XXXX).
@@ -213,6 +255,7 @@ module.exports = {
   getDeviceCode,
   updateDeviceCode,
   deleteDeviceCode,
+  consumeApprovedDeviceCode,
   storeUserCode,
   getDeviceCodeByUserCode,
   deleteUserCode,

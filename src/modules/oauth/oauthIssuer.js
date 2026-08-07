@@ -94,6 +94,13 @@ function hashRefreshToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
 }
 
+async function assertUserNotBanned(userId) {
+  const [rows] = await pool.execute('SELECT ban_status FROM users WHERE id = ?', [userId]);
+  if (!rows[0] || rows[0].ban_status === 'banned') {
+    throw new OAuthError(401, 'invalid_token', rows[0] ? '用户已被封禁' : '用户不存在');
+  }
+}
+
 // ─── Client verification ──────────────────────────────────────
 
 /**
@@ -325,12 +332,15 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
 
   // 6. Get user info
   const [userRows] = await pool.execute(
-    'SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?',
+    'SELECT id, username, email, phone_verified, phone_verified_at, created_at, ban_status FROM users WHERE id = ?',
     [codeData.user_id]
   );
   const user = userRows[0];
   if (!user) {
     throw new OAuthError(401, 'invalid_grant', '授权用户不存在');
+  }
+  if (user.ban_status === 'banned') {
+    throw new OAuthError(401, 'invalid_grant', '用户已被封禁');
   }
 
   // 7. Generate tokens
@@ -420,12 +430,15 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
 
       // Get user info (within transaction for consistency)
       const [userRows] = await conn.execute(
-        'SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?',
+        'SELECT id, username, email, phone_verified, phone_verified_at, created_at, ban_status FROM users WHERE id = ?',
         [row.user_id]
       );
       user = userRows[0];
       if (!user) {
         throw new Error('USER_NOT_FOUND');
+      }
+      if (user.ban_status === 'banned') {
+        throw new Error('USER_BANNED');
       }
 
       // Generate new tokens (rotation)
@@ -443,8 +456,8 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
     if (txErr.message === 'TOKEN_NOT_FOUND' || txErr.message === 'TOKEN_REVOKED' || txErr.message === 'TOKEN_EXPIRED') {
       throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
     }
-    if (txErr.message === 'USER_NOT_FOUND') {
-      throw new OAuthError(401, 'invalid_grant', '用户不存在');
+    if (txErr.message === 'USER_NOT_FOUND' || txErr.message === 'USER_BANNED') {
+      throw new OAuthError(401, 'invalid_grant', txErr.message === 'USER_BANNED' ? '用户已被封禁' : '用户不存在');
     }
     throw txErr;
   }
@@ -490,6 +503,12 @@ async function introspect({ token, clientId, clientSecret }) {
   // other clients' tokens.
   const tokenData = await tokenStore.getAccessToken(token);
   if (tokenData && tokenData.client_id === clientId) {
+    try {
+      await assertUserNotBanned(tokenData.user_id);
+    } catch (err) {
+      if (err instanceof OAuthError) return { active: false };
+      throw err;
+    }
     const ttl = await tokenStore.getAccessTokenTtl(token);
     return {
       active: true,
@@ -508,6 +527,12 @@ async function introspect({ token, clientId, clientSecret }) {
   );
   const refreshToken = refreshRows[0];
   if (refreshToken) {
+    try {
+      await assertUserNotBanned(refreshToken.user_id);
+    } catch (err) {
+      if (err instanceof OAuthError) return { active: false };
+      throw err;
+    }
     return {
       active: true,
       token_type: 'refresh_token',
@@ -573,6 +598,7 @@ async function userinfo(accessToken) {
   if (!tokenData) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
+  await assertUserNotBanned(tokenData.user_id);
 
   const scope = tokenData.scope || 'openid profile email';
 
@@ -637,6 +663,7 @@ async function userByAccessToken(accessToken) {
   if (!tokenData) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
+  await assertUserNotBanned(tokenData.user_id);
 
   const [userRows] = await pool.execute(
     'SELECT id, username, email, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?',
@@ -801,6 +828,7 @@ async function issueDeviceCode({ clientId, scope }) {
   // 5. Store device code in Redis
   const deviceData = {
     client_id: clientId,
+    user_code: userCode,
     scope: effectiveScope,
     user_id: null,
     approved: false,
@@ -914,15 +942,24 @@ async function exchangeDeviceToken({ clientId, deviceCode }) {
     throw new OAuthError(400, 'authorization_pending', '等待用户授权');
   }
 
+  // Consume only after approval checks, atomically with the Redis delete.
+  // This prevents concurrent polls from redeeming the same device code.
+  const consumedData = await tokenStore.consumeApprovedDeviceCode(deviceCode, clientId);
+  if (!consumedData) {
+    throw new OAuthError(400, 'expired_token', '设备码已过期或已使用');
+  }
+  const effectiveDeviceData = consumedData;
+
   // 5. Check if denied (approved but no user_id means denied)
-  if (!deviceData.user_id) {
+  if (!effectiveDeviceData.user_id) {
+    await tokenStore.deleteUserCode(effectiveDeviceData.user_code);
     throw new OAuthError(400, 'access_denied', '用户拒绝授权');
   }
 
   // 6. Get user info
   const [userRows] = await pool.execute(
     'SELECT id, username, email, phone_verified, phone_verified_at, created_at FROM users WHERE id = ?',
-    [deviceData.user_id]
+    [effectiveDeviceData.user_id]
   );
   const user = userRows[0];
   if (!user) {
@@ -933,7 +970,7 @@ async function exchangeDeviceToken({ clientId, deviceCode }) {
   const accessToken = generateToken();
   const refreshToken = generateToken();
   const refreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
-  const effectiveScope = deviceData.scope || 'openid profile email';
+  const effectiveScope = effectiveDeviceData.scope || 'openid profile email';
 
   // 8. Store access token in Redis
   await tokenStore.storeAccessToken(accessToken, {
@@ -949,12 +986,8 @@ async function exchangeDeviceToken({ clientId, deviceCode }) {
     [user.id, clientId, hashRefreshToken(refreshToken), effectiveScope, refreshExpiresAt]
   );
 
-  // 10. Delete device code (single-use)
-  const userCode = Object.keys(await tokenStore.getDeviceCode(deviceCode) || {}).userCode;
-  if (userCode) {
-    await tokenStore.deleteUserCode(userCode);
-  }
-  await tokenStore.deleteDeviceCode(deviceCode);
+  // 10. Delete the user-code mapping after successful token issuance.
+  await tokenStore.deleteUserCode(effectiveDeviceData.user_code);
 
   // 11. Upsert authorization record
   await pool.execute(`

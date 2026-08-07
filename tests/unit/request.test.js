@@ -162,30 +162,19 @@ test('getClientIp falls back to remote address when ali-real-client-ip and X-For
 
 // ─── getClientIp: untrusted paths ────────────────────────────
 
-test('getClientIp always reads ali-real-client-ip header (no trusted-proxy gate)', () => {
+test('getClientIp uses remote address when proxy is not trusted', () => {
   const req = makeReq(UNTRUSTED_REMOTE, {
     'ali-real-client-ip': '1.2.3.4',
     'x-forwarded-for': '5.6.7.8',
-    'cf-connecting-ip': '2001:db8::1',
   });
-  // ali-real-client-ip has highest priority
-  assert.equal(getClientIp(req), '1.2.3.4');
+  assert.equal(getClientIp(req), UNTRUSTED_REMOTE);
 });
 
-test('getClientIp prefers x-real-ip over cf-connecting-ip when ali-real-client-ip missing', () => {
-  const req = makeReq(UNTRUSTED_REMOTE, {
-    'x-real-ip': '5.6.7.8',
-    'cf-connecting-ip': '2001:db8::1',
-    'x-forwarded-for': '9.9.9.9',
+test('getClientIp ignores proxy headers when remote is outside whitelist', () => {
+  withRequestModule({ enabled: 'true', ips: '172.16.0.0/12' }, ({ getClientIp: restrictedGetClientIp }) => {
+    const req = makeReq('173.16.8.23', { 'x-forwarded-for': '198.51.100.10' });
+    assert.equal(restrictedGetClientIp(req), '173.16.8.23');
   });
-  assert.equal(getClientIp(req), '5.6.7.8');
-});
-
-test('getClientIp falls through to x-forwarded-for when dedicated headers missing', () => {
-  const req = makeReq(UNTRUSTED_REMOTE, {
-    'x-forwarded-for': '203.0.113.5, 10.0.0.1',
-  });
-  assert.equal(getClientIp(req), '203.0.113.5');
 });
 
 test('getClientIp strips IPv6-mapped prefix on fallback', () => {
@@ -214,11 +203,10 @@ test('getClientIp accepts IPv4 CIDR trusted proxy ranges', () => {
   });
 });
 
-test('getClientIp reads x-forwarded-for regardless of whether remote is in CIDR whitelist', () => {
+test('getClientIp uses remote address when remote is outside CIDR whitelist', () => {
   withRequestModule({ enabled: 'true', ips: '172.16.0.0/12' }, ({ getClientIp: cidrGetClientIp }) => {
-    // 173.16.8.23 is NOT in 172.16.0.0/12 — but headers are read unconditionally
     const req = makeReq('173.16.8.23', { 'x-forwarded-for': '198.51.100.10' });
-    assert.equal(cidrGetClientIp(req), '198.51.100.10');
+    assert.equal(cidrGetClientIp(req), '173.16.8.23');
   });
 });
 
@@ -251,14 +239,13 @@ test('getClientIp trusts cached Aliyun ESA proxy entries when auto trust is enab
   });
 });
 
-test('getClientIp reads ali-real-client-ip unconditionally even when remote is not in ESA cache', () => {
+test('getClientIp uses remote address when remote is not in ESA cache', () => {
   withRequestModule({ enabled: 'true', ips: '', cloudflare: 'false', aliyunAutoTrust: 'true' }, ({ getClientIp: esaGetClientIp }) => {
     const esaProxy = require('../../src/utils/aliyunEsaTrustedProxy');
     esaProxy._setCachedEntries(['203.0.113.0/24']);
 
-    // 198.51.100.77 is NOT in ESA cache — but header is still read
     const req = makeReq('198.51.100.77', { 'ali-real-client-ip': '198.51.100.12' });
-    assert.equal(esaGetClientIp(req), '198.51.100.12');
+    assert.equal(esaGetClientIp(req), '198.51.100.77');
   });
 });
 

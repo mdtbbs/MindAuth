@@ -266,9 +266,9 @@ function isTrustedProxy(req) {
 
 /**
  * Extract client IP address from request.
- * Unconditionally reads common CDN / reverse-proxy headers in priority order,
- * mirroring how other CDNs (NGINx `X-Real-IP`, CF `CF-Connecting-IP`, ESA
- * `ali-real-client-ip`, standard `X-Forwarded-For`) are handled:
+ * Reads common CDN / reverse-proxy headers only when the direct peer is
+ * trusted, mirroring how other CDNs (NGINx `X-Real-IP`, CF `CF-Connecting-IP`,
+ * ESA `ali-real-client-ip`, standard `X-Forwarded-For`) are handled:
  *
  *   1. ali-real-client-ip   (Aliyun ESA / DCDN)
  *   2. x-real-ip            (NGINX / generic CDN)
@@ -287,6 +287,11 @@ function isTrustedProxy(req) {
  * @returns {string} Client IP address
  */
 function getClientIp(req) {
+  if (!isTrustedProxy(req)) {
+    const remoteAddr = req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown';
+    return remoteAddr.replace(/^::ffff:/, '') || 'unknown';
+  }
+
   const candidates = [
     req.headers['ali-real-client-ip'],
     req.headers['x-real-ip'],

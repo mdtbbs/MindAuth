@@ -36,6 +36,14 @@ module.exports = tseslint.config(
     },
   },
 
+  // Browser shims installed by the frontend test setup.
+  {
+    files: ['tests/helpers/test-setup.js'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+
   // ESM config files (playwright.config.js, vite.config.ts handled by TS block)
   {
     files: ['*.config.js', '*.config.mjs'],

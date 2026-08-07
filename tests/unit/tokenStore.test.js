@@ -25,6 +25,13 @@ const mockRedisClient = {
     return 1;
   },
   sMembers: async (key) => (sets.has(key) ? [...sets.get(key)] : []),
+  sRem: async (key, member) => {
+    const set = sets.get(key);
+    if (!set) return 0;
+    const removed = set.delete(member);
+    if (set.size === 0) sets.delete(key);
+    return removed ? 1 : 0;
+  },
 };
 
 // Install the mock before requiring tokenStore
