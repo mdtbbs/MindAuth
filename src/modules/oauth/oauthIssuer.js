@@ -30,6 +30,7 @@ const crypto = require('crypto');
 const { pool, transaction } = require('../../db');
 const { timingSafeCompare } = require('../../utils/crypto');
 const { generateShortToken, generateToken } = require('../../utils/token');
+const { hashClientSecret, isHashedClientSecret } = require('../../utils/secrets');
 const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../../utils/datetime');
 const { maskPhone } = require('../../utils/phone');
 const sessionManager = require('../sessions/sessionManager');
@@ -122,7 +123,9 @@ async function verifyClient(clientId, clientSecret) {
     [clientId]
   );
   const row = rows[0];
-  if (!row || !timingSafeCompare(String(clientSecret), String(row.client_secret))) {
+  const storedSecret = row && String(row.client_secret || '');
+  const presentedSecret = isHashedClientSecret(storedSecret) ? hashClientSecret(clientSecret) : String(clientSecret);
+  if (!row || !timingSafeCompare(presentedSecret, storedSecret)) {
     throw new OAuthError(401, 'invalid_client', '无效的 client_id 或 client_secret');
   }
   return row;

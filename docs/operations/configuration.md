@@ -158,3 +158,6 @@
 注意：非生产环境（`NODE_ENV !== 'production'`）下邮件不实际发送，仅打印到控制台。
 
 已知遗留：SMTP 密码与阿里云 AccessKeySecret 目前在数据库中明文存储（管理端回显已脱敏），静态加密需应用级密钥管理，详见 [安全架构文档](../architecture/security.md)。
+> 敏感配置说明：数据库中的 SMTP 密码和阿里云 `AccessKeySecret` 使用
+> AES-256-GCM 加密，密钥由 `SECRETS_ENCRYPTION_KEY` 提供。升级时启动迁移会
+> 转换旧明文值，生产环境必须配置该密钥。

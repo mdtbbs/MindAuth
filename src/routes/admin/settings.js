@@ -15,6 +15,7 @@ const runtimeConfig = require('../../modules/config/runtimeConfig');
 const auditWriter = require('../../modules/audit/auditWriter');
 const { backgroundUpload } = require('../../middleware/upload');
 const { tryRemovePublicFile } = require('../../utils/publicFiles');
+const { encryptSecret } = require('../../utils/secrets');
 
 // GET /stats - Dashboard statistics
 router.get('/stats', requireAdmin, async (req, res) => {
@@ -137,10 +138,10 @@ router.put('/email-config', requireAdmin, requireAdminPermission('email_config.w
       return res.status(400).json({ success: false, message: '主机、端口、用户名和发件人必填' });
     }
 
-    let finalPassword = password;
+    let finalPassword = password ? encryptSecret(password) : '';
     if (!password) {
       const [rows] = await pool.execute('SELECT password FROM email_config WHERE id = 1');
-      finalPassword = rows[0]?.password || '';
+      finalPassword = rows[0]?.password ? encryptSecret(rows[0].password) : '';
     }
 
     await pool.execute(`
@@ -220,10 +221,10 @@ router.put('/sms-config', requireAdmin, requireAdminPermission('sms_config.write
       return res.status(400).json({ success: false, message: '启用短信时 AccessKey ID、短信签名和模板 Code 必填' });
     }
 
-    let finalAccessKeySecret = access_key_secret;
+    let finalAccessKeySecret = access_key_secret ? encryptSecret(access_key_secret) : '';
     if (!access_key_secret) {
       const [rows] = await pool.execute('SELECT access_key_secret FROM sms_config WHERE id = 1');
-      finalAccessKeySecret = rows[0]?.access_key_secret || '';
+      finalAccessKeySecret = rows[0]?.access_key_secret ? encryptSecret(rows[0].access_key_secret) : '';
     }
 
     if (enabled && !finalAccessKeySecret) {

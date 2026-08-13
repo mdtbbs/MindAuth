@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getEncryptionKey } = require('../utils/secrets');
 
 /**
  * Validate the application configuration.
@@ -52,6 +53,12 @@ function validateConfig(config) {
     // memory — data loss on restart and no cross-instance sharing
     if (process.env.USE_MEMORY_REDIS === '1' || process.env.USE_MEMORY_REDIS === 'true') {
       errors.push('USE_MEMORY_REDIS must not be enabled in production');
+    }
+
+    try {
+      if (!getEncryptionKey()) errors.push('SECRETS_ENCRYPTION_KEY is required in production');
+    } catch (err) {
+      errors.push(err.message);
     }
   }
 

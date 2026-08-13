@@ -13,6 +13,7 @@
 
 const { pool } = require('../../db');
 const { generateToken, generateShortToken } = require('../../utils/token');
+const { hashClientSecret } = require('../../utils/secrets');
 const { writeAdminAudit } = require('../audit/auditWriter');
 
 // ─── Redirect URI validation ─────────────────────────────────
@@ -149,7 +150,7 @@ async function createClient(data, actor) {
 
   await pool.execute(
     'INSERT INTO clients (name, client_id, client_secret, redirect_uri, require_pkce) VALUES (?, ?, ?, ?, ?)',
-    [name, clientId, clientSecret, redirect_uri, pkceFlag]
+    [name, clientId, hashClientSecret(clientSecret), redirect_uri, pkceFlag]
   );
 
   await writeAdminAudit(
@@ -218,7 +219,7 @@ async function updateClient(id, data, actor) {
  */
 async function rotateSecret(id, actor) {
   const newSecret = generateToken();
-  await pool.execute('UPDATE clients SET client_secret = ? WHERE id = ?', [newSecret, id]);
+  await pool.execute('UPDATE clients SET client_secret = ? WHERE id = ?', [hashClientSecret(newSecret), id]);
 
   await writeAdminAudit(
     actor.adminId,

@@ -18,6 +18,7 @@
 const config = require('./config');
 const { validateConfig } = require('./config/validate');
 const { pool, closePool, runMigrations, seedTestFixtures } = require('./db');
+const { migrateSensitiveConfig } = require('./utils/secrets');
 const { client, connectRedis, closeRedis } = require('./redis');
 const { createApp } = require('./app');
 const { startCleanupScheduler } = require('./utils/cleanup');
@@ -40,6 +41,8 @@ async function start() {
   // 2. Connect to MySQL and run migrations
   await runMigrations(pool);
   console.log('MySQL database migrated');
+  const migratedSecrets = await migrateSensitiveConfig(pool);
+  if (migratedSecrets > 0) console.log(`Migrated ${migratedSecrets} stored provider secret(s) to encrypted form`);
 
   // 3. Seed test data only when the environment explicitly allows it.
   const shouldSeedTestData = ['development', 'test'].includes(process.env.NODE_ENV) || process.env.ENABLE_TEST_SEEDS === 'true';

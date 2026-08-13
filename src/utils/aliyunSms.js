@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { client } = require('../redis');
 const { pool } = require('../db');
+const { decryptSecret } = require('./secrets');
 
 const ENDPOINT = 'dysmsapi.aliyuncs.com';
 const SIGNATURE_ALGORITHM = 'ACS3-HMAC-SHA256';
@@ -56,7 +57,7 @@ async function getSmsConfig() {
       return {
         enabled: true,
         accessKeyId: dbConfig.access_key_id,
-        accessKeySecret: dbConfig.access_key_secret,
+        accessKeySecret: decryptSecret(dbConfig.access_key_secret),
         signName: dbConfig.sign_name,
         templateCode: dbConfig.template_code,
       };

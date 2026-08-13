@@ -1,6 +1,6 @@
 {
   "name": "mindauth",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "MindAuth - OAuth 2.0 authentication service with MySQL and Redis",
   "main": "src/server.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "test:integration": "node --test tests/integration/*.test.js",
     "test:e2e": "npx playwright test",
     "test:verify-routing": "node scripts/verify-routing.js",
+    "test:secrets": "node --test tests/unit/secrets.test.js",
     "verify": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {

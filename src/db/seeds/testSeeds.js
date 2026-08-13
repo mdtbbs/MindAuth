@@ -9,6 +9,7 @@
  */
 
 const bcrypt = require('bcrypt');
+const { hashClientSecret } = require('../../utils/secrets');
 
 /**
  * Seed all test fixtures (admin accounts, OAuth clients).
@@ -88,6 +89,7 @@ async function seedTestOAuthClient(pool) {
 
   for (const client of testClients) {
     try {
+      const storedSecret = hashClientSecret(client.client_secret);
       const [existing] = await pool.execute(
         'SELECT id, name, client_secret, redirect_uri FROM clients WHERE client_id = ?',
         [client.client_id]
@@ -96,19 +98,19 @@ async function seedTestOAuthClient(pool) {
       if (existing.length === 0) {
         await pool.execute(
           'INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)',
-          [client.name, client.client_id, client.client_secret, client.redirect_uri]
+          [client.name, client.client_id, storedSecret, client.redirect_uri]
         );
         console.log(`Test OAuth client '${client.name}' created`);
       } else if (
         existing[0].name !== client.name ||
-        existing[0].client_secret !== client.client_secret ||
+        existing[0].client_secret !== storedSecret ||
         existing[0].redirect_uri !== client.redirect_uri
       ) {
         // Dev/test fixtures must match the seed definition exactly — E2E tests
         // depend on these values.  Sync rows left behind by older seed data.
         await pool.execute(
           'UPDATE clients SET name = ?, client_secret = ?, redirect_uri = ? WHERE id = ?',
-          [client.name, client.client_secret, client.redirect_uri, existing[0].id]
+          [client.name, storedSecret, client.redirect_uri, existing[0].id]
         );
         console.log(`Test OAuth client '${client.name}' re-synced to seed values`);
       }

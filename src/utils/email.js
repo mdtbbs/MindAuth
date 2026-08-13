@@ -5,6 +5,7 @@
 
 const nodemailer = require('nodemailer');
 const { pool } = require('../db');
+const { decryptSecret } = require('./secrets');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -12,7 +13,7 @@ async function getEmailConfig() {
   try {
     // 先尝试数据库配置
     const [rows] = await pool.execute('SELECT host, port, user, password, `from`, secure FROM email_config WHERE id = 1');
-    const dbConfig = rows[0];
+    const dbConfig = rows[0] ? { ...rows[0], password: decryptSecret(rows[0].password) } : rows[0];
 
     // 如果数据库有完整配置（包括密码），使用数据库
     if (dbConfig && dbConfig.host && dbConfig.user && dbConfig.password) {

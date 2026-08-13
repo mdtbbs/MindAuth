@@ -11,6 +11,7 @@
 
 const { runMigrations } = require('./migrator');
 const { seedTestFixtures } = require('./seeds/testSeeds');
+const { hashClientSecret } = require('../utils/secrets');
 
 // Backward-compatible aliases (deprecated).
 async function initSchema(pool) {
@@ -58,7 +59,7 @@ async function seedTestOAuthClient(pool) {
       if (existing.length === 0) {
         await targetPool.execute(
           'INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)',
-          [c.name, c.client_id, c.client_secret, c.redirect_uri]
+          [c.name, c.client_id, hashClientSecret(c.client_secret), c.redirect_uri]
         );
       }
     } catch (err) {

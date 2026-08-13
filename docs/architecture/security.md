@@ -132,3 +132,8 @@ CORS 策略（app.js，`credentials: true`）：**同源请求（Origin host 与
 | `client_secret` 明文存储于 `clients` 表 | 比较走 `timingSafeCompare`；migration 002 已删除内嵌 secret 的凭据索引，避免索引页泄漏 | 哈希化后无法回显原文，需向所有第三方接入方**重新签发** client_secret 并协调切换窗口 |
 | SMTP 密码 / 阿里云 AccessKeySecret 明文存于 `email_config` / 配置 | 管理端回显已脱敏 | 静态加密需要应用层密钥管理（密钥从何而来、如何轮换）；单靠 DB 内加密而密钥同库存放并无实质收益 |
 | CSP `script-src 'unsafe-inline'` | 见上节 | 先将 `public/error.html` 等遗留页面的内联脚本外置 |
+### 敏感配置存储
+
+OAuth 客户端密钥以 `sha256:<hex>` 哈希存储，SMTP 密码和阿里云短信
+`AccessKeySecret` 以 AES-256-GCM 加密存储。生产环境必须配置
+`SECRETS_ENCRYPTION_KEY`；启动时会将旧数据库中的明文值迁移为加密值。
