@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '@/api/client';
+import api, { ApiError } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { Card, CardTitle, CardDescription } from '@/shared/Card';
@@ -50,6 +50,7 @@ export function DashboardPage() {
   const [smsPhone, setSmsPhone] = useState('');
   const [smsLoading, setSmsLoading] = useState(false);
   const [smsSent, setSmsSent] = useState(false);
+  const [smsCooldownSeconds, setSmsCooldownSeconds] = useState(0);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -87,6 +88,14 @@ export function DashboardPage() {
     }
   }, [user, loadDashboardData]);
 
+  useEffect(() => {
+    if (smsCooldownSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setSmsCooldownSeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [smsCooldownSeconds]);
+
   async function handleLogout() {
     await logout();
     navigate('/login', { replace: true });
@@ -107,14 +116,22 @@ export function DashboardPage() {
       toast('error', '请输入手机号');
       return;
     }
+    if (smsCooldownSeconds > 0) return;
     setSmsLoading(true);
     try {
       await api.post('/api/sms/send', { phone: smsPhone.trim() });
       setSmsSent(true);
+      setSmsCooldownSeconds(60);
       toast('success', '验证码已发送');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '发送失败';
-      toast('error', msg);
+      if (err instanceof ApiError && err.code === 'SMS_RATE_LIMITED') {
+        const waitSeconds = err.retry_after_seconds || 60;
+        setSmsCooldownSeconds(waitSeconds);
+        toast('error', `发送太频繁，请${waitSeconds}秒后重试`);
+      } else {
+        const msg = err instanceof Error ? err.message : '发送失败';
+        toast('error', msg);
+      }
     } finally {
       setSmsLoading(false);
     }
@@ -133,9 +150,16 @@ export function DashboardPage() {
       setSmsSent(false);
       setSmsCode('');
       setSmsPhone('');
+      setSmsCooldownSeconds(0);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '验证失败';
-      toast('error', msg);
+      if (err instanceof ApiError && (err.code === 'SMS_RATE_LIMITED' || err.code === 'SMS_VERIFY_RATE_LIMITED')) {
+        const waitSeconds = err.retry_after_seconds || 60;
+        setSmsCooldownSeconds(waitSeconds);
+        toast('error', `操作太频繁，请${waitSeconds}秒后重试`);
+      } else {
+        const msg = err instanceof Error ? err.message : '验证失败';
+        toast('error', msg);
+      }
     } finally {
       setSmsLoading(false);
     }
@@ -282,8 +306,8 @@ export function DashboardPage() {
                   onChange={(e) => setSmsPhone(e.target.value)}
                 />
                 <div className="cluster">
-                  <Button onClick={handleSendSms} loading={smsLoading} disabled={smsSent}>
-                    {smsSent ? '验证码已发送' : '发送验证码'}
+                  <Button onClick={handleSendSms} loading={smsLoading} disabled={smsCooldownSeconds > 0}>
+                    {smsCooldownSeconds > 0 ? `重新发送 (${smsCooldownSeconds}s)` : '发送验证码'}
                   </Button>
                 </div>
                 {smsSent ? (

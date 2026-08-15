@@ -76,7 +76,14 @@ const config = {
   // Rate limiting defaults — every limiter gets its own key namespace so
   // endpoints can never consume or reset each other's counters
   rateLimit: {
-    login: { maxAttempts: 5, windowMs: 5 * 60 * 1000, keyPrefix: 'ratelimit:login' },          // 5 per 5 min
+    login: {
+      keyPrefix: 'ratelimit:login',
+      windowMs: 5 * 60 * 1000,
+      clients: {
+        default: { maxAttempts: 5 },
+        mod: { maxAttempts: 20 }  // Mod 客户端（BackupSave, LanLink）更宽松
+      }
+    },
     register: { maxAttempts: 5, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:register' },   // 5 per hour
     adminLogin: { maxAttempts: 3, windowMs: 15 * 60 * 1000, keyPrefix: 'ratelimit:admin_login' }, // 3 per 15 min
     registerSendCode: { maxAttempts: 3, windowMs: 10 * 60 * 1000, keyPrefix: 'ratelimit:register_send_code' } // 3 per 10 min

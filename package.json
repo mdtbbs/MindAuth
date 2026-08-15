@@ -1,6 +1,6 @@
 {
   "name": "mindauth",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "MindAuth - OAuth 2.0 authentication service with MySQL and Redis",
   "main": "src/server.js",
   "scripts": {

@@ -7,7 +7,7 @@ const { hashToken } = require('../utils/token');
 const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
-const { createRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
+const { createRateLimiter, createClientAwareRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
 const { maskPhone } = require('../utils/phone');
 const { logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
@@ -16,7 +16,7 @@ const notificationCenter = require('../modules/notifications/notificationCenter'
 const config = require('../config');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
-const loginRateLimiter = createRateLimiter(config.rateLimit.login);
+const loginRateLimiter = createClientAwareRateLimiter(config.rateLimit.login);
 const registerRateLimiter = createRateLimiter(config.rateLimit.register);
 
 const REGISTER_CODE_MAX_FAILURES = 5;

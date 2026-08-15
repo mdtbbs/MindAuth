@@ -19,13 +19,15 @@ export class ApiError extends Error {
   status?: number;
   code?: string;
   details?: unknown;
+  retry_after_seconds?: number;
 
-  constructor(message: string, opts: { status?: number; code?: string; details?: unknown } = {}) {
+  constructor(message: string, opts: { status?: number; code?: string; details?: unknown; retry_after_seconds?: number } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = opts.status;
     this.code = opts.code;
     this.details = opts.details;
+    this.retry_after_seconds = opts.retry_after_seconds;
   }
 }
 
@@ -91,6 +93,7 @@ async function normalizeError(res: Response): Promise<ApiError> {
     status: res.status,
     code: body?.code ? (body.code as string) : undefined,
     details: body?.details,
+    retry_after_seconds: typeof body?.retry_after_seconds === 'number' ? (body.retry_after_seconds as number) : undefined,
   });
 }
 

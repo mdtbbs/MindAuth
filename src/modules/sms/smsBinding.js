@@ -65,22 +65,22 @@ async function hitLimit(key, max, ttlSeconds) {
 
 async function enforceSendLimits(userId, phone, ip) {
   const limits = [
-    [`sms:send:ip:${ip}`, 3, 60 * 60],
-    [`sms:send:user:${userId}`, 3, 5 * 60],
-    [`sms:send:phone:${phone}`, 1, 60],
+    { key: `sms:send:ip:${ip}`, max: 10, ttl: 60 * 60, type: 'ip' },
+    { key: `sms:send:user:${userId}`, max: 5, ttl: 10 * 60, type: 'user' },
+    { key: `sms:send:phone:${phone}`, max: 1, ttl: 60, type: 'phone' },
   ];
-  for (const [key, max, ttl] of limits) {
+  for (const { key, max, ttl, type } of limits) {
     const waitSeconds = await hitLimit(key, max, ttl);
-    if (waitSeconds > 0) return waitSeconds;
+    if (waitSeconds > 0) return { waitSeconds, limitType: type };
   }
-  return 0;
+  return { waitSeconds: 0 };
 }
 
 async function enforceVerifyFailureLimit(userId, phone, ip) {
   const limits = [
-    [`sms:verify:fail:user:${userId}:${phone}`, 5, 5 * 60],
-    [`sms:verify:fail:phone:${phone}`, 10, 60 * 60],
-    [`sms:verify:fail:ip:${ip}`, 20, 60 * 60],
+    [`sms:verify:fail:user:${userId}:${phone}`, 8, 5 * 60],
+    [`sms:verify:fail:phone:${phone}`, 15, 60 * 60],
+    [`sms:verify:fail:ip:${ip}`, 30, 60 * 60],
   ];
   for (const [key, max, ttl] of limits) {
     const waitSeconds = await hitLimit(key, max, ttl);
@@ -91,9 +91,9 @@ async function enforceVerifyFailureLimit(userId, phone, ip) {
 
 async function getVerifyFailureWaitSeconds(userId, phone, ip) {
   const limits = [
-    [`sms:verify:fail:user:${userId}:${phone}`, 5],
-    [`sms:verify:fail:phone:${phone}`, 10],
-    [`sms:verify:fail:ip:${ip}`, 20],
+    [`sms:verify:fail:user:${userId}:${phone}`, 8],
+    [`sms:verify:fail:phone:${phone}`, 15],
+    [`sms:verify:fail:ip:${ip}`, 30],
   ];
   for (const [key, max] of limits) {
     const count = Number(await client.get(key) || 0);
@@ -148,10 +148,17 @@ async function sendCode(user, rawPhone, req) {
       return { success: false, code: 'PHONE_ALREADY_BOUND', status: 409, message: '当前账号已绑定手机号，暂不支持换绑' };
     }
 
-    const waitSeconds = await enforceSendLimits(user.id, phone, ip);
-    if (waitSeconds > 0) {
+    const limitResult = await enforceSendLimits(user.id, phone, ip);
+    if (limitResult.waitSeconds > 0) {
       await logSmsAudit({ ...audit, success: false, code: 'SMS_RATE_LIMITED' });
-      return { success: false, code: 'SMS_RATE_LIMITED', status: 429, message: `发送太频繁，请${waitSeconds}秒后重试` };
+      return {
+        success: false,
+        code: 'SMS_RATE_LIMITED',
+        status: 429,
+        message: `发送太频繁，请${limitResult.waitSeconds}秒后重试`,
+        retry_after_seconds: limitResult.waitSeconds,
+        limit_type: limitResult.limitType,
+      };
     }
 
     const [existing] = await pool.execute(
@@ -216,7 +223,13 @@ async function verifyCode(user, rawPhone, rawCode, req) {
     const preCheckWait = await getVerifyFailureWaitSeconds(user.id, phone, ip);
     if (preCheckWait > 0) {
       await logSmsAudit({ ...audit, success: false, code: 'SMS_VERIFY_RATE_LIMITED' });
-      return { success: false, code: 'SMS_VERIFY_RATE_LIMITED', status: 429, message: `验证失败次数过多，请${preCheckWait}秒后重试` };
+      return {
+        success: false,
+        code: 'SMS_VERIFY_RATE_LIMITED',
+        status: 429,
+        message: `验证失败次数过多，请${preCheckWait}秒后重试`,
+        retry_after_seconds: preCheckWait,
+      };
     }
 
     const result = await checkSmsCode(phone, code);
@@ -224,7 +237,13 @@ async function verifyCode(user, rawPhone, rawCode, req) {
       const waitSeconds = await enforceVerifyFailureLimit(user.id, phone, ip);
       if (waitSeconds > 0) {
         await logSmsAudit({ ...audit, success: false, code: 'SMS_VERIFY_RATE_LIMITED' });
-        return { success: false, code: 'SMS_VERIFY_RATE_LIMITED', status: 429, message: `验证失败次数过多，请${waitSeconds}秒后重试` };
+        return {
+          success: false,
+          code: 'SMS_VERIFY_RATE_LIMITED',
+          status: 429,
+          message: `验证失败次数过多，请${waitSeconds}秒后重试`,
+          retry_after_seconds: waitSeconds,
+        };
       }
       await logSmsAudit({ ...audit, success: false, code: 'INVALID_SMS_CODE' });
       return { success: false, code: 'INVALID_SMS_CODE', status: 400, message: '验证码错误或已过期' };
