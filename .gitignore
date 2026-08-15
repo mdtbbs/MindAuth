@@ -51,3 +51,6 @@ temp/
 *.pem
 *.key
 *.crt
+
+# Hosting platform generated files
+.htaccess
