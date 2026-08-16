@@ -89,22 +89,6 @@ const config = {
     registerSendCode: { maxAttempts: 3, windowMs: 10 * 60 * 1000, keyPrefix: 'ratelimit:register_send_code' } // 3 per 10 min
   },
 
-  // Trusted proxy configuration for IP extraction
-  // When behind a trusted proxy/CDN, specify which IPs are trusted
-  // This prevents IP spoofing attacks that bypass rate limits
-  trustedProxy: {
-    // Enable proxy header trust (set to true when behind CDN/reverse proxy)
-    enabled: process.env.TRUSTED_PROXY_ENABLED === 'true' || false,
-    // Whitelist of trusted proxy IPs or CIDR ranges (comma-separated)
-    // Only accept proxy headers from these sources
-    ips: process.env.TRUSTED_PROXY_IPS
-      ? process.env.TRUSTED_PROXY_IPS.split(',').map(ip => ip.trim())
-      : [],
-    // Cloudflare IP ranges (auto-trust if using Cloudflare)
-    // See: https://www.cloudflare.com/ips/
-    trustCloudflare: process.env.TRUST_CLOUDFLARE === 'true' || false
-  },
-
   // Admin security settings
   adminSecurity: {
     // Minimum length for ADMIN_SECRET in production

@@ -1,5 +1,5 @@
 const { client } = require('../redis');
-const { getClientIp, isTrustedProxy } = require('../utils/request');
+const { getClientIp } = require('../utils/request');
 
 // Local memory fallback for rate limiting when Redis unavailable
 const localRateLimitStore = new Map();
@@ -29,7 +29,6 @@ function createRateLimiter(options = {}) {
       console.log('[IP Detection]', {
         detected_ip: ip,
         remote_addr: req.connection?.remoteAddress,
-        is_trusted_proxy: isTrustedProxy(req),
         headers: {
           'ali-real-client-ip': req.headers['ali-real-client-ip'],
           'x-real-ip': req.headers['x-real-ip'],
@@ -168,7 +167,6 @@ function createClientAwareRateLimiter(options = {}) {
         detected_ip: ip,
         client_type: clientType,
         remote_addr: req.connection?.remoteAddress,
-        is_trusted_proxy: isTrustedProxy(req),
       });
     }
 

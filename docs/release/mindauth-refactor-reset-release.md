@@ -129,9 +129,7 @@ Ensure `.env` has the correct values. Key changes from the old version:
 - `ALLOWED_ORIGINS` — Set to actual domain(s), not `*`
 
 **Optional (new):**
-- `TRUSTED_PROXY_ENABLED=true` — If behind Nginx/Cloudflare
-- `TRUSTED_PROXY_IPS=10.0.0.1` — Trusted proxy IP list
-- `TRUST_CLOUDFLARE=true` — If using Cloudflare
+- _(Previously `TRUSTED_PROXY_*` / `ALIYUN_ESA_*` — removed; IP detection now reads CDN headers unconditionally.)_
 
 ### Step 10: Run Migrations (Automatic)
 

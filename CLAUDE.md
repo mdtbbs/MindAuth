@@ -330,7 +330,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `validation.js` | `isValidEmail`, `isValidPassword` (rules from `system_config`: `password_min_length` default 6, `password_require_complexity` default off), `getPasswordValidationError`, `isValidUsername`, `getUsernameValidationError`, `escapeHtml` |
 | `email.js` | `sendEmail`, `sendVerificationEmail`, `sendPasswordResetEmail` |
 | `crypto.js` | `timingSafeCompare` |
-| `request.js` | `getClientIp` (trusted proxy support; exact IP + CIDR allowlists, Aliyun ESA auto-trust, proxy-header values accept IPv4/IPv6, ports and brackets stripped, `::ffff:` unmapped), `normalizeIpCandidate` |
+| `request.js` | `getClientIp` (unconditional CDN-header extraction; priority: `ali-real-client-ip` → `x-real-ip` → `cf-connecting-ip` → `x-forwarded-for[0]` → socket peer; header values accept IPv4/IPv6, ports and brackets stripped, `::ffff:` unmapped), `normalizeIpCandidate` |
 | `datetime.js` | `formatMySQLDateTime` |
 | `cleanup.js` | Scheduled cleanup of expired tokens |
 | `aliyunSms.js` | `sendSmsCode(phone)`, `checkSmsCode(phone, code)` |
@@ -355,14 +355,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 | `SMTP_HOST/PORT/USER/PASS/FROM/SECURE` | - | Email configuration |
 | `CDN_URL` | - | CDN base URL (auto-added to CSP) |
 | `ALLOWED_ORIGINS` | localhost:3000,4000,4001 | CORS allowed origins |
-| `TRUST_CLOUDFLARE` | false | Trust Cloudflare IP headers |
-| `TRUSTED_PROXY_ENABLED` | false | Enable trusted proxy IP extraction |
-| `TRUSTED_PROXY_IPS` | - | Comma-separated trusted proxy IPs or CIDR ranges |
-| `ALIYUN_ESA_AUTO_TRUST` | false | Auto-load trusted ESA origin-protection IP ranges |
-| `ALIYUN_ESA_SITE_ID` | - | ESA site ID used for trusted proxy auto-trust |
-| `ALIYUN_ESA_REGION_ID` | cn-hangzhou | ESA OpenAPI region for trusted proxy auto-trust |
-| `ALIYUN_ESA_REFRESH_INTERVAL_MS` | 600000 | Background refresh interval for ESA trusted proxy cache |
-| `ALIYUN_ACCESS_KEY_ID/SECRET` | - | Aliyun SMS credentials and ESA API credentials |
+| `ALIYUN_ACCESS_KEY_ID/SECRET` | - | Aliyun SMS credentials |
 | `QQ_OAUTH_ENABLED` | false | Enable QQ OAuth login (requires all QQ_* variables) |
 | `QQ_CLIENT_ID` | - | QQ OAuth client ID (from QQ open platform) |
 | `QQ_CLIENT_SECRET` | - | QQ OAuth client secret |
@@ -420,7 +413,7 @@ Schema migrations live in `src/db/migrations/` and run automatically on startup 
 - CSRF signed double-submit cookie (HMAC of a random nonce)
 - Rate limiting (Redis + memory fallback); every limiter has a unique keyPrefix; OAuth `/token` `/refresh` `/authorize` `/introspect` `/revoke` are rate-limited
 - Timing-safe secret comparison (incl. client_secret)
-- Trusted proxy IP validation (proxy headers untrusted by default; header values accept IPv4 **and IPv6**)
+- Direct CDN-header IP extraction (`getClientIp` unconditionally reads `ali-real-client-ip` → `x-real-ip` → `cf-connecting-ip` → `x-forwarded-for[0]` → socket peer; header values accept IPv4 **and IPv6**; deployment requirement: service must sit behind a CDN/reverse proxy that overwrites these headers)
 - CORS: same-origin requests (Origin host == request Host) are always allowed; unknown origins get a normal response without CORS headers (browser blocks the read) instead of a 500; cross-origin allowlist via `ALLOWED_ORIGINS`
 - PKCE S256 support (OAuth)
 - Replay attack detection (OAuth); `/introspect` and `/revoke` are bound to the requesting client (a client cannot probe/revoke another client's tokens)

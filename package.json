@@ -1,6 +1,6 @@
 {
   "name": "mindauth",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "MindAuth - OAuth 2.0 authentication service with MySQL and Redis",
   "main": "src/server.js",
   "scripts": {
@@ -19,7 +19,6 @@
     "verify": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {
-    "@alicloud/esa20240910": "^3.11.0",
     "bcrypt": "^5.1.1",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.6",

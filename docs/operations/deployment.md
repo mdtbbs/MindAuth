@@ -85,31 +85,16 @@ npm start              # node src/server.js，监听 PORT（默认 4001）
 
 ## 反向代理要求（重点）
 
-`src/app.js` 显式设置 `app.set('trust proxy', false)`，客户端 IP 提取完全由 `src/utils/request.js` 的 `getClientIp()` 接管：**默认不信任任何代理头**，直接取 TCP 连接的对端地址。只有请求来自可信代理时，才会优先采信 ESA 注入的 `ali-real-client-ip`，并在其缺失时回退到 `X-Forwarded-For`。
+`src/app.js` 显式设置 `app.set('trust proxy', false)`，客户端 IP 提取完全由 `src/utils/request.js` 的 `getClientIp()` 接管：**无条件按优先级直读 CDN header**（`ali-real-client-ip` → `x-real-ip` → `cf-connecting-ip` → `x-forwarded-for` 首项 → TCP 对端地址）。不再做受信代理白名单校验。
 
-这意味着：**如果 MindAuth 前面有 nginx / CDN 而你未配置可信代理，所有请求的"客户端 IP"都会是代理自身的 IP**。后果是 IP 封禁与限流（登录 5 次/5 分钟等）作用在代理 IP 上，一个用户触发限流会误伤全站用户；封禁一个"IP"等于封掉所有人。
+这意味着：**反代/CDN 必须覆写上述 header**，否则客户端可伪造任意 IP。如果反代只是透传客户端发来的 `X-Forwarded-For`，攻击者可以在请求中注入任意值，绕过按 IP 的限流和封禁。
 
-### 配置方法
+### 反代 / CDN 侧配置要点
 
-```bash
-# 必须先打开总开关（下面这些模式单独设置无效——
-# isTrustedProxy() 在 enabled=false 时直接返回 false）
-TRUSTED_PROXY_ENABLED=true
-
-# 方式一：显式列出可信代理 IP 或 CIDR（nginx 所在机器的地址，逗号分隔）
-TRUSTED_PROXY_IPS=127.0.0.1,10.0.0.0/24
-
-# 方式二（可叠加）：对阿里云 ESA 自动拉取 origin protection 回源白名单
-ALIYUN_ESA_AUTO_TRUST=true
-ALIYUN_ESA_SITE_ID=123456
-# 可选，默认 cn-hangzhou
-ALIYUN_ESA_REGION_ID=cn-hangzhou
-
-# 方式三（可叠加）：信任 Cloudflare 内置 IPv4/IPv6 网段
-TRUST_CLOUDFLARE=true
-```
-
-仅当请求的 TCP 对端 IP 在可信列表、Aliyun ESA origin-protection 白名单，或 Cloudflare 网段内，才会优先采信 `ali-real-client-ip`，并在其缺失时回退到 `X-Forwarded-For` 首项；头值须为合法 IPv4 或 IPv6（自动剥离端口与 IPv6 方括号，`::ffff:` 映射地址还原为 IPv4），否则回退到连接地址。ESA 白名单在启动时预热，并默认每 10 分钟后台刷新一次。
+- **nginx**：`proxy_set_header X-Real-IP $remote_addr;`、`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`，且**不**转发客户端自带的同名 header（`proxy_set_header` 默认就是覆盖语义）。
+- **阿里云 ESA**：开启「回源 IP 透传」，ESA 会自动注入 `ali-real-client-ip`，本服务优先读取。
+- **Cloudflare**：默认注入 `cf-connecting-ip`，本服务直接读取。
+- **直连路径必须关闭**：客户端不得绕过反代直连 MindAuth 端口（防火墙只放行反代 IP 到 4001）。
 
 ### nginx 最小配置片段
 
@@ -129,7 +114,7 @@ server {
 }
 ```
 
-完整 nginx 配置（多域名、SSL、certbot）见 monorepo 根目录的 `DEPLOYMENT.md` 第 7 节。注意根文档的 `.env` 示例**未包含** `TRUSTED_PROXY_*` 变量，按其 nginx 拓扑部署时必须补上。
+完整 nginx 配置（多域名、SSL、certbot）见 monorepo 根目录的 `DEPLOYMENT.md` 第 7 节。
 
 ### 验证方法
 
@@ -139,7 +124,7 @@ server {
 SELECT ip, created_at FROM login_logs ORDER BY id DESC LIMIT 5;
 ```
 
-若 `ip` 显示的是你的公网 IP → 配置正确；若显示 `127.0.0.1` 或代理机 IP → 可信代理未生效。
+若 `ip` 显示的是你的公网 IP → 配置正确；若显示 `127.0.0.1` 或代理机 IP → 反代未覆写对应 header（检查 nginx 的 `proxy_set_header X-Real-IP $remote_addr;` / ESA 的「回源 IP 透传」/ Cloudflare 的 `cf-connecting-ip`）。
 
 ## 静态资源与上传目录
 

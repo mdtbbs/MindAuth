@@ -1,143 +1,25 @@
 /**
  * Request utility functions
+ *
+ * getClientIp() extracts the client's real IP by reading CDN / reverse-proxy
+ * headers unconditionally, in the following priority:
+ *
+ *   1. ali-real-client-ip   (Aliyun ESA / DCDN)
+ *   2. x-real-ip            (NGINX / generic CDN)
+ *   3. cf-connecting-ip     (Cloudflare)
+ *   4. x-forwarded-for      (standard, first entry)
+ *   5. req.connection.remoteAddress / req.socket.remoteAddress (fallback)
+ *
+ * Each header value is normalized (brackets / ports / `::ffff:` mapping
+ * stripped) and validated via `net.isIP()`; the first valid IP wins.
+ *
+ * Deployment requirement: the service MUST sit behind a CDN / reverse proxy
+ * that OVERWRITES these headers on the way in (e.g. ESA, nginx with
+ * `proxy_set_header Ali-Real-Client-IP $remote_addr;`). If a client can
+ * reach the service directly, it can spoof any IP via these headers.
  */
 
 const net = require('net');
-const config = require('../config');
-const { getCachedEntries: getAliyunEsaTrustedEntries, isEnabled: isAliyunEsaAutoTrustEnabled } = require('./aliyunEsaTrustedProxy');
-
-// Cloudflare IP ranges (as of 2024)
-// See: https://www.cloudflare.com/ips/
-const CLOUDFLARE_IPV4_RANGES = [
-  '173.245.48.0/20',
-  '103.21.244.0/22',
-  '103.22.200.0/22',
-  '103.31.4.0/22',
-  '141.101.64.0/18',
-  '108.162.192.0/18',
-  '190.93.240.0/20',
-  '188.114.96.0/20',
-  '197.234.240.0/22',
-  '198.41.128.0/17',
-  '162.158.0.0/15',
-  '104.16.0.0/13',
-  '104.24.0.0/14',
-  '172.64.0.0/13',
-  '131.0.72.0/22'
-];
-
-const CLOUDFLARE_IPV6_RANGES = [
-  '2400:cb00::/32',
-  '2606:4700::/32',
-  '2803:f800::/32',
-  '2405:b500::/32',
-  '2405:8100::/32',
-  '2a06:98c0::/29',
-  '2c0f:f248::/32'
-];
-
-/**
- * Parse dotted-quad IPv4 → BigInt (32-bit), or null if invalid.
- * @param {string} ip
- * @returns {bigint|null}
- */
-function ipv4ToBigInt(ip) {
-  const parts = ip.split('.');
-  if (parts.length !== 4) return null;
-  let n = 0n;
-  for (const p of parts) {
-    if (!/^\d{1,3}$/.test(p)) return null;
-    const o = Number(p);
-    if (o > 255) return null;
-    n = (n << 8n) + BigInt(o);
-  }
-  return n;
-}
-
-/**
- * Parse IPv6 (incl. `::` compression and embedded IPv4) → BigInt (128-bit), or null.
- * @param {string} ip
- * @returns {bigint|null}
- */
-function ipv6ToBigInt(ip) {
-  ip = ip.split('%')[0];
-
-  const v4 = ip.match(/(\d+\.\d+\.\d+\.\d+)$/);
-  if (v4) {
-    const v4n = ipv4ToBigInt(v4[1]);
-    if (v4n === null) return null;
-    const hi = (v4n >> 16n) & 0xffffn;
-    const lo = v4n & 0xffffn;
-    ip = ip.slice(0, v4.index) + hi.toString(16) + ':' + lo.toString(16);
-  }
-
-  const halves = ip.split('::');
-  if (halves.length > 2) return null;
-  const head = halves[0] ? halves[0].split(':') : [];
-  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
-
-  let groups;
-  if (halves.length === 2) {
-    const missing = 8 - head.length - tail.length;
-    if (missing < 0) return null;
-    groups = [...head, ...Array(missing).fill('0'), ...tail];
-  } else {
-    groups = head;
-  }
-  if (groups.length !== 8) return null;
-
-  let n = 0n;
-  for (const g of groups) {
-    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
-    n = (n << 16n) + BigInt(parseInt(g, 16));
-  }
-  return n;
-}
-
-/** Parse any IP → { fam: 4|6, n: BigInt } or null. */
-function parseIp(ip) {
-  if (typeof ip !== 'string') return null;
-  if (ip.includes(':')) {
-    const n = ipv6ToBigInt(ip);
-    return n === null ? null : { fam: 6, n };
-  }
-  if (ip.includes('.')) {
-    const n = ipv4ToBigInt(ip);
-    return n === null ? null : { fam: 4, n };
-  }
-  return null;
-}
-
-/**
- * Check whether an IP is in a CIDR range. Supports IPv4 and IPv6.
- * @param {string} ip - IP address to check
- * @param {string} cidr - CIDR range (e.g., '192.168.0.0/16' or '2400:cb00::/32')
- * @returns {boolean} True if IP is within range
- */
-function isIpInCidr(ip, cidr) {
-  if (typeof cidr !== 'string' || !cidr.includes('/')) return false;
-  const [range, bits] = cidr.split('/');
-  const client = parseIp(ip);
-  const network = parseIp(range);
-  if (!client || !network || client.fam !== network.fam) return false;
-
-  const width = client.fam === 4 ? 32 : 128;
-  const prefix = Number(bits);
-  if (!Number.isInteger(prefix) || prefix < 0 || prefix > width) return false;
-
-  const mask = prefix === 0 ? 0n : (((1n << BigInt(prefix)) - 1n) << BigInt(width - prefix));
-  return (client.n & mask) === (network.n & mask);
-}
-
-/**
- * Convert IPv4 address to number
- * @param {string} ip - IPv4 address
- * @returns {number|null} Numeric representation or null if invalid
- */
-function ipToNumber(ip) {
-  const n = ipv4ToBigInt(ip);
-  return n === null ? null : Number(n);
-}
 
 /**
  * Validate IP address format (IPv4)
@@ -195,103 +77,13 @@ function normalizeIpCandidate(value) {
 }
 
 /**
- * Normalize trusted-proxy list entries so loopback / mapped forms compare consistently.
- * @param {string} value
- * @returns {string|null}
- */
-function normalizeTrustedProxyEntry(value) {
-  const normalized = normalizeIpCandidate(value);
-  if (!normalized) return null;
-  if (normalized === '::1') return '127.0.0.1';
-  return normalized;
-}
-
-/**
- * Check whether a trusted-proxy entry matches a remote address.
- * Supports exact IPs and CIDR ranges.
- * @param {string} remoteAddr
- * @param {string} trustedEntry
- * @returns {boolean}
- */
-function matchesTrustedProxyEntry(remoteAddr, trustedEntry) {
-  if (!remoteAddr || !trustedEntry) return false;
-
-  if (trustedEntry.includes('/')) {
-    return isIpInCidr(remoteAddr, trustedEntry);
-  }
-
-  const normalizedEntry = normalizeTrustedProxyEntry(trustedEntry);
-  return normalizedEntry === remoteAddr;
-}
-
-/**
- * Check if request comes from a trusted proxy
- * @param {Express.Request} req - Express request object
- * @returns {boolean} True if request is from trusted proxy
- */
-function isTrustedProxy(req) {
-  const remoteAddr = req.connection?.remoteAddress || req.socket?.remoteAddress;
-  const normalizedRemoteAddr = normalizeTrustedProxyEntry(remoteAddr);
-
-  // If trusted proxy not enabled, don't trust any proxy headers
-  if (!config.trustedProxy?.enabled) {
-    return false;
-  }
-
-  // Check against explicit whitelist
-  const trustedIps = (config.trustedProxy.ips || []).filter(Boolean);
-  if (normalizedRemoteAddr && trustedIps.some((entry) => matchesTrustedProxyEntry(normalizedRemoteAddr, entry))) {
-    return true;
-  }
-
-  // Check cached Aliyun ESA origin-protection entries if enabled
-  if (normalizedRemoteAddr && isAliyunEsaAutoTrustEnabled()) {
-    const esaEntries = getAliyunEsaTrustedEntries();
-    if (esaEntries.some((entry) => matchesTrustedProxyEntry(normalizedRemoteAddr, entry))) {
-      return true;
-    }
-  }
-
-  // Check Cloudflare IP ranges if enabled
-  if (config.trustedProxy.trustCloudflare) {
-    for (const cidr of [...CLOUDFLARE_IPV4_RANGES, ...CLOUDFLARE_IPV6_RANGES]) {
-      if (normalizedRemoteAddr && isIpInCidr(normalizedRemoteAddr, cidr)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-/**
- * Extract client IP address from request.
- * Reads common CDN / reverse-proxy headers only when the direct peer is
- * trusted, mirroring how other CDNs (NGINx `X-Real-IP`, CF `CF-Connecting-IP`,
- * ESA `ali-real-client-ip`, standard `X-Forwarded-For`) are handled:
- *
- *   1. ali-real-client-ip   (Aliyun ESA / DCDN)
- *   2. x-real-ip            (NGINX / generic CDN)
- *   3. cf-connecting-ip     (Cloudflare)
- *   4. x-forwarded-for      (standard, first entry)
- *   5. req.ip / socket remoteAddress (fallback)
- *
- * Each header value is normalized (brackets / ports / `::ffff:` mapping
- * stripped) and validated; the first valid IP wins.
- *
- * Security note: this trusts the first proxy hop. Only deploy this way when
- * the service is actually behind a CDN / reverse proxy that overwrites these
- * headers on the way in — otherwise an attacker can spoof any IP.
+ * Extract client IP address from request by reading CDN / reverse-proxy
+ * headers in priority order. See module JSDoc for deployment requirements.
  *
  * @param {Express.Request} req - Express request object
  * @returns {string} Client IP address
  */
 function getClientIp(req) {
-  if (!isTrustedProxy(req)) {
-    const remoteAddr = req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown';
-    return remoteAddr.replace(/^::ffff:/, '') || 'unknown';
-  }
-
   const candidates = [
     req.headers['ali-real-client-ip'],
     req.headers['x-real-ip'],
@@ -310,13 +102,13 @@ function getClientIp(req) {
     if (first) return first;
   }
 
-  // Fallback to Express req.ip or connection remote address
-  const fallbackIp = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown';
+  // Fallback to socket remote address
+  const fallback = req.connection?.remoteAddress
+    || req.socket?.remoteAddress
+    || 'unknown';
 
   // Clean IPv6-mapped IPv4 addresses
-  const cleanIp = fallbackIp.replace(/^::ffff:/, '');
-
-  return cleanIp || 'unknown';
+  return fallback.replace(/^::ffff:/, '') || 'unknown';
 }
 
-module.exports = { getClientIp, isValidIpv4, isTrustedProxy, normalizeIpCandidate };
+module.exports = { getClientIp, isValidIpv4, normalizeIpCandidate };
