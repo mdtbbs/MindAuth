@@ -88,7 +88,7 @@ test.describe('用户认证流程', () => {
     await page.fill('#password', 'wrongpassword');
     await page.click('#login-form button[type="submit"]');
 
-    await expect(toastWith(page, '用户名或密码错误')).toBeVisible({ timeout: 5000 });
+    await expect(toastWith(page, '用户名/邮箱或密码错误')).toBeVisible({ timeout: 5000 });
     // 表单内也应展示错误提示
     await expect(page.locator('.auth-form__alert')).toBeVisible();
   });
@@ -199,11 +199,11 @@ test.describe('管理员后台', () => {
 });
 
 test.describe('邮箱验证状态', () => {
-  test('新用户显示未验证状态', async ({ page }) => {
+  test('完成邮箱验证码注册的新用户显示已验证状态', async ({ page }) => {
     await registerUser(page, 'pw_verify');
 
-    // 邮箱状态摘要卡应显示「待验证」
-    await expect(page.getByText('待验证', { exact: true })).toBeVisible({ timeout: 5000 });
+    // 注册流程已完成邮箱验证码校验，邮箱状态摘要卡应显示「已验证」。
+    await expect(page.getByText('已验证', { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.locator('#verified-badge')).toBeVisible();
   });
 });

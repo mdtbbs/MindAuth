@@ -12,14 +12,8 @@
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
-
-process.env.USE_MEMORY_REDIS = '1';
-process.env.NODE_ENV = 'test';
-
 const { pool, closePool, runMigrations } = require('../../src/db');
-const { client } = require('../../src/redis');
+const { client, connectRedis, closeRedis } = require('../../src/redis');
 const notificationCenter = require('../../src/modules/notifications/notificationCenter');
 const bcrypt = require('bcrypt');
 
@@ -47,12 +41,14 @@ describe('notificationCenter', { skip: !RUN_INTEGRATION }, () => {
   let user;
 
   before(async () => {
+    await connectRedis();
     await runMigrations(pool);
     user = await createTestUser();
   });
 
   after(async () => {
     await cleanupUser(user.id);
+    await closeRedis();
     await closePool();
   });
 

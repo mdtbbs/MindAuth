@@ -32,11 +32,12 @@
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| **`MYSQL_HOST`** | `localhost` | MySQL 主机（所有环境必填，有默认值） |
+| **`MYSQL_HOST`** | 无 | MySQL 主机；未设置时必须提供 `MYSQL_SOCKET_PATH` |
+| `MYSQL_SOCKET_PATH` | 无 | 本机 Unix socket 路径；仅适合受限本地开发/测试，生产仍建议 TCP + 独立凭据 |
 | `MYSQL_PORT` | `3306` | MySQL 端口 |
-| `MYSQL_USER` | `mindauth` | MySQL 用户 |
-| `MYSQL_PASSWORD` | 空 | MySQL 密码 |
-| **`MYSQL_DATABASE`** | `mindauth` | 数据库名（所有环境必填，有默认值） |
+| **`MYSQL_USER`** | 无 | MySQL 用户（所有环境必填） |
+| **`MYSQL_PASSWORD`** | 空 | MySQL 密码（生产环境必填；开发环境可按本机 MySQL 配置留空） |
+| **`MYSQL_DATABASE`** | 无 | 数据库名（所有环境必填） |
 | `MYSQL_POOL_SIZE` | `10` | 连接池大小 |
 
 ### redis
@@ -84,7 +85,7 @@
 4. `USE_MEMORY_REDIS` 不得为 `1`/`true`（内存 Redis 会在重启时丢失会话、OAuth 令牌与限流数据）
 5. 上传目录不可写视为致命错误（开发环境仅告警）
 
-所有环境（含开发）均要求 `MYSQL_HOST`、`MYSQL_DATABASE`、`REDIS_HOST` 非空（均有默认值，通常自动满足）。
+所有环境均要求 `MYSQL_HOST` 或 `MYSQL_SOCKET_PATH`、`MYSQL_DATABASE`、`REDIS_HOST` 非空。生产环境额外要求 `MYSQL_USER` 与 `MYSQL_PASSWORD` 非空。测试环境若不提供 `MYSQL_USER`，必须显式提供 `MYSQL_SOCKET_PATH`，且数据库名必须是 `test_*` 或 `*_test`；这样会在连接池创建前给出缺失配置的明确错误，避免 MySQL 返回含混的匿名用户或“using password: NO”报错。
 
 上传目录处理：自动创建 `public/uploads/` 及 `avatars/`、`banners/` 子目录，并通过写入/删除 `.write-test` 临时文件验证可写性（登录页背景目录 `backgrounds/` 由 `src/middleware/upload.js` 加载时创建，不在 validate.js 校验范围内）。
 

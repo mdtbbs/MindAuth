@@ -42,6 +42,38 @@ function createMemoryRedisClient() {
       expires.delete(key);
       return val;
     },
+    async set(key, value, ...options) {
+      let ttlMs = null;
+      let nx = false;
+      let xx = false;
+
+      for (let i = 0; i < options.length; i += 1) {
+        const option = String(options[i]).toUpperCase();
+        if (option === 'NX') {
+          nx = true;
+        } else if (option === 'XX') {
+          xx = true;
+        } else if (option === 'EX' || option === 'PX') {
+          const ttl = Number(options[++i]);
+          if (!Number.isFinite(ttl) || ttl <= 0) {
+            throw new Error('ERR invalid expire time in set');
+          }
+          ttlMs = option === 'EX' ? ttl * 1000 : ttl;
+        }
+      }
+
+      const exists = !isExpired(key) && store.has(key);
+      if ((nx && exists) || (xx && !exists)) return null;
+
+      store.set(key, String(value));
+      sets.delete(key);
+      if (ttlMs === null) {
+        expires.delete(key);
+      } else {
+        expires.set(key, now() + ttlMs);
+      }
+      return 'OK';
+    },
     async setEx(key, ttlSeconds, value) {
       store.set(key, String(value));
       expires.set(key, now() + Number(ttlSeconds) * 1000);

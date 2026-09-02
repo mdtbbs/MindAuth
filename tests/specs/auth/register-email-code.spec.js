@@ -216,6 +216,9 @@ test.describe('POST /api/register (with email_code)', () => {
     }
 
     // After 5 failures the code is consumed. A 6th attempt gets EMAIL_CODE_INVALID.
+    // Clear the outer per-IP registration limiter so this assertion exercises
+    // the per-code brute-force guard rather than a separate endpoint quota.
+    await clearRateLimits(request);
     const res = await request.post('/api/register', {
       data: {
         username: `brute_final`,
@@ -224,6 +227,7 @@ test.describe('POST /api/register (with email_code)', () => {
         email_code: '000000',
       }
     });
+    await clearRateLimits(request);
     expect(res.status()).toBe(400);
     const body = await res.json();
     expect(body.code).toBe('EMAIL_CODE_INVALID');

@@ -9,7 +9,6 @@
  */
 
 const http = require('http');
-const path = require('path');
 
 // Provide fake DB/Redis so app.js can be required.
 process.env.USE_MEMORY_REDIS = '1';
@@ -33,6 +32,7 @@ const fakeRedis = {
   ping: async () => 'PONG',
   get: async () => null,
   set: async () => 'OK',
+  setEx: async () => 'OK',
   del: async () => 1,
   expire: async () => 1,
   keys: async () => [],

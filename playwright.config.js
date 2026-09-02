@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
+import { config as loadEnv } from 'dotenv';
+
+if (process.env.NODE_ENV === 'test') {
+  loadEnv({ path: '.env.test' });
+}
 
 const port = process.env.PLAYWRIGHT_PORT || process.env.PORT || '4001';
 const baseURL = `http://localhost:${port}`;
@@ -39,9 +44,11 @@ export default defineConfig({
     env: {
       ...process.env,
       PORT: port,
+      NODE_ENV: 'test',
       BASE_URL: baseURL,
+      ADMIN_SECRET: 'admin123',
+      SECRETS_ENCRYPTION_KEY: Buffer.alloc(32).toString('base64'),
       ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || `http://localhost:3000,http://localhost:4000,http://localhost:4001,${baseURL}`,
-      USE_MEMORY_REDIS: process.env.USE_MEMORY_REDIS || '1',
     },
   },
 });

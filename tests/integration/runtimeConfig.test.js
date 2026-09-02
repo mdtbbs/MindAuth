@@ -11,13 +11,8 @@
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
-
-process.env.USE_MEMORY_REDIS = '1';
-process.env.NODE_ENV = 'test';
-
 const { pool, closePool, runMigrations } = require('../../src/db');
+const { connectRedis, closeRedis } = require('../../src/redis');
 const runtimeConfig = require('../../src/modules/config/runtimeConfig');
 
 // Integration test: requires a live MySQL test database (RUN_INTEGRATION=1).
@@ -25,10 +20,12 @@ const RUN_INTEGRATION = process.env.RUN_INTEGRATION === '1' || process.env.CI ==
 
 describe('runtimeConfig', { skip: !RUN_INTEGRATION }, () => {
   before(async () => {
+    await connectRedis();
     await runMigrations(pool);
   });
 
   after(async () => {
+    await closeRedis();
     await closePool();
   });
 

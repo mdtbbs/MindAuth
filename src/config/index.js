@@ -18,11 +18,12 @@ const config = {
 
   // MySQL database configuration
   mysql: {
-    host: process.env.MYSQL_HOST || 'localhost',
+    host: process.env.MYSQL_HOST || '',
+    socketPath: process.env.MYSQL_SOCKET_PATH || undefined,
     port: parseInt(process.env.MYSQL_PORT) || 3306,
-    user: process.env.MYSQL_USER || 'mindauth',
+    user: process.env.MYSQL_USER || '',
     password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE || 'mindauth',
+    database: process.env.MYSQL_DATABASE || '',
     poolSize: parseInt(process.env.MYSQL_POOL_SIZE) || 10
   },
 

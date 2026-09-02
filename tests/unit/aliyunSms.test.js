@@ -20,6 +20,16 @@ function setupRedisMock() {
     loaded: true,
     exports: { client: mockRedisClient },
   };
+
+  // Keep unit tests hermetic when SMS falls back from environment settings to
+  // the admin-configured database settings.
+  const dbPath = require.resolve('../../src/db');
+  require.cache[dbPath] = {
+    id: dbPath,
+    filename: dbPath,
+    loaded: true,
+    exports: { pool: { execute: async () => [[]] } },
+  };
 }
 
 // -- Env Utilities --

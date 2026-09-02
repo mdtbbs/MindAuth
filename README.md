@@ -44,8 +44,9 @@ npm run dev               # 开发模式（node --watch，启动时自动执行�
 
 ```bash
 npm run test:unit         # 单元测试（无外部依赖）
-npm run test:integration  # 集成测试（需 MySQL + RUN_INTEGRATION=1，否则跳过）
-npm run test:e2e          # Playwright E2E（可 USE_MEMORY_REDIS=1 免真实 Redis）
+npm run test:db:prepare   # 仅准备 test_* / *_test 库，运行真实 migration 与 seed
+RUN_INTEGRATION=1 npm run test:integration  # 本机 MySQL-compatible + Redis/Valkey
+npm run test:e2e          # 本机 MySQL-compatible + Redis/Valkey Playwright E2E
 npm run verify            # lint + typecheck + build
 ```
 

@@ -459,7 +459,7 @@ router.get('/me', requireAuth, (req, res) => {
     id,
     username,
     email,
-    email_verified,
+    email_verified: email_verified === 1 || email_verified === true,
     role,
     avatar_url,
     banner_url,

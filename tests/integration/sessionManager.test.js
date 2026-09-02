@@ -1,7 +1,7 @@
 /**
  * Unit tests for sessionManager — the centralized session lifecycle module.
  *
- * Tests run with USE_MEMORY_REDIS=1 and a real MySQL test database.
+ * Tests run with native Redis and a real MySQL-compatible test database.
  * They verify:
  *   - create / authenticate / touch / revoke / revoke-all for user sessions
  *   - token hashing (SHA-256) before DB storage
@@ -12,16 +12,8 @@
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Load .env before any application imports
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
-
-// Ensure memory redis is used for tests
-process.env.USE_MEMORY_REDIS = '1';
-process.env.NODE_ENV = 'test';
-
 const { pool, closePool, runMigrations } = require('../../src/db');
-const { client } = require('../../src/redis');
+const { client, connectRedis, closeRedis } = require('../../src/redis');
 const sessionManager = require('../../src/modules/sessions/sessionManager');
 const bcrypt = require('bcrypt');
 
@@ -56,10 +48,12 @@ const RUN_INTEGRATION = process.env.RUN_INTEGRATION === '1' || process.env.CI ==
 
 describe('sessionManager', { skip: !RUN_INTEGRATION }, () => {
   before(async () => {
+    await connectRedis();
     await runMigrations(pool);
   });
 
   after(async () => {
+    await closeRedis();
     await closePool();
   });
 

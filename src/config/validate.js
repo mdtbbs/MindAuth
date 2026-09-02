@@ -69,11 +69,26 @@ function validateConfig(config) {
   }
 
   // --- MySQL config ---
-  if (!config.mysql.host) {
-    errors.push('MYSQL_HOST is required');
+  if (!config.mysql.host && !config.mysql.socketPath) {
+    errors.push('MYSQL_HOST or MYSQL_SOCKET_PATH is required');
   }
   if (!config.mysql.database) {
     errors.push('MYSQL_DATABASE is required');
+  }
+  if (isProduction && !config.mysql.user) {
+    errors.push('MYSQL_USER is required in production');
+  }
+  if (isProduction && !config.mysql.password) {
+    errors.push('MYSQL_PASSWORD is required in production');
+  }
+  if (process.env.NODE_ENV === 'test') {
+    const database = String(config.mysql.database || '');
+    if (!/^(?:test_.+|.+_test)$/.test(database)) {
+      errors.push('MYSQL_DATABASE must be an explicitly named test database when NODE_ENV=test');
+    }
+    if (!config.mysql.user && !config.mysql.socketPath) {
+      errors.push('MYSQL_USER is required for test runs unless MYSQL_SOCKET_PATH is configured');
+    }
   }
 
   // --- Redis config ---
