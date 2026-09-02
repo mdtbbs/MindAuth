@@ -193,6 +193,20 @@ async function sendSmsCode(phone) {
   }
 }
 
+// Native Auth owns its OTP digest and lifecycle in MySQL.  This helper sends
+// a caller-provided code without putting a usable code in Redis.
+async function sendNativeSmsCode(phone, code) {
+  if (!/^\d{6}$/.test(String(code))) throw new Error('Native SMS code invalid');
+  const { signName, templateCode } = await requireConfig();
+  const data = await requestAliyun('SendSms', {
+    PhoneNumbers: phone,
+    SignName: signName,
+    TemplateCode: templateCode,
+    TemplateParam: JSON.stringify({ code: String(code) }),
+  });
+  return { success: true, bizId: data.BizId };
+}
+
 async function checkSmsCode(phone, code) {
   const stored = await client.get(`${CODE_REDIS_PREFIX}${phone}`);
 
@@ -213,4 +227,4 @@ async function checkSmsCode(phone, code) {
   return { success: match };
 }
 
-module.exports = { sendSmsCode, checkSmsCode, getSmsConfig };
+module.exports = { sendSmsCode, sendNativeSmsCode, checkSmsCode, getSmsConfig };

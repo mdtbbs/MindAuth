@@ -14,6 +14,10 @@ MindAuth 后端（Express + MySQL + Redis）按"深模块"组织：`src/modules/
 
 ## 深模块
 
+### nativeAuthService（`src/modules/nativeAuth/nativeAuthService.js`）
+
+第一方 `mdtbbs_android` 的 AuthTransaction、密码/SMS/QQ 认证、一次性 authorization code 与 MindFourm 后端交换。只接受 PKCE `S256`；事务 10 分钟、短信 5 分钟、authorization code 90 秒。敏感值只存在请求内存，MySQL 只保存 HMAC-SHA-256 digest；SMS challenge 使用 HMAC 绑定重新提交的 canonical phone，再以 `users.phone` 做精确既有账号查询。条件更新 `status = 'PENDING'` 和 `consumed_at IS NULL` 令同一 transaction / exchange 并发时只能成功一次。该模块不创建 MindAuth session 或 refresh token。
+
 ### sessionManager（`src/modules/sessions/sessionManager.js`）
 
 用户与管理员会话的全生命周期：创建、认证、活跃更新、单个/批量吊销。唯一允许读写会话数据的代码。

@@ -60,6 +60,12 @@ function validateConfig(config) {
     } catch (err) {
       errors.push(err.message);
     }
+    if (!process.env.NATIVE_AUTH_HMAC_SECRET) {
+      errors.push('NATIVE_AUTH_HMAC_SECRET is required in production');
+    }
+    if (!process.env.NATIVE_MINDFOURM_CLIENT_SECRET) {
+      errors.push('NATIVE_MINDFOURM_CLIENT_SECRET is required in production');
+    }
   }
 
   // --- MySQL config ---

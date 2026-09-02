@@ -97,6 +97,28 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | GET | `/api/csrf-token` | 无 | — | 获取/刷新 CSRF 令牌 |
 | GET | `/api/public/auth-page-config` | 无 | 60/分钟 | 登录页外观公开配置（见下文） |
 
+### Android Native Auth 域
+
+第一方 `mdtbbs_android` 使用 `/api/v1/native`，不签发 MindAuth Cookie、access token 或 refresh token；成功后只返回 90 秒的一次性 authorization code。客户端必须先创建 transaction 并提供 RFC 7636 `S256` PKCE challenge。Android 仅可调用 transaction/password/SMS/QQ 接口；`POST /api/v1/native/auth/exchange` 仅供 MindFourm 后端调用，必须携带部署环境配置的 `NATIVE_MINDFOURM_CLIENT_SECRET`（可用 `X-Mindfourm-Client-Secret` 传递），绝不可进入 APK。
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| POST | `/api/v1/native/auth/transactions` | 创建 10 分钟 AuthTransaction |
+| POST | `/api/v1/native/auth/transactions/:id/password` | 密码认证并返回 authorization code |
+| POST | `/api/v1/native/auth/transactions/:id/sms/send` | 发送 5 分钟短信 challenge |
+| POST | `/api/v1/native/auth/transactions/:id/sms/verify` | 使用同一 canonical phone 验证 challenge 并返回 authorization code |
+| POST | `/api/v1/native/auth/transactions/:id/qq` | 使用 QQ SDK authorization code 完成已绑定账号登录 |
+| POST | `/api/v1/native/register` | 以已验证 SMS challenge 注册（额外需要 email，匹配现有 users 非空邮箱约束） |
+| POST | `/api/v1/native/phone/send` | 使用 MindFourm 签发的 phone-action ticket 发送验证短信 |
+| POST | `/api/v1/native/phone/verify` | 使用同一 ticket 消费短信 challenge 并绑定手机号 |
+| POST | `/api/v1/native/auth/exchange` | MindFourm 服务端原子消费授权码、校验 PKCE |
+
+Native 错误统一为 `{ "error": { "code", "message", "retryable", "details": [] } }`。敏感值（密码、短信码、QQ token、authorization code、PKCE verifier）不会写日志、审计表或 Redis。
+
+短信 challenge 仅保存手机号的 HMAC，用于 challenge 绑定与限流；验证码校验请求必须再次携带 `phone`。服务先比对 HMAC，再以 canonical phone 精确查询 `users.phone`，从而保持既有账号映射且不把 HMAC 当作数据库身份键。
+
+手机号验证票据格式为 `npa.<base64url-json>.<base64url-hmac>`；MindFourm 使用 `NATIVE_PHONE_ACTION_SECRET` 以 HMAC-SHA-256 签发，claims 必须含整数 `sub`、唯一 `jti`、`aud: "mindauth-native-phone"` 与短期 Unix `exp`。票据只能由 MindFourm 后端签发，Android 仅在 `Authorization: Bearer` 转交。
+
 **`GET /api/public/auth-page-config`**（`src/routes/public.js`）：返回认证页（登录/注册等）的公开外观配置，当前仅自定义背景图 URL：`{ "success": true, "background_url": "/uploads/backgrounds/..." | null }`（`null` 表示前端使用默认网格背景）。限流前缀 `ratelimit:public_config`（60 次/分钟），响应带 `Cache-Control: public, max-age=60`。背景图由管理端 `POST/DELETE /api/admin/auth-background` 维护，见 [admin.md](admin.md)。
 
 ### 认证域 — 详见 [auth.md](auth.md)

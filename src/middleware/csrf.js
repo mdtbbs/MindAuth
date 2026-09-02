@@ -83,6 +83,13 @@ function validateCsrf(req, res, next) {
     '/api/register/send-code', // Registration email code (pre-auth, rate-limited)
     '/api/login',        // User login (creates session, rate-limited)
     '/api/service/validate-credentials', // Service-to-service validation (has service API key)
+    // Native endpoints are exact-path exemptions: they use short-lived PKCE
+    // transactions or a bearer action ticket, never browser-cookie auth.
+    '/api/v1/native/auth/transactions',
+    '/api/v1/native/auth/exchange',
+    '/api/v1/native/register',
+    '/api/v1/native/phone/send',
+    '/api/v1/native/phone/verify',
     '/api/admin/login',  // Admin login (uses rate limiting + ADMIN_SECRET)
     '/api/admin/test/clear-rate-limits', // Test endpoint (non-production only)
     '/api/admin/test/get-user-id',       // Test endpoint (ADMIN_SECRET protected)
@@ -92,7 +99,8 @@ function validateCsrf(req, res, next) {
     // POST /api/auth/qq/complete 需要 CSRF 验证（使用一次性 state 作为额外防护）
   ]);
 
-  if (exemptPaths.has(path)) {
+  const nativeTransactionPath = /^\/api\/v1\/native\/auth\/transactions\/[^/]+\/(?:password|sms\/send|sms\/verify|qq)$/.test(path);
+  if (exemptPaths.has(path) || nativeTransactionPath) {
     return next();
   }
 

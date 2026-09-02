@@ -19,6 +19,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | [`001_initial_schema.sql`](../../src/db/migrations/001_initial_schema.sql) | 全量初始 schema：18 张表 + `email_config`/`sms_config` 的单行种子 + `system_config` 的 6 个种子键 |
 | [`002_security_hardening.sql`](../../src/db/migrations/002_security_hardening.sql) | 安全加固：`user_sessions` 增加 `expires_at` 列（存量回填 30 天）并将 token 索引改为 UNIQUE（`uniq_sessions_token`）、新增 `idx_sessions_expires`；`refresh_tokens.token` 存量值 `SHA2(token, 256)` 哈希化；删除 `clients` 的 `idx_clients_credentials` 复合索引（含 secret）；删除 `users.session_token` 列及 `idx_users_session`、冗余的 `idx_users_username`/`idx_users_email`；`ip_bans` 新增 `idx_ip_bans_ip` |
 | [`005_username_change_tracking.sql`](../../src/db/migrations/005_username_change_tracking.sql) | `users` 增加 `username_changed_at`，用于用户名自助修改的 30 天冷却检查 |
+| [`008_native_auth.sql`](../../src/db/migrations/008_native_auth.sql) | 第一方 Android client、认证事务、短信 challenge、一次性授权码与 Native 审计表 |
 
 ## MySQL 表
 
@@ -35,6 +36,17 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | `registration_email_codes` | 注册邮箱验证码的 MySQL 兜底（`register_email_code:{hash}` Redis 键的持久副本） | `email_hash`（主键，`SHA-256(lower(email))`）、`email`、`code_hash`（`SHA-256(code)`，永远不存明文 6 位码）、`expires_at` |
 
 ### OAuth
+
+### Native Auth
+
+| 表 | 用途 | 关键列与关联 |
+|----|------|-------------|
+| `native_auth_clients` | 首方 Native client 能力开关 | `mdtbbs_android` 预置；方法白名单和 PKCE required 标志 |
+| `native_auth_transactions` | 10 分钟认证上下文 | public id、S256 challenge、当前状态、最终 user/method |
+| `native_sms_challenges` | Native 短信验证码 | phone/code HMAC digest、5 次上限、5 分钟过期、一次消费 |
+| `native_authorization_codes` | 90 秒一次性授权码 | code HMAC digest、client/user/transaction、PKCE challenge、条件消费 |
+| `native_phone_challenges` | 已登录用户的原生手机验证 | ticket/phone/code HMAC digest、5 次上限、5 分钟过期、一次消费 |
+| `native_auth_audit_logs` | Native 安全审计 | 不记录密码、OTP、provider token、code 或 verifier |
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
