@@ -107,7 +107,18 @@ function createApp(deps = {}) {
       }
     },
     crossOriginEmbedderPolicy: false,
+    xFrameOptions: { action: 'sameorigin' },
+    // Helmet intentionally sends `0` when enabled; ESA's compatibility
+    // contract requires the explicit legacy blocking value below.
+    xXssProtection: false,
+    referrerPolicy: { policy: 'same-origin' },
   }));
+
+  app.use((_req, res, next) => {
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Expect-CT', 'max-age=86400, enforce');
+    next();
+  });
 
   // Middleware
   app.use(compression());
