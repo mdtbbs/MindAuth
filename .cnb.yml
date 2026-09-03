@@ -83,9 +83,22 @@
     - name: e2e
       env:
         USE_MEMORY_REDIS: '1'
+      # The Playwright config runs two browser projects (chromium + mobile)
+      # against a shared MySQL DB + shared in-process webServer.  Running the
+      # full stateful OAuth/session suite twice against the same mutable DB
+      # pollutes state for the second project (e.g. the seeded `forum` OAuth
+      # client is left mutated), which makes OAuth/session E2E tests fail only
+      # in the second project.  Run each project as its own playwright
+      # invocation, and reset the test DB (and thus the per-run in-process
+      # Redis) in between, so both projects start from identical clean state.
       script: |
         npx playwright install --with-deps chromium
-        npm run test:e2e
+        npm run test:db:prepare
+        npx playwright test --project=chromium
+        # Wipe & re-seed the test DB so the mobile project starts clean.
+        docker exec mindauth-mysql mysql -uroot -proot -e "DROP DATABASE IF EXISTS mindauth_test"
+        npm run test:db:prepare
+        npx playwright test --project=mobile
       timeout: 30m
 
 main:
