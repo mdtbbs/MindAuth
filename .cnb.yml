@@ -62,6 +62,10 @@
       script: npm run build
 
     - name: unit
+      # 单元测试运行在开发语义下：它们 mock DB，且会校验“无密码本地开发账号”
+      # 等开发态配置，因此不能带全局的 NODE_ENV=test。
+      env:
+        NODE_ENV: development
       script: npm run test:unit
 
     - name: prepare-db
