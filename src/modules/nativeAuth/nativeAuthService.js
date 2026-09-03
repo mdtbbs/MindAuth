@@ -62,10 +62,10 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
     return c;
   }
   async function getTransaction(publicId, { lock = false } = {}) {
-    const sql = `SELECT * FROM native_auth_transactions WHERE public_id = ? LIMIT 1${lock ? ' FOR UPDATE' : ''}`;
+    const sql = `SELECT t.*, NOW() AS db_now FROM native_auth_transactions t WHERE t.public_id = ? LIMIT 1${lock ? ' FOR UPDATE' : ''}`;
     const [rows] = await pool.execute(sql, [publicId]); const tx = rows[0];
     if (!tx) throw new NativeAuthError('AUTH_TRANSACTION_NOT_FOUND', 404, '认证事务不存在');
-    if (new Date(tx.expires_at) <= new Date() || tx.status === 'EXPIRED') { await pool.execute("UPDATE native_auth_transactions SET status = 'EXPIRED' WHERE id = ? AND status = 'PENDING'", [tx.id]); throw new NativeAuthError('AUTH_TRANSACTION_EXPIRED', 410, '认证事务已过期'); }
+    if (new Date(tx.expires_at) <= new Date(tx.db_now) || tx.status === 'EXPIRED') { await pool.execute("UPDATE native_auth_transactions SET status = 'EXPIRED' WHERE id = ? AND status = 'PENDING'", [tx.id]); throw new NativeAuthError('AUTH_TRANSACTION_EXPIRED', 410, '认证事务已过期'); }
     if (tx.status !== 'PENDING') throw new NativeAuthError('AUTH_TRANSACTION_NOT_PENDING', 409, '认证事务不可用');
     return tx;
   }
@@ -119,9 +119,9 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
   }
   async function verifySms({ transactionId, challengeId, phone, code, req }) {
     const tx = await getTransaction(transactionId); if (!/^\d{6}$/.test(String(code || ''))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效');
-    const [rows] = await pool.execute('SELECT * FROM native_sms_challenges WHERE public_id = ? AND transaction_id = ? LIMIT 1', [challengeId, tx.id]); const challenge = rows[0];
+    const [rows] = await pool.execute('SELECT c.*, NOW() AS db_now FROM native_sms_challenges c WHERE c.public_id = ? AND c.transaction_id = ? LIMIT 1', [challengeId, tx.id]); const challenge = rows[0];
     if (!challenge || challenge.consumed_at) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效');
-    if (new Date(challenge.expires_at) <= new Date()) throw new NativeAuthError('SMS_CODE_EXPIRED', 410, '验证码已过期');
+    if (new Date(challenge.expires_at) <= new Date(challenge.db_now)) throw new NativeAuthError('SMS_CODE_EXPIRED', 410, '验证码已过期');
     if (challenge.attempt_count >= challenge.max_attempts) throw new NativeAuthError('SMS_TOO_MANY_ATTEMPTS', 429, '验证码尝试次数过多');
     const normalized = normalizePhone(phone);
     if (!isValidMainlandChinaPhone(normalized) || !timingSafeCompare(challenge.phone_hash, hmac(`phone:${normalized}`))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效');
@@ -155,8 +155,8 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
   async function register({ transactionId, challengeId, smsCode, username, password, email, phone, req }) {
     const tx = await getTransaction(transactionId);
     if (!isValidUsername(username) || !isValidPassword(password) || !isValidEmail(email)) throw new NativeAuthError('INVALID_REGISTRATION', 400, '用户名、邮箱或密码格式无效');
-    const [rows] = await pool.execute('SELECT * FROM native_sms_challenges WHERE public_id = ? AND transaction_id = ? LIMIT 1', [challengeId, tx.id]); const challenge = rows[0];
-    if (!challenge || challenge.consumed_at || new Date(challenge.expires_at) <= new Date() || !timingSafeCompare(challenge.code_digest, hmac(`sms:${challengeId}:${smsCode}`))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效或已过期');
+    const [rows] = await pool.execute('SELECT c.*, NOW() AS db_now FROM native_sms_challenges c WHERE c.public_id = ? AND c.transaction_id = ? LIMIT 1', [challengeId, tx.id]); const challenge = rows[0];
+    if (!challenge || challenge.consumed_at || new Date(challenge.expires_at) <= new Date(challenge.db_now) || !timingSafeCompare(challenge.code_digest, hmac(`sms:${challengeId}:${smsCode}`))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效或已过期');
     const normalizedPhone = normalizePhone(phone);
     if (!isValidMainlandChinaPhone(normalizedPhone) || !timingSafeCompare(hmac(`phone:${normalizedPhone}`), challenge.phone_hash)) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码与手机号不匹配');
     const [existingPhone] = await pool.execute('SELECT id FROM users WHERE phone = ? LIMIT 1', [normalizedPhone]); if (existingPhone[0]) throw new NativeAuthError('PHONE_ALREADY_USED', 409, '手机号已注册');
@@ -181,9 +181,9 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
   }
   async function verifyPhoneVerification({ ticket, challengeId, phone, code, req }) {
     const claims = verifyPhoneActionTicket(ticket); if (!/^\d{6}$/.test(String(code || ''))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效');
-    const [rows] = await pool.execute('SELECT * FROM native_phone_challenges WHERE public_id = ? AND user_id = ? LIMIT 1', [challengeId, claims.sub]); const challenge = rows[0];
+    const [rows] = await pool.execute('SELECT c.*, NOW() AS db_now FROM native_phone_challenges c WHERE c.public_id = ? AND c.user_id = ? LIMIT 1', [challengeId, claims.sub]); const challenge = rows[0];
     if (!challenge || challenge.consumed_at || !timingSafeCompare(challenge.ticket_id_hash, hmac(`ticket:${claims.jti}`))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效');
-    if (new Date(challenge.expires_at) <= new Date()) throw new NativeAuthError('SMS_CODE_EXPIRED', 410, '验证码已过期');
+    if (new Date(challenge.expires_at) <= new Date(challenge.db_now)) throw new NativeAuthError('SMS_CODE_EXPIRED', 410, '验证码已过期');
     if (challenge.attempt_count >= challenge.max_attempts) throw new NativeAuthError('SMS_TOO_MANY_ATTEMPTS', 429, '验证码尝试次数过多');
     if (!timingSafeCompare(challenge.code_digest, hmac(`phone-code:${challengeId}:${code}`))) { await pool.execute('UPDATE native_phone_challenges SET attempt_count = attempt_count + 1 WHERE id = ?', [challenge.id]); throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效'); }
     const normalized = normalizePhone(phone); if (!isValidMainlandChinaPhone(normalized) || !timingSafeCompare(challenge.phone_hash, hmac(`phone:${normalized}`))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码与手机号不匹配');
@@ -195,10 +195,10 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
   async function exchange({ clientId, clientSecret, code, codeVerifier, req }) {
     if (clientId !== 'mdtbbs_android' || !process.env.NATIVE_MINDFOURM_CLIENT_SECRET || !timingSafeCompare(hashClientSecret(clientSecret || ''), hashClientSecret(process.env.NATIVE_MINDFOURM_CLIENT_SECRET))) throw new NativeAuthError('INVALID_CLIENT', 401, '服务端客户端认证失败');
     if (!code || !codeVerifier || typeof codeVerifier !== 'string') throw new NativeAuthError('AUTHORIZATION_CODE_INVALID', 400, '授权码无效');
-    const digest = hmac(`code:${code}`); const [rows] = await pool.execute('SELECT c.*, u.username, u.email, u.avatar_url, u.phone_verified FROM native_authorization_codes c JOIN users u ON u.id = c.user_id WHERE c.code_digest = ? LIMIT 1', [digest]); const record = rows[0];
+    const digest = hmac(`code:${code}`); const [rows] = await pool.execute('SELECT c.*, NOW() AS db_now, u.username, u.email, u.avatar_url, u.phone_verified FROM native_authorization_codes c JOIN users u ON u.id = c.user_id WHERE c.code_digest = ? LIMIT 1', [digest]); const record = rows[0];
     if (!record) throw new NativeAuthError('AUTHORIZATION_CODE_INVALID', 400, '授权码无效');
     if (record.client_id !== clientId) throw new NativeAuthError('AUTHORIZATION_CODE_INVALID', 400, '授权码无效');
-    if (new Date(record.expires_at) <= new Date()) throw new NativeAuthError('AUTHORIZATION_CODE_EXPIRED', 400, '授权码已过期');
+    if (new Date(record.expires_at) <= new Date(record.db_now)) throw new NativeAuthError('AUTHORIZATION_CODE_EXPIRED', 400, '授权码已过期');
     if (!timingSafeCompare(pkceChallenge(codeVerifier), record.code_challenge)) { await audit({ transactionId: record.transaction_id, userId: record.user_id, clientId, event: 'native.auth.code.exchange.failed', resultCode: 'PKCE_VERIFICATION_FAILED', req }); throw new NativeAuthError('PKCE_VERIFICATION_FAILED', 400, 'PKCE 校验失败'); }
     const [result] = await pool.execute('UPDATE native_authorization_codes SET consumed_at = NOW() WHERE id = ? AND consumed_at IS NULL AND expires_at > NOW()', [record.id]);
     if (result.affectedRows !== 1) throw new NativeAuthError('AUTHORIZATION_CODE_CONSUMED', 400, '授权码已使用或过期');
