@@ -7,6 +7,11 @@
     volumes:
       - node_modules
   env:
+    # Force the runner to UTC so MySQL's DATETIME (mysql:8 defaults to UTC) is
+    # parsed and compared consistently. Without this, nativeAuth integration
+    # tests that read `expires_at` back and compare to `new Date()` see a
+    # fresh transaction as already expired (runner local tz ahead of DB UTC).
+    TZ: UTC
     NODE_ENV: test
     PORT: '4001'
     BASE_URL: http://localhost:4001
@@ -30,6 +35,7 @@
         docker run -d --name mindauth-mysql \
           -e MYSQL_ROOT_PASSWORD=root \
           -e MYSQL_DATABASE=mindauth_test \
+          -e TZ=UTC \
           -p 3306:3306 \
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent" \
           --health-interval=5s --health-timeout=5s --health-retries=30 \
