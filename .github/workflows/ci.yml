@@ -70,6 +70,10 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+        # Unit configuration tests intentionally exercise development defaults.
+        # Integration and E2E retain the job-level NODE_ENV=test setting.
+        env:
+          NODE_ENV: development
 
       - name: Integration tests
         run: npm run test:integration
