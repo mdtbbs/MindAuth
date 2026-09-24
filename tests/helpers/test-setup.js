@@ -45,9 +45,9 @@ async function registerUser(http, { username, email, password }) {
   const sendRes = await http.post('/api/register/send-code', {
     data: { email }
   });
-  if (sendRes.status !== 200) {
+  if (sendRes.status() !== 200) {
     const body = await sendRes.json().catch(() => ({}));
-    throw new Error(`send-code failed: ${sendRes.status} ${JSON.stringify(body)}`);
+    throw new Error(`send-code failed: ${sendRes.status()} ${JSON.stringify(body)}`);
   }
   const sendBody = await sendRes.json();
   if (!sendBody.code) {
@@ -58,8 +58,8 @@ async function registerUser(http, { username, email, password }) {
     data: { username, email, password, email_code: sendBody.code }
   });
   const regBody = await regRes.json().catch(() => ({}));
-  if (regRes.status !== 201) {
-    throw new Error(`register failed: ${regRes.status} ${JSON.stringify(regBody)}`);
+  if (regRes.status() !== 201) {
+    throw new Error(`register failed: ${regRes.status()} ${JSON.stringify(regBody)}`);
   }
   return regBody;
 }

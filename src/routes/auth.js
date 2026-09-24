@@ -9,8 +9,8 @@ const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter, createClientAwareRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
 const { maskPhone } = require('../utils/phone');
-const { logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
+const passwordLogin = require('../modules/auth/passwordLogin');
 const challengeManager = require('../modules/challenges/challengeManager');
 const notificationCenter = require('../modules/notifications/notificationCenter');
 const config = require('../config');
@@ -267,141 +267,30 @@ router.post('/register', registerRateLimiter, async (req, res) => {
 // Login
 router.post('/login', loginRateLimiter, async (req, res) => {
   const { username, password } = req.body;
-
   if (!username || !password) {
     return res.status(400).json({ success: false, message: '用户名/邮箱和密码必填' });
   }
 
   try {
-    // Support login with email or username
-    const isEmail = isValidEmail(username);
-    const loginIdentifier = isEmail ? username.toLowerCase().trim() : username;
-    const query = isEmail
-      ? 'SELECT * FROM users WHERE email = ?'
-      : 'SELECT * FROM users WHERE username = ?';
-    const [rows] = await pool.execute(query, [loginIdentifier]);
-    const user = rows[0];
-
-    if (!user) {
-      return res.status(401).json({ success: false, message: '用户名/邮箱或密码错误' });
-    }
-
-    // Check ban status
-    if (user.ban_status === 'banned') {
-      const isExpired = user.ban_expires_at && new Date(user.ban_expires_at) < new Date();
-      if (isExpired) {
-        await pool.execute(
-          "UPDATE users SET ban_status = 'none', ban_reason = NULL, banned_by = NULL, ban_expires_at = NULL WHERE id = ?",
-          [user.id]
-        );
-      } else {
-        return res.status(403).json({
-          success: false,
-          code: 'USER_BANNED',
-          message: user.ban_reason || '账号已被封禁',
-          ban_expires_at: user.ban_expires_at,
-        });
-      }
-    }
-
-    // Check account lock status
-    if (user.locked_until) {
-      const lockExpiry = new Date(user.locked_until);
-      if (lockExpiry > new Date()) {
-        return res.status(423).json({
-          success: false,
-          code: 'ACCOUNT_LOCKED',
-          message: `账号已锁定，请${Math.ceil((lockExpiry - new Date()) / 60000)}分钟后重试`,
-          locked_until: user.locked_until,
-          lock_level: user.lock_level,
-        });
-      }
-      // Lock expired, clear it
-      await pool.execute('UPDATE users SET locked_until = NULL WHERE id = ?', [user.id]);
-    }
-    // Note: failed-login lockouts are always temporary (see below). A hard,
-    // indefinite block is only ever applied by an admin via ban_status —
-    // this prevents an attacker who knows a username from permanently
-    // locking the account out from a single IP.
-
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) {
-      // Audit: login failed
-      logUserAudit({
-        user_id: user.id,
-        action: 'login_failed',
-        ip_address: getClientIp(req),
-        user_agent: req.headers['user-agent'],
-        details: { reason: 'invalid_password' },
-      });
-
-      // Increment login failure counter.
-      // Keyed by username AND IP so a remote attacker who only knows a
-      // username cannot lock the real owner out of their account.
-      const failKey = `login_fail:${username}:${getClientIp(req)}`;
-      const failCount = await client.incr(failKey);
-      if (failCount === 1) await client.expire(failKey, 300);
-
-      if (failCount >= 5) {
-        const newLevel = (user.lock_level || 0) + 1;
-        // Escalating but ALWAYS finite lockout — never permanent. Caps at 2h
-        // so a single IP can, at worst, temporarily lock an account that
-        // auto-recovers, rather than locking it out forever.
-        let lockMinutes;
-        if (newLevel === 1) lockMinutes = 15;
-        else if (newLevel === 2) lockMinutes = 60;
-        else lockMinutes = 120;
-        const lockedUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
-
-        await pool.execute(
-          'UPDATE users SET lock_level = ?, locked_until = ? WHERE id = ?',
-          [newLevel, lockedUntil, user.id]
-        );
-        await client.del(failKey);
-
-        const lockMsg = lockMinutes >= 60 ? `锁定${lockMinutes / 60}小时` : `锁定${lockMinutes}分钟`;
-        await notificationCenter.create({
-          user_id: user.id, type: 'account_locked', title: '账号已被锁定',
-          content: `连续登录失败次数过多，账号已被${lockMsg}`, sendEmail: true,
-        });
-        logUserAudit({
-          user_id: user.id,
-          action: 'account_locked',
-          ip_address: getClientIp(req),
-          user_agent: req.headers['user-agent'],
-          details: { lock_level: newLevel, duration: lockMsg },
-        });
-      }
-
-      return res.status(401).json({ success: false, message: '用户名/邮箱或密码错误' });
-    }
-
-    // Reset the login limiter only — other limiters (admin login, register,
-    // password reset) keep their own counters
     const ip = getClientIp(req);
     const userAgent = req.headers['user-agent'] || '';
-    await resetRateLimit(ip, config.rateLimit.login.keyPrefix);
-    await client.del(`login_fail:${username}:${ip}`);
-
-    // Reset lock status on successful login
-    if (user.lock_level > 0) {
-      await pool.execute('UPDATE users SET lock_level = 0 WHERE id = ?', [user.id]);
+    const result = await passwordLogin.authenticatePassword({ login: username, password, ipAddress: ip, userAgent });
+    if (!result.ok && result.reason === 'banned') {
+      return res.status(403).json({ success: false, code: 'USER_BANNED', message: result.user.ban_reason || '账号已被封禁', ban_expires_at: result.user.ban_expires_at });
     }
+    if (!result.ok && result.reason === 'locked') {
+      return res.status(423).json({ success: false, code: 'ACCOUNT_LOCKED', message: `账号已锁定，请${result.retryMinutes}分钟后重试`, locked_until: result.lockedUntil, lock_level: result.user.lock_level });
+    }
+    if (!result.ok) return res.status(401).json({ success: false, message: '用户名/邮箱或密码错误' });
 
-    // Create session via sessionManager (hash-based, stored in user_sessions)
-    const sessionResult = await sessionManager.createUserSession({
-      userId: user.id,
-      ipAddress: ip,
-      userAgent: userAgent,
-    });
-
-    // Record login log
+    const user = result.user;
+    await resetRateLimit(ip, config.rateLimit.login.keyPrefix);
+    const sessionResult = await sessionManager.createUserSession({ userId: user.id, ipAddress: ip, userAgent });
     await pool.execute(
       'INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)',
       [user.id, ip, userAgent.slice(0, 200), 'web']
     );
 
-    // New device notification
     try {
       const [prevLog] = await pool.execute(
         'SELECT ip FROM login_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1 OFFSET 1',
@@ -410,8 +299,7 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       if (prevLog.length > 0 && prevLog[0].ip !== ip) {
         await notificationCenter.create({
           user_id: user.id, type: 'login_new_device', title: '新设备登录',
-          content: `检测到新设备登录，IP: ${ip}`,
-          ip_address: ip, user_agent: userAgent, sendEmail: true,
+          content: `检测到新设备登录，IP: ${ip}`, ip_address: ip, user_agent: userAgent, sendEmail: true,
         });
       }
     } catch (notifyErr) {
@@ -419,13 +307,8 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     }
 
     res.cookie('session', sessionResult.token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: SESSION_MAX_AGE,
-      sameSite: 'Lax',
-      path: '/'
+      httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: SESSION_MAX_AGE, sameSite: 'Lax', path: '/',
     });
-
     res.json({ success: true });
   } catch (err) {
     console.error('Login error:', err);

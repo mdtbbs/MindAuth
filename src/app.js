@@ -34,6 +34,7 @@ const notificationsRoutes = require('./routes/notifications');
 const registerEmailCodeRoutes = require('./routes/registerEmailCode');
 const socialAuthRoutes = require('./routes/socialAuth');
 const nativeAuthRoutes = require('./routes/nativeAuth');
+const nativeClientRoutes = require('./routes/nativeClient');
 
 // Middleware
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
@@ -192,6 +193,7 @@ function createApp(deps = {}) {
   app.use('/api/register', registerEmailCodeRoutes);
   app.use('/api/auth', socialAuthRoutes);
   app.use('/api/v1/native', nativeAuthRoutes);
+  app.use('/api/native', nativeClientRoutes);
   app.use('/api', authRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api', oauthRoutes);

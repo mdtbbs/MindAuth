@@ -119,6 +119,21 @@ Native 错误统一为 `{ "error": { "code", "message", "retryable", "details": 
 
 手机号验证票据格式为 `npa.<base64url-json>.<base64url-hmac>`；MindFourm 使用 `NATIVE_PHONE_ACTION_SECRET` 以 HMAC-SHA-256 签发，claims 必须含整数 `sub`、唯一 `jti`、`aud: "mindauth-native-phone"` 与短期 Unix `exp`。票据只能由 MindFourm 后端签发，Android 仅在 `Authorization: Bearer` 转交。
 
+### MDTBBS Mindustry Mod 原生会话
+
+`/api/native/*` 仅面向 MDTBBS 官方 public client `mdtbbs-mindustry-mod`。客户端不含 `client_secret`；`client_id` 只是可伪造的产品标识，不是信任凭证。**第三方应用禁止使用 Native Password Login**，第三方仍须走 OAuth Authorization Code + PKCE。生产客户端必须仅使用 `https://auth.mdtbbs.cn`，不得忽略证书错误或回退到 HTTP。`device_id` 是本地随机 UUID，不得由硬件标识生成，也不是身份验证因子。
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| POST | `/api/native/login` | 使用用户名/邮箱与密码建立一个 Mod 设备会话 |
+| POST | `/api/native/refresh` | 轮换当前设备的 refresh token |
+| POST | `/api/native/logout` | 用 Bearer access token（或绑定设备的 refresh token）注销当前 Mod 设备会话 |
+| GET | `/api/native/me` | 返回当前用户的最小资料 |
+
+登录请求为 `{client_id, username, password, device_id, device_name?}`；刷新为 `{client_id, refresh_token, device_id}`。成功响应沿用 OAuth Token 字段（`access_token`、`refresh_token`、`token_type`、`expires_in`、`scope`），登录额外返回 `success: true`。默认 scope 为 `openid profile game_content`。Native access token 仍是 Redis 中标准 Bearer token，audience client 由 `native_auth_clients.token_audience_client_id` 指向 MindFourm OAuth client（默认 `forum`），可由现有 `/api/introspect`、`/api/userinfo` 验证；不会向 OIDC Discovery 宣称支持 password grant。
+
+Native 错误采用共享 API JSON 结构 `{success:false, code, message}`；常见 code 为 `INVALID_CLIENT`、`INVALID_REQUEST`、`INVALID_CREDENTIALS`、`ACCOUNT_LOCKED`、`USER_BANNED`、`INVALID_REFRESH_TOKEN`、`SESSION_REVOKED`、`RATE_LIMITED`。Native POST 只在 CSRF middleware 中按完整路径精确豁免；授权仍只依赖密码或 Bearer/refresh token、TLS、限流与账号锁定。
+
 **`GET /api/public/auth-page-config`**（`src/routes/public.js`）：返回认证页（登录/注册等）的公开外观配置，当前仅自定义背景图 URL：`{ "success": true, "background_url": "/uploads/backgrounds/..." | null }`（`null` 表示前端使用默认网格背景）。限流前缀 `ratelimit:public_config`（60 次/分钟），响应带 `Cache-Control: public, max-age=60`。背景图由管理端 `POST/DELETE /api/admin/auth-background` 维护，见 [admin.md](admin.md)。
 
 ### 认证域 — 详见 [auth.md](auth.md)

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const passwordLogin = require('../auth/passwordLogin');
 const { pool: defaultPool } = require('../../db');
 const { client: defaultRedis } = require('../../redis');
 const { getClientIp } = require('../../utils/request');
@@ -95,13 +96,22 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
     return { authorization_code: code, expires_in: CODE_TTL_SECONDS, token_type: 'authorization_code' };
   }
   async function password({ transactionId, login, password, req }) {
-    const tx = await getTransaction(transactionId); await requireMethod(tx, 'password'); await hitLimit(`native:password:ip:${getClientIp(req)}`, 10, 300); await hitLimit(`native:password:tx:${tx.id}`, 10, 300); await hitLimit(`native:password:login:${crypto.createHash('sha256').update(normalizeLogin(login).toLowerCase()).digest('hex')}`, 10, 300);
-    const identifier = normalizeLogin(login); if (!identifier || typeof password !== 'string') throw new NativeAuthError('INVALID_CREDENTIALS', 401, '登录凭据无效');
-    const byEmail = isValidEmail(identifier); const [rows] = await pool.execute(byEmail ? 'SELECT * FROM users WHERE email = ? LIMIT 1' : 'SELECT * FROM users WHERE username = ? LIMIT 1', [byEmail ? identifier.toLowerCase() : identifier]);
-    const user = rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) { await audit({ transactionId: tx.id, clientId: tx.client_id, event: 'native.auth.password.failed', method: 'password', resultCode: 'INVALID_CREDENTIALS', req }); throw new NativeAuthError('INVALID_CREDENTIALS', 401, '用户名、邮箱或密码错误'); }
-    const allowed = await checkLoginAllowed(user);
-    if (!allowed.allowed) throw new NativeAuthError(allowed.error.code === 'USER_BANNED' ? 'ACCOUNT_DISABLED' : allowed.error.code, 403, '账号当前不可登录');
+    const tx = await getTransaction(transactionId);
+    await requireMethod(tx, 'password');
+    await hitLimit(`native:password:ip:${getClientIp(req)}`, 10, 300);
+    await hitLimit(`native:password:tx:${tx.id}`, 10, 300);
+    const identifier = normalizeLogin(login);
+    if (!identifier || typeof password !== 'string') throw new NativeAuthError('INVALID_CREDENTIALS', 401, '用户名、邮箱或密码错误');
+    const result = await passwordLogin.authenticatePassword({
+      login: identifier, password, ipAddress: getClientIp(req), userAgent: req.headers['user-agent'] || '',
+    });
+    if (!result.ok) {
+      if (result.reason === 'locked') throw new NativeAuthError('ACCOUNT_LOCKED', 423, '账号已锁定，请稍后重试');
+      if (result.reason === 'banned') throw new NativeAuthError('ACCOUNT_DISABLED', 403, '账号当前不可登录');
+      await audit({ transactionId: tx.id, clientId: tx.client_id, event: 'native.auth.password.failed', method: 'password', resultCode: 'INVALID_CREDENTIALS', req });
+      throw new NativeAuthError('INVALID_CREDENTIALS', 401, '用户名、邮箱或密码错误');
+    }
+    const user = result.user;
     await pool.execute('INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)', [user.id, getClientIp(req), (req.headers['user-agent'] || '').slice(0, 200), 'native_password']);
     await audit({ transactionId: tx.id, userId: user.id, clientId: tx.client_id, event: 'native.auth.password.success', method: 'password', req });
     return issueCode(tx, user, 'password', req);

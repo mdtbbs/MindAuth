@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { pool } = require('../../db');
 const { client } = require('../../redis');
 const { parseDeviceInfo } = require('../../utils/deviceInfo');
+const tokenStore = require('../oauth/tokenStore');
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -193,6 +194,9 @@ async function touchUserSession(sessionId) {
  * @returns {Promise<{ revoked: boolean }>}
  */
 async function revokeUserSession({ token, userId, sessionId }) {
+  if (typeof sessionId === 'string' && sessionId.startsWith('native:')) {
+    return revokeNativeClientSession({ sessionId: Number(sessionId.slice(7)), userId });
+  }
   let tokenHash = null;
   let resolvedSessionId = sessionId || null;
 
@@ -300,6 +304,15 @@ async function revokeAllUserSessions(userId, options = {}) {
   // 4. Delete the per-user index set
   await client.del(`sessions_by_user:${userId}`).catch(() => {});
 
+  // Native client credentials are separate device sessions backed by the
+  // shared OAuth token store. Password/security revocation must include them.
+  const [nativeRows] = await pool.execute('SELECT id FROM native_client_sessions WHERE user_id = ? AND revoked_at IS NULL', [userId]);
+  if (nativeRows.length) {
+    await pool.execute('UPDATE native_client_sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL', [userId]);
+    await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND native_session_id IS NOT NULL', [userId]);
+    await Promise.all(nativeRows.map(({ id }) => tokenStore.revokeAccessTokensForNativeSession(id)));
+  }
+
   return { revokedCount };
 }
 
@@ -317,14 +330,43 @@ async function listUserSessions(userId, currentTokenHash) {
     [userId]
   );
 
-  return rows.map(s => ({
+  const webSessions = rows.map(s => ({
     id: s.id,
+    session_type: 'web',
     ip_address: s.ip_address,
     device_info: s.device_info,
     is_current: currentTokenHash ? s.session_token === currentTokenHash : false,
     created_at: s.created_at,
     last_active_at: s.last_active_at,
   }));
+  const [nativeRows] = await pool.execute(
+    `SELECT id, client_id, device_name, ip_address, created_at, last_active_at
+     FROM native_client_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY last_active_at DESC`,
+    [userId]
+  );
+  const nativeSessions = nativeRows.map(s => ({
+    id: `native:${s.id}`,
+    session_type: 'native',
+    client_id: s.client_id,
+    ip_address: s.ip_address,
+    device_info: `${s.client_id === 'mdtbbs-mindustry-mod' ? 'MDTBBS Mindustry Mod' : 'Native Client'} · ${s.device_name}`,
+    is_current: false,
+    created_at: s.created_at,
+    last_active_at: s.last_active_at,
+  }));
+  return [...webSessions, ...nativeSessions].sort((a, b) => new Date(b.last_active_at) - new Date(a.last_active_at));
+}
+
+async function revokeNativeClientSession({ sessionId, userId }) {
+  if (!Number.isSafeInteger(Number(sessionId)) || Number(sessionId) <= 0) return { revoked: false };
+  const [result] = await pool.execute(
+    'UPDATE native_client_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = ? AND user_id = ? AND revoked_at IS NULL',
+    [Number(sessionId), userId]
+  );
+  if (!result.affectedRows) return { revoked: false };
+  await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE native_session_id = ?', [Number(sessionId)]);
+  await tokenStore.revokeAccessTokensForNativeSession(Number(sessionId));
+  return { revoked: true };
 }
 
 // ─── Admin sessions ───────────────────────────────────────────
@@ -480,6 +522,7 @@ module.exports = {
   revokeAllUserSessions,
   invalidateUserSessionCache,
   listUserSessions,
+  revokeNativeClientSession,
 
   // Admin sessions
   createAdminSession,

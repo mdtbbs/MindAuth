@@ -68,6 +68,11 @@ async function storeAccessToken(token, data, ttlSeconds) {
   await client.setEx(`accesstoken:${tokenHash}`, ttlSeconds, JSON.stringify(data));
   // Index for targeted invalidation (avoids SCAN)
   await client.sAdd(`accesstokens_by_userclient:${data.user_id}:${data.client_id}`, tokenHash);
+  if (data.native_session_id) {
+    const index = `accesstokens_by_native_session:${data.native_session_id}`;
+    await client.sAdd(index, tokenHash);
+    await client.expire(index, ttlSeconds + 60).catch(() => {});
+  }
 }
 
 /**
@@ -108,6 +113,9 @@ async function revokeAccessToken(token) {
   if (tokenData?.user_id !== undefined && tokenData?.client_id !== undefined) {
     await client.sRem(`accesstokens_by_userclient:${tokenData.user_id}:${tokenData.client_id}`, tokenHash);
   }
+  if (tokenData?.native_session_id) {
+    await client.sRem(`accesstokens_by_native_session:${tokenData.native_session_id}`, tokenHash).catch(() => {});
+  }
 }
 
 /**
@@ -123,6 +131,23 @@ async function revokeAccessTokensForUserClient(userId, clientId) {
   const tokenHashes = await client.sMembers(indexKey);
   if (tokenHashes.length > 0) {
     await Promise.all(tokenHashes.map(h => client.del(`accesstoken:${h}`).catch(() => {})));
+  }
+  await client.del(indexKey).catch(() => {});
+}
+
+async function revokeAccessTokensForNativeSession(sessionId) {
+  const indexKey = `accesstokens_by_native_session:${sessionId}`;
+  const tokenHashes = await client.sMembers(indexKey);
+  for (const tokenHash of tokenHashes) {
+    const key = `accesstoken:${tokenHash}`;
+    const raw = await client.get(key).catch(() => null);
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        await client.sRem(`accesstokens_by_userclient:${data.user_id}:${data.client_id}`, tokenHash).catch(() => {});
+      } catch {}
+    }
+    await client.del(key).catch(() => {});
   }
   await client.del(indexKey).catch(() => {});
 }
@@ -251,6 +276,7 @@ module.exports = {
   getAccessTokenTtl,
   revokeAccessToken,
   revokeAccessTokensForUserClient,
+  revokeAccessTokensForNativeSession,
   storeDeviceCode,
   getDeviceCode,
   updateDeviceCode,

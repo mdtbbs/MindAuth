@@ -129,6 +129,8 @@ MindAuth OAuth 2.0 / OIDC 域全部端点的内部参考文档，涵盖协议端
 
 错误：缺 token → 400 `invalid_request`；缺凭证或凭证错误 → 401 `invalid_client`。
 
+Native Mod access token 的 introspection `client_id` 是 `native_auth_clients.token_audience_client_id` 配置的资源服务器客户端（当前默认 `forum`），所以 MindFourm 继续用自身已配置的 OAuth client credentials 校验标准 Bearer token。Native refresh token 只能通过 `/api/native/refresh` 使用。Native Password Login 不属于 OAuth grant，`/api/token`、`/api/refresh` 的标准契约和 OIDC Discovery 不变。
+
 ---
 
 ## GET /api/userinfo

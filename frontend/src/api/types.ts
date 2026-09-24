@@ -85,7 +85,9 @@ export interface Authorization {
 // ─── Session ─────────────────────────────────────────────────────────────────
 
 export interface Session {
-  id: number;
+  id: number | string;
+  session_type?: 'web' | 'native';
+  client_id?: string;
   ip_address: string;
   device_info: string;
   last_active_at: string;

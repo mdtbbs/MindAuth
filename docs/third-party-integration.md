@@ -13,6 +13,8 @@ MindAuth 支持以下标准：
 
 > **注意：** MindFourm（论坛）已完全切换到 OAuth-only 用户同步模式。不再支持 service-key 方式的直接用户同步。所有第三方系统必须通过 OAuth 2.0 流程接入。
 
+**Native Password API 边界：** `/api/native/*` 仅供 MDTBBS 官方 Mindustry Mod 的 `mdtbbs-mindustry-mod` public client 使用。第三方应用不得收集 MindAuth 密码或调用 Native Password Login；请使用本文档的 Authorization Code + PKCE。Mod 不含 `client_secret`，其 `client_id` 不是可验证身份的秘密。生产 Mod 必须固定访问 `https://auth.mdtbbs.cn` 并执行正常 TLS 证书验证。Native API 不属于 OAuth password grant，也不会加入 OIDC Discovery 的 `grant_types_supported`。
+
 ---
 
 ## 1. OIDC Discovery

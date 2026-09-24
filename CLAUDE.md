@@ -116,6 +116,8 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | Module | File | Key Exports |
 |--------|------|-------------|
 | `sessionManager` | `sessions/sessionManager.js` | `hashToken`, `createUserSession`, `authenticateUserSession`, `touchUserSession`, `revokeUserSession`, `revokeAllUserSessions`, `invalidateUserSessionCache`, `listUserSessions`, `createAdminSession`, `authenticateAdminSession`, `revokeAdminSessionsForUser` |
+| `passwordLogin` | `auth/passwordLogin.js` | Shared username/email password validation, ban/lock checks, failure counter, notifications and audit for Web and Native password login |
+| `nativeClientService` | `nativeAuth/nativeClientService.js` | First-party `mdtbbs-mindustry-mod` device sessions, native token issue/refresh/logout/me |
 | `oauthIssuer` | `oauth/oauthIssuer.js` | `authorize`, `exchangeCode`, `refresh`, `introspect`, `revoke`, `userinfo`, `userByAccessToken`, `listAuthorizations`, `revokeAuthorization`, `verify` |
 | `tokenStore` | `oauth/tokenStore.js` | `storeAuthCode`, `consumeAuthCode`, `storeAccessToken`, `getAccessToken`, `getAccessTokenTtl`, `revokeAccessToken`, `revokeAccessTokensForUserClient` |
 | `clientRegistry` | `admin/clientRegistry.js` | `createClient`, `updateClient`, `rotateSecret`, `deleteClient`, `listClients`, `getClient`, `validateRedirectUri` |
@@ -135,6 +137,10 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `/register/send-code` | POST | Send 6-digit email verification code for registration. Dev mode returns the code in response body. | None |
 | `/register` | POST | User registration. Requires valid `email_code` from `/register/send-code`. Creates account with `email_verified=1`. | None |
 | `/login` | POST | User login | None |
+| `/native/login` | POST | Official Mindustry Mod public-client login | None |
+| `/native/refresh` | POST | Rotate a Mod device refresh token | None |
+| `/native/logout` | POST | Revoke current Mod device session | Bearer |
+| `/native/me` | GET | Minimal Native user info | Bearer |
 | `/logout` | POST | User logout | Session |
 | `/me` | GET | Current user info | Session |
 | `/login-logs` | GET | Login history | Session |
@@ -239,7 +245,8 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `clients` | OAuth apps | id, name, client_id, client_secret, redirect_uri |
 | `authorizations` | User-client auth records | user_id, client_id, scope, last_used_at |
 | `refresh_tokens` | Long-lived tokens | user_id, client_id, token, expires_at, revoked |
-| `login_logs` | Login history | user_id, ip, device, login_type (web/oauth) |
+| `native_client_sessions` | First-party device sessions | user_id, client_id, random device_id, display name, IP/UA, last activity, revoked_at |
+| `login_logs` | Login history | user_id, ip, device, login_type (web/oauth/native), client_id, device_id, device_name |
 | `email_config` | SMTP settings | host, port, user, password, from (single row id=1) |
 | `system_config` | Runtime config | key, value (session_lifetime, password_rules, auth_background_url, etc.) |
 | `user_sessions` | Active session tracking | user_id, session_token (SHA-256 hash), ip_address, device_info, expires_at, last_active_at |
@@ -257,6 +264,8 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `social_accounts` | Social login provider bindings (QQ, etc.) | id, user_id, provider, provider_user_id, nickname, avatar_url, created_at, last_login_at. UNIQUE on (provider, provider_user_id) and (user_id, provider). FK to users ON DELETE CASCADE |
 
 Schema migrations live in `src/db/migrations/` and run automatically on startup via `src/db/migrator.js`. Migration `002_security_hardening.sql` adds `user_sessions.expires_at` + UNIQUE token index, hashes existing `refresh_tokens.token` values (SHA-256), drops the `clients` credential index and the deprecated `users.session_token` column, and indexes `ip_bans.ip_address`. Migration `003_auth_background_config.sql` seeds the `auth_background_url` key (`runtimeConfig.set` is UPDATE-only, so config keys must be seeded by migration). Migration `006_social_accounts.sql` creates the `social_accounts` table for social login bindings.
+
+Migration `009_native_client_sessions.sql` adds the official Mindustry Mod client allowlist entry, `native_client_sessions`, refresh-token session linkage, and device metadata on `login_logs`. Native access tokens use the existing OAuth Redis token format; their audience is configured by `native_auth_clients.token_audience_client_id` (default `forum`).
 
 ### Redis Keys
 

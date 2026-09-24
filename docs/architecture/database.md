@@ -12,7 +12,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 2. **记录**：首次运行创建 `schema_version` 表（`version` PRIMARY KEY、`name`、`applied_at`），已应用的版本不会重复执行——正常启动**从不删数据**，重复调用是 no-op。
 3. **执行**：每个待执行文件经 `splitStatements()` 拆成单条语句依次 `pool.query()`。全部成功后才写入 `schema_version`；任一语句失败则抛错且**不记录版本**，下次启动重试。注意 MySQL 的 DDL 会隐式 COMMIT，失败的迁移可能已部分生效，无法真正回滚。
 
-现有三个迁移文件（以 SQL 文件为准）：
+迁移文件（以 SQL 文件为准）：
 
 | 文件 | 内容边界 |
 |------|---------|
@@ -20,6 +20,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | [`002_security_hardening.sql`](../../src/db/migrations/002_security_hardening.sql) | 安全加固：`user_sessions` 增加 `expires_at` 列（存量回填 30 天）并将 token 索引改为 UNIQUE（`uniq_sessions_token`）、新增 `idx_sessions_expires`；`refresh_tokens.token` 存量值 `SHA2(token, 256)` 哈希化；删除 `clients` 的 `idx_clients_credentials` 复合索引（含 secret）；删除 `users.session_token` 列及 `idx_users_session`、冗余的 `idx_users_username`/`idx_users_email`；`ip_bans` 新增 `idx_ip_bans_ip` |
 | [`005_username_change_tracking.sql`](../../src/db/migrations/005_username_change_tracking.sql) | `users` 增加 `username_changed_at`，用于用户名自助修改的 30 天冷却检查 |
 | [`008_native_auth.sql`](../../src/db/migrations/008_native_auth.sql) | 第一方 Android client、认证事务、短信 challenge、一次性授权码与 Native 审计表 |
+| [`009_native_client_sessions.sql`](../../src/db/migrations/009_native_client_sessions.sql) | Mod device session、OAuth refresh token 的 native session 关联、登录日志设备元数据、`forum` audience 配置和官方 Mindustry Mod client seed |
 
 ## MySQL 表
 
@@ -31,7 +32,8 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 |----|------|-------------|
 | `users` | 用户账号主表 | `username`/`email`/`phone` 均 UNIQUE；`username_changed_at` 记录自助改名时间并用于 30 天冷却；`password_hash`（bcrypt）；`role`、`email_verified`、`phone_verified(_at)`；头像/横幅 `avatar_url`/`banner_url`；锁定 `lock_level` + `locked_until`；封禁 `ban_status`/`ban_reason`/`banned_by`/`ban_expires_at`。几乎所有表都外键指向它 |
 | `user_sessions` | 活跃会话追踪（Web 登录态） | `session_token` 存 SHA-256 哈希（UNIQUE），`ip_address`、`user_agent`、`device_info`、`expires_at`（绝对过期，002 引入）、`last_active_at` |
-| `login_logs` | 登录历史 | `ip`、`device`、`login_type`（`web`/`oauth`），供用户端"登录记录"与管理端统计使用 |
+| `native_client_sessions` | 官方 Native client 设备凭据会话 | `user_id`、`client_id`、随机 `device_id`、展示用 `device_name`、IP/UA、创建/活跃/撤销时间；每个会话对应 OAuth refresh-token family，不存原始 token |
+| `login_logs` | 登录历史 | `ip`、`device`、`login_type`（`web`/`oauth`/`native`）；009 增加 `client_id`、`device_id`、`device_name`，供用户端与管理端识别设备 |
 | `email_verification_tokens` | 邮箱验证令牌的 MySQL 兜底（Redis 重启丢数据时回查） | `token`（主键，存哈希）、`email`（待验证/待变更邮箱）、`expires_at` |
 | `registration_email_codes` | 注册邮箱验证码的 MySQL 兜底（`register_email_code:{hash}` Redis 键的持久副本） | `email_hash`（主键，`SHA-256(lower(email))`）、`email`、`code_hash`（`SHA-256(code)`，永远不存明文 6 位码）、`expires_at` |
 
@@ -41,7 +43,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
-| `native_auth_clients` | 首方 Native client 能力开关 | `mdtbbs_android` 预置；方法白名单和 PKCE required 标志 |
+| `native_auth_clients` | 首方 Native client 能力开关 | `mdtbbs_android` 与 `mdtbbs-mindustry-mod` 预置；方法白名单、PKCE required 标志；009 增加 Native token downstream `token_audience_client_id`（Mod 默认 `forum`） |
 | `native_auth_transactions` | 10 分钟认证上下文 | public id、S256 challenge、当前状态、最终 user/method |
 | `native_sms_challenges` | Native 短信验证码 | phone/code HMAC digest、5 次上限、5 分钟过期、一次消费 |
 | `native_authorization_codes` | 90 秒一次性授权码 | code HMAC digest、client/user/transaction、PKCE challenge、条件消费 |
@@ -52,7 +54,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 |----|------|-------------|
 | `clients` | 第三方 OAuth 应用注册 | `client_id`（UNIQUE）、`client_secret`（明文存储——见 CLAUDE.md 已知遗留项）、`redirect_uri`、`require_pkce`。无外键 |
 | `authorizations` | 用户对客户端的授权记录 | `(user_id, client_id)` UNIQUE；`scope`、`last_used_at`。`client_id` 为字符串关联 `clients.client_id`（无外键约束） |
-| `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销 |
+| `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销；009 增加 nullable `native_session_id` 关联单设备 Native family |
 
 ### 审计日志
 

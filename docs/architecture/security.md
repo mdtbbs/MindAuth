@@ -17,6 +17,7 @@ MindAuth 是面向公网的 OAuth 2.0 SSO 认证服务，本文档面向后端�
 | IP 伪造 | `trust proxy=false` + 显式可信代理白名单 | [request.js](../../src/utils/request.js) |
 | SSRF（redirect_uri） | 私网地址拦截 | [clientRegistry.js](../../src/modules/admin/clientRegistry.js) |
 | 令牌泄漏/重放 | 授权码原子单次消费、refresh token 轮换 + 重放检测、PKCE S256 | [oauthIssuer.js](../../src/modules/oauth/oauthIssuer.js)、[tokenStore.js](../../src/modules/oauth/tokenStore.js) |
+| Native 设备 token 被撤销后重用 | OAuth access-token store + `native_client_sessions` 状态检查；refresh 重放撤销单设备 family | `nativeClientService.js`、`oauthIssuer.js` |
 
 ## 密码与凭据
 
@@ -36,6 +37,10 @@ MindAuth 是面向公网的 OAuth 2.0 SSO 认证服务，本文档面向后端�
 - **管理员会话**：仅存 Redis（24h），**每次请求都回 DB 复查 role 与 ban_status**——降权或封禁即时生效并删除会话（[requireAdmin.js](../../src/middleware/requireAdmin.js) 委托 `authenticateAdminSession`）。
 
 Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf_token` 非 httpOnly（需 JS 读取）+ SameSite=Strict。
+
+官方 Mindustry Mod 的 Native Session 独立记录在 `native_client_sessions`，不伪装成 Web Cookie Session。对应 refresh token 仍使用 `refresh_tokens` 的 SHA-256 哈希记录及 OAuth rotation 实现；access token 仍使用 Redis `accesstoken:{sha256}`。Access-token payload 带内部 `native_session_id`，userinfo/introspection 每次复查 session 与用户封禁状态，单设备注销会清 Redis access token 并撤销该 session 的 refresh rows。密码修改/重置、管理员封禁、全设备注销会一并撤销 Native sessions。
+
+Native `client_id` 白名单取自 `native_auth_clients`，仅启用 `mdtbbs-mindustry-mod`。它是公开分发 public client，不含 client secret；client_id、device_id 和 device_name 均不证明客户端或用户身份。Native 登录仍走共享 `passwordLogin`，包含同样的用户名/邮箱解析、封禁、锁定、Redis `login_fail:{userId}:{ip}`、用户审计和账号锁定通知。登录另有 `ratelimit:native_login` IP 限额及按 client + 登录标识 SHA-256 的 Redis 计数（TTL 300 秒），随机更换 device_id 不会绕过账号计数。
 
 ## 令牌安全
 
@@ -57,6 +62,7 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 | `/api/token` `/api/refresh` `/api/introspect` `/api/revoke` | 服务端到服务端，凭 `client_secret` 认证，不依赖浏览器 Cookie |
 | `/api/verify` | 会话校验接口，凭请求体 token |
 | `/api/login` `/api/register` `/api/register/send-code` `/api/admin/login` | 尚无会话可劫持；有独立限流 |
+| `/api/native/login` `/api/native/refresh` `/api/native/logout` | public Native JSON/Bearer API，不读取浏览器 Cookie；精确路径豁免并独立限流 |
 | `/api/challenge/random` `/api/challenge/verify` | 注册前置问答，无会话 |
 | `/api/email-verification/verify` | 凭一次性邮件 token |
 | `/api/admin/test/*`（4 项） | 测试端点，非生产环境使用且受 ADMIN_SECRET 保护 |
@@ -68,6 +74,8 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 | 端点 | 限额 | keyPrefix |
 |------|------|-----------|
 | 登录 | 5 / 5min | `ratelimit:login` |
+| Native Login | 30 / 5min（IP）+ 10 / 5min（client + 登录标识 SHA-256） | `ratelimit:native_login` + `native:login:account` |
+| Native Refresh / Logout / Me | 60 / min、30 / min、60 / min | `ratelimit:native_refresh` / `_logout` / `_me` |
 | 注册 | 5 / 1h | `ratelimit:register` |
 | 注册发送验证码 | 3 / 10min（IP）+ 1/min（email 冷却） | `ratelimit:register_send_code` + `register_email_cooldown:{hash}` |
 | 注册验证码校验 | 5 / code（email+IP），超限 DEL | 内嵌于 `routes/auth.js` 的 `failures` 计数器 |
@@ -80,7 +88,7 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 | 问答获取 / 校验 | 30/min、15/5min | `ratelimit:challenge_random` / `_verify` |
 | 管理操作（删用户/重置密码/建客户端/测试邮件短信） | 见 config | `ratelimit:admin_*` |
 
-**登录失败锁定**（[auth.js](../../src/routes/auth.js)）：失败计数键为 `login_fail:{username}:{ip}`（**同时含用户名与 IP**，TTL 5min）——仅知用户名的远程攻击者无法替真实用户攒失败次数。同一 IP 5 次失败后按 `lock_level` 递进锁定：15min → 1h → 2h 封顶，**始终自动过期，绝无永久锁定**；无限期封禁只能由管理员通过 `ban_status` 施加。锁定时发通知 + 邮件并写用户审计；登录成功清零 `lock_level` 与失败计数。
+**登录失败锁定**（[passwordLogin.js](../../src/modules/auth/passwordLogin.js)）：失败计数键为 `login_fail:{userId}:{ip}`（**同时含账号与 IP**，TTL 5min），Web 与 Native 共用同一计数，用户名/邮箱/大小写变体不会分散同一账号的计数。未知账号仍返回相同凭据错误且不泄露存在性。同一 IP 对同一账号 5 次失败后按 `lock_level` 递进锁定：15min → 1h → 2h 封顶，**始终自动过期，绝无永久锁定**；无限期封禁只能由管理员通过 `ban_status` 施加。锁定时发通知 + 邮件并写用户审计；登录成功清零 `lock_level` 与失败计数。
 
 ## IP 处理与封禁
 

@@ -51,6 +51,7 @@ export function DashboardPage() {
   const [smsLoading, setSmsLoading] = useState(false);
   const [smsSent, setSmsSent] = useState(false);
   const [smsCooldownSeconds, setSmsCooldownSeconds] = useState(0);
+  const [revokingSessionId, setRevokingSessionId] = useState<number | string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -80,6 +81,19 @@ export function DashboardPage() {
     if (unreadRes.status === 'fulfilled') setUnreadCount(unreadRes.value.count || 0);
     setDataLoading(false);
   }, []);
+
+  const revokeSession = useCallback(async (session: Session) => {
+    setRevokingSessionId(session.id);
+    try {
+      await api.del(`/api/sessions/${encodeURIComponent(String(session.id))}`);
+      toast('success', '设备会话已注销');
+      await loadDashboardData();
+    } catch (error) {
+      toast('error', error instanceof Error ? error.message : '注销设备会话失败');
+    } finally {
+      setRevokingSessionId(null);
+    }
+  }, [loadDashboardData, toast]);
 
   useEffect(() => {
     if (user) {
@@ -399,7 +413,7 @@ export function DashboardPage() {
 
       <Card>
         <CardTitle>活跃会话</CardTitle>
-        <CardDescription>查看当前设备与最近活跃会话。</CardDescription>
+        <CardDescription>查看并注销登录设备。</CardDescription>
         <div style={{ marginTop: 'var(--space-5)' }}>
           <ResponsiveTable
             columns={[
@@ -413,6 +427,15 @@ export function DashboardPage() {
                   <span className={`status-badge ${s.is_current ? 'status-badge--success' : 'status-badge--info'}`}>
                     {s.is_current ? '当前会话' : '活跃'}
                   </span>
+                ),
+              },
+              {
+                header: '操作',
+                accessor: 'action',
+                render: (s) => s.is_current ? '当前设备' : (
+                  <Button variant="danger" size="sm" loading={revokingSessionId === s.id} onClick={() => revokeSession(s)}>
+                    注销
+                  </Button>
                 ),
               },
             ]}

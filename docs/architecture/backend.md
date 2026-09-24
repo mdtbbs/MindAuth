@@ -18,6 +18,14 @@ MindAuth 后端（Express + MySQL + Redis）按"深模块"组织：`src/modules/
 
 第一方 `mdtbbs_android` 的 AuthTransaction、密码/SMS/QQ 认证、一次性 authorization code 与 MindFourm 后端交换。只接受 PKCE `S256`；事务 10 分钟、短信 5 分钟、authorization code 90 秒。敏感值只存在请求内存，MySQL 只保存 HMAC-SHA-256 digest；SMS challenge 使用 HMAC 绑定重新提交的 canonical phone，再以 `users.phone` 做精确既有账号查询。条件更新 `status = 'PENDING'` 和 `consumed_at IS NULL` 令同一 transaction / exchange 并发时只能成功一次。该模块不创建 MindAuth session 或 refresh token。
 
+### nativeClientService（`src/modules/nativeAuth/nativeClientService.js`）
+
+第一方 `mdtbbs-mindustry-mod` 密码登录和设备会话；从 `native_auth_clients` 读取启用状态及 downstream OAuth audience。复用 `passwordLogin` 的 credentials/ban/lock/failure-counter 检查；设备会话单独记录于 `native_client_sessions`，但 access token 委托 `oauthIssuer.issueNativeTokens` 写入统一 OAuth Redis token store，refresh token 哈希写入现有 `refresh_tokens` 并交由 OAuth issuer 轮换。只允许单设备注销；旧 refresh token 重放撤销该设备 session family。
+
+### passwordLogin（`src/modules/auth/passwordLogin.js`）
+
+Web `/api/login`、`/api/native/login` 与既有 Android transaction password method 共用的密码校验域。统一用户名/邮箱规范化、封禁到期处理、临时账号锁定、`login_fail:{username}:{ip}` 计数、成功清理及失败/锁定审计通知。路由和 Native session module 负责各自登录态创建、响应与 login log。
+
 ### sessionManager（`src/modules/sessions/sessionManager.js`）
 
 用户与管理员会话的全生命周期：创建、认证、活跃更新、单个/批量吊销。唯一允许读写会话数据的代码。
@@ -31,12 +39,13 @@ MindAuth 后端（Express + MySQL + Redis）按"深模块"组织：`src/modules/
 | `revokeAllUserSessions(userId, { exceptToken })` | 吊销全部会话，可保留当前 |
 | `invalidateUserSessionCache(rawToken)` | 只删 Redis 缓存，MySQL 行不动（用户资料变更后用） |
 | `listUserSessions(userId, currentTokenHash)` | 会话列表，含 `is_current` |
+| `revokeNativeClientSession({ sessionId, userId })` | 吊销一个 Native 设备凭据会话及关联 OAuth tokens |
 | `createAdminSession({ adminId, ipAddress, userAgent })` | 管理员会话（仅 Redis，24h） |
 | `authenticateAdminSession(rawToken)` | 认证；**每次回 DB 重查 role/ban_status**，返回含 `normalized_role` 的 admin；Redis 故障时 fail-closed 返回 `null` |
 | `revokeAdminSessionsForUser(userId)` | 吊销某用户全部管理员会话 |
 | `hashToken(rawToken)` | SHA-256 工具（测试/内部用） |
 
-依赖：MySQL `user_sessions`、`users`；Redis `session:{hash}`、`sessions_by_user:{userId}`、`admin_session:{hash}`、`admin_sessions_by_user:{userId}`、`session_active:{id}`；utils `deviceInfo`。
+依赖：MySQL `user_sessions`、`native_client_sessions`、`refresh_tokens`、`users`；Redis `session:{hash}`、`sessions_by_user:{userId}`、`admin_session:{hash}`、`admin_sessions_by_user:{userId}`、`session_active:{id}`；utils `deviceInfo`。
 
 约束：token 仅以 SHA-256 哈希落库，原始值只在 cookie；`users.session_token` 已废弃不读不写；30 天绝对有效期用 DB 时间计算，Redis payload 携带 `session_expires_at`，缓存命中也校验；批量吊销走索引集合，无 SCAN；管理员被撤权或封禁后下次认证即失效。**Redis 故障降级**：用户会话认证在 Redis 命令抛错时按缓存未命中处理，降级 MySQL（缓存回填 best-effort，失败仅告警）；管理员会话仅存 Redis，无回退层，故障时 fail-closed 返回 `null`（401）而非 500。
 
@@ -50,6 +59,7 @@ OAuth 2.0 / OIDC 全部业务逻辑：授权码签发、令牌交换、刷新轮
 | `authorize({ clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, responseType, sessionToken, ipAddress })` | 校验参数并签发授权码；未登录返回 `{ loginRedirect: true, client }`，成功返回 `{ redirectTo }` |
 | `exchangeCode({ code, clientId, clientSecret, redirectUri, codeVerifier })` | 授权码换令牌：验客户端、原子消费码、PKCE 校验 |
 | `refresh({ refreshToken, clientId, clientSecret })` | 刷新令牌轮换（MySQL 事务 + `SELECT FOR UPDATE`） |
+| `issueNativeTokens({ userId, clientId, accessClientId, nativeSessionId, scope })` / `refreshNative(...)` | Native Bearer token 签发及设备绑定的 refresh rotation；复用相同 token store |
 | `introspect({ token, clientId, clientSecret })` | RFC 7662；只返回属于请求方 client 的令牌信息 |
 | `revoke({ token, tokenTypeHint, clientId, clientSecret })` | RFC 7009；未知令牌也返回 `{ success: true }` |
 | `userinfo(accessToken)` | OIDC claims，按 scope 过滤（含公开 `custom_fields`） |
@@ -60,7 +70,7 @@ OAuth 2.0 / OIDC 全部业务逻辑：授权码签发、令牌交换、刷新轮
 
 依赖：`tokenStore`、`sessionManager`；MySQL `clients`、`refresh_tokens`、`authorizations`、`users`、`login_logs`、`user_fields`/`user_field_values`；utils `crypto`、`token`、`datetime`、`phone`。
 
-约束：PKCE 只接受 `S256`；client_secret 先按 `client_id` 取行再 `timingSafeCompare`（避免 SQL 等值比较时序泄漏）；refresh token SHA-256 哈希落库，轮换在事务行锁内完成，重放已吊销令牌会吊销该 user/client **全部** refresh token；scope 白名单 `openid profile email`；授权码 5min、access token 1h、refresh token 30 天。
+约束：PKCE 只接受 `S256`；client_secret 先按 `client_id` 取行再 `timingSafeCompare`（避免 SQL 等值比较时序泄漏）；refresh token SHA-256 哈希落库，轮换在事务行锁内完成。OAuth refresh 重放维持原 user/client 撤销策略；Native refresh 重放只撤销关联 native session。OAuth scope 白名单为 `openid profile email`；Native 另用 `openid profile game_content`，不改变 OIDC Discovery 的标准 grant 列表；授权码 5min、access token 1h、refresh token 30 天。
 
 ### tokenStore（`src/modules/oauth/tokenStore.js`）
 

@@ -27,8 +27,10 @@ router.get('/', requireAuth, async (req, res) => {
 // Users can terminate any of their own sessions, including the current one.
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const sessionId = parseInt(req.params.id, 10);
-    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    const sessionId = /^native:[1-9]\d*$/.test(req.params.id)
+      ? req.params.id
+      : Number(req.params.id);
+    if (!(typeof sessionId === 'string' || (Number.isSafeInteger(sessionId) && sessionId > 0))) {
       return res.status(400).json({ success: false, message: '无效的会话 ID' });
     }
 

@@ -57,7 +57,7 @@ describe('nativeAuth', { skip: !RUN_INTEGRATION }, () => {
   }
 
   it('maps an existing canonical phone to the same user and exchanges exactly once', async () => {
-    const phone = '13800138000';
+    const phone = `138${String(Date.now()).slice(-8)}`;
     const userId = await createUser(phone);
     const { verifier, transaction, challenge } = await smsTransaction(` ${phone} `);
     const authorization = await service.verifySms({ transactionId: transaction.transaction_id, challengeId: challenge.challenge_id, phone, code: sentCode, req });
@@ -67,7 +67,7 @@ describe('nativeAuth', { skip: !RUN_INTEGRATION }, () => {
   });
 
   it('allows exactly one concurrent SMS verification to authorize a transaction', async () => {
-    const phone = '13900139000';
+    const phone = `139${String(Date.now() + Math.floor(Math.random() * 1000)).slice(-8)}`;
     await createUser(phone);
     const { transaction, challenge } = await smsTransaction(phone);
     const results = await Promise.allSettled([

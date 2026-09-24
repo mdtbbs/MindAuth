@@ -80,6 +80,7 @@ npm start              # node src/server.js，监听 PORT（默认 4001）
 启动序列（`src/bootstrap.js`）为：校验配置 → 连接 MySQL 并执行迁移 → 连接 Redis → 启动 HTTP 服务。因此：
 
 - **迁移自动执行**：`src/db/migrator.js` 按数字序读取 `src/db/migrations/*.sql`，用 `schema_version` 表跟踪已应用版本，只跑未应用的迁移，重复启动幂等（无新迁移时打印 `Schema is up to date`）。
+- **MindOps 发布前迁移门禁**：`NODE_ENV=production npm run db:migrate` 运行同一套迁移和敏感配置转换，并在结束时关闭连接池。MindOps 的 `migrate` 步骤应在停止线上进程前运行，避免迁移失败后才发现启动问题；服务启动仍会再次执行幂等检查。
 - **失败时的表现**：任一 SQL 失败会打印 `Migration FAILED: <名称>` 及出错语句片段，进程抛错退出，**不会**带着半新半旧的 schema 对外服务；该版本不被记录，下次启动自动重试。注意 MySQL DDL 隐式提交，失败的迁移可能已部分生效，重试前需人工检查。
 - **`scripts/migrate-to-mysql.js`**：历史遗留的一次性脚本，早期从 SQLite（`users.db`）迁移到 MySQL 用。仓库根目录无 `users.db` 时直接跳过；全新部署与常规升级**不需要**运行它（其依赖的 `better-sqlite3` 已不在 dependencies 中）。
 

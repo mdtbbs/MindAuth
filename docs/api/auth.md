@@ -102,9 +102,37 @@
 
 注记：
 
-- **失败锁定递进**：失败计数键为 `login_fail:{username}:{ip}`（5 分钟窗口），同一 IP 连续失败 5 次即锁定账号，时长按 `lock_level` 递进 15 分钟 → 1 小时 → 2 小时封顶，**始终有限时**、到期自动解锁；锁定时发站内通知 + 邮件。永久封禁只能由管理员 `ban_status` 施加。
+- **失败锁定递进**：失败计数键为 `login_fail:{userId}:{ip}`（5 分钟窗口）；同账号通过用户名、邮箱或不同大小写提交都会共享计数。Web 与 Native 登录统一调用同一校验服务，同一 IP 连续失败 5 次即锁定账号，时长按 `lock_level` 递进 15 分钟 → 1 小时 → 2 小时封顶，**始终有限时**、到期自动解锁；锁定时发站内通知 + 邮件。永久封禁只能由管理员 `ban_status` 施加。
 - 登录成功后重置登录限流计数与失败计数、清零 `lock_level`，写入 `login_logs`（`login_type='web'`）。
 - IP 与上次登录不同会触发"新设备登录"通知（含邮件），失败不影响登录。
+
+### 官方 Mindustry Mod Native API
+
+该接口只开放给产品策略指定的 MDTBBS 官方 public client `mdtbbs-mindustry-mod`。客户端没有 `client_secret`，任何第三方不得用此 API 收集用户密码；第三方集成继续使用 OAuth Authorization Code + PKCE。客户端必须固定使用 HTTPS `https://auth.mdtbbs.cn`，不能忽略证书错误或 HTTP fallback。
+
+#### `POST /api/native/login`
+
+请求 JSON：`{ "client_id": "mdtbbs-mindustry-mod", "username": "用户名或邮箱", "password": "…", "device_id": "随机 UUID", "device_name": "Mindustry Linux" }`。`device_id` 必须是客户端首次运行生成并持久化的随机 UUID，不可来自 MAC、硬件序列号或 Android ID；服务端仅把它作为可伪造的会话标识。`device_name` 可选，最多 80 字符，仅展示。
+
+成功响应含标准 Bearer token 字段及 `success: true`：
+
+```json
+{ "success": true, "access_token": "…", "refresh_token": "…", "token_type": "Bearer", "expires_in": 3600, "scope": "openid profile game_content" }
+```
+
+#### `POST /api/native/refresh`
+
+JSON 请求：`{ "client_id": "mdtbbs-mindustry-mod", "refresh_token": "…", "device_id": "…" }`。每次成功返回新 access/refresh token，旧 refresh token 立即作废；重放已轮换 token 会撤销该设备会话。
+
+#### `POST /api/native/logout`
+
+请求头 `Authorization: Bearer <access_token>`。若 access token 已过期，也可提交 `{ "client_id": "mdtbbs-mindustry-mod", "refresh_token": "…", "device_id": "…" }` 撤销对应设备。只撤销此 Mod 设备会话、其 refresh-token family 和 access token，不影响 Web Cookie 或其他设备。
+
+#### `GET /api/native/me`
+
+请求头 `Authorization: Bearer <access_token>`。返回 `{success:true,user:{id,username,avatar_url,phone_verified,ban_status,is_muted}}`，不会返回邮箱、完整手机号或内部账号字段。
+
+所有 Native POST 路径以完整路径在 CSRF middleware 中精确豁免，使用 Bearer/JSON，不读取浏览器 Cookie。限流为 login 30/IP/5 分钟并叠加 login 标识哈希 10/5 分钟；refresh 60/分钟；logout 30/分钟；me 60/分钟。
 
 ### `POST /api/logout`
 

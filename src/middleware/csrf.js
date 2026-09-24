@@ -82,6 +82,9 @@ function validateCsrf(req, res, next) {
     '/api/register',     // User registration (no session needed)
     '/api/register/send-code', // Registration email code (pre-auth, rate-limited)
     '/api/login',        // User login (creates session, rate-limited)
+    '/api/native/login', // Public first-party JSON client, no cookie authentication
+    '/api/native/refresh',
+    '/api/native/logout', // Bearer token only
     '/api/service/validate-credentials', // Service-to-service validation (has service API key)
     // Native endpoints are exact-path exemptions: they use short-lived PKCE
     // transactions or a bearer action ticket, never browser-cookie auth.

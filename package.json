@@ -15,6 +15,7 @@
     "test:db:prepare": "NODE_ENV=test node --require ./tests/helpers/load-test-env.js scripts/test/prepare-db.js",
     "test:integration": "NODE_ENV=test node --require ./tests/helpers/load-test-env.js --test --test-concurrency=1 tests/integration/*.test.js",
     "test:e2e": "NODE_ENV=test npx playwright test",
+    "db:migrate": "node scripts/migrate.js",
     "test:verify-routing": "node scripts/verify-routing.js",
     "test:secrets": "node --test tests/unit/secrets.test.js",
     "verify": "npm run lint && npm run typecheck && npm run build"

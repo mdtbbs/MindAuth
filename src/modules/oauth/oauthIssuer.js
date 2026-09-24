@@ -102,6 +102,82 @@ async function assertUserNotBanned(userId) {
   }
 }
 
+async function assertNativeSessionActive(sessionId) {
+  if (!sessionId) return;
+  const [rows] = await pool.execute('SELECT revoked_at FROM native_client_sessions WHERE id = ? LIMIT 1', [sessionId]);
+  if (!rows[0] || rows[0].revoked_at) throw new OAuthError(401, 'invalid_token', '会话已撤销');
+}
+
+function issueNativeTokens({ userId, clientId, accessClientId = clientId, nativeSessionId, scope = 'openid profile game_content' }) {
+  return (async () => {
+    const accessToken = generateToken();
+    const refreshToken = generateToken();
+    const expiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
+    const [refreshResult] = await pool.execute(
+      'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at, native_session_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, clientId, hashRefreshToken(refreshToken), scope, expiresAt, nativeSessionId]
+    );
+    try {
+      await tokenStore.storeAccessToken(accessToken, {
+        user_id: userId, client_id: accessClientId, scope, token_type: 'Bearer', native_session_id: nativeSessionId,
+      }, ACCESS_TOKEN_TTL_S);
+    } catch (err) {
+      await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [refreshResult.insertId]).catch(() => {});
+      await tokenStore.revokeAccessToken(accessToken).catch(() => {});
+      throw err;
+    }
+    return { access_token: accessToken, token_type: 'Bearer', refresh_token: refreshToken, expires_in: ACCESS_TOKEN_TTL_S, scope };
+  })();
+}
+
+async function refreshNative({ refreshToken, clientId, accessClientId = clientId, deviceId }) {
+  let outcome;
+  await transaction(async (conn) => {
+    const [rows] = await conn.execute('SELECT * FROM refresh_tokens WHERE token = ? FOR UPDATE', [hashRefreshToken(refreshToken)]);
+    const row = rows[0];
+    if (!row || row.client_id !== clientId || !row.native_session_id) { outcome = { error: 'INVALID' }; return; }
+    const [sessions] = await conn.execute('SELECT * FROM native_client_sessions WHERE id = ? FOR UPDATE', [row.native_session_id]);
+    const session = sessions[0];
+    if (!session || session.client_id !== clientId || session.device_id !== deviceId || session.revoked_at) { outcome = { error: 'INVALID' }; return; }
+    if (row.revoked) { outcome = { replaySessionId: session.id }; return; }
+    if (new Date(row.expires_at) <= new Date()) { outcome = { error: 'INVALID' }; return; }
+    const [users] = await conn.execute('SELECT id, ban_status FROM users WHERE id = ? LIMIT 1', [row.user_id]);
+    const user = users[0];
+    if (!user || user.ban_status === 'banned') { outcome = { error: 'INVALID' }; return; }
+    const nextRefresh = generateToken();
+    const expiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
+    await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [row.id]);
+    await conn.execute(
+      'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at, native_session_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [user.id, clientId, hashRefreshToken(nextRefresh), row.scope || 'openid profile game_content', expiresAt, session.id]
+    );
+    await conn.execute('UPDATE native_client_sessions SET last_active_at = NOW() WHERE id = ?', [session.id]);
+    outcome = { userId: user.id, sessionId: session.id, scope: row.scope || 'openid profile game_content', refreshToken: nextRefresh };
+  });
+
+  if (outcome?.replaySessionId) {
+    await revokeNativeSession(outcome.replaySessionId);
+    throw new OAuthError(401, 'invalid_grant', '无效或已撤销的 refresh_token');
+  }
+  if (!outcome?.userId) throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
+  const accessToken = generateToken();
+  try {
+    await tokenStore.storeAccessToken(accessToken, {
+      user_id: outcome.userId, client_id: accessClientId, scope: outcome.scope, token_type: 'Bearer', native_session_id: outcome.sessionId,
+    }, ACCESS_TOKEN_TTL_S);
+  } catch (err) {
+    await revokeNativeSession(outcome.sessionId).catch(() => {});
+    throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+  }
+  return { access_token: accessToken, token_type: 'Bearer', refresh_token: outcome.refreshToken, expires_in: ACCESS_TOKEN_TTL_S, scope: outcome.scope };
+}
+
+async function revokeNativeSession(sessionId) {
+  await pool.execute('UPDATE native_client_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = ?', [sessionId]);
+  await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE native_session_id = ?', [sessionId]);
+  await tokenStore.revokeAccessTokensForNativeSession(sessionId);
+}
+
 // ─── Client verification ──────────────────────────────────────
 
 /**
@@ -508,6 +584,7 @@ async function introspect({ token, clientId, clientSecret }) {
   if (tokenData && tokenData.client_id === clientId) {
     try {
       await assertUserNotBanned(tokenData.user_id);
+      await assertNativeSessionActive(tokenData.native_session_id);
     } catch (err) {
       if (err instanceof OAuthError) return { active: false };
       throw err;
@@ -532,6 +609,7 @@ async function introspect({ token, clientId, clientSecret }) {
   if (refreshToken) {
     try {
       await assertUserNotBanned(refreshToken.user_id);
+      await assertNativeSessionActive(refreshToken.native_session_id);
     } catch (err) {
       if (err instanceof OAuthError) return { active: false };
       throw err;
@@ -602,6 +680,7 @@ async function userinfo(accessToken) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
   await assertUserNotBanned(tokenData.user_id);
+  await assertNativeSessionActive(tokenData.native_session_id);
 
   const scope = tokenData.scope || 'openid profile email';
 
@@ -667,6 +746,7 @@ async function userByAccessToken(accessToken) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
   await assertUserNotBanned(tokenData.user_id);
+  await assertNativeSessionActive(tokenData.native_session_id);
 
   const [userRows] = await pool.execute(
     'SELECT id, username, email, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?',
@@ -1013,6 +1093,9 @@ async function exchangeDeviceToken({ clientId, deviceCode }) {
 
 module.exports = {
   OAuthError,
+  issueNativeTokens,
+  refreshNative,
+  revokeNativeSession,
   authorize,
   exchangeCode,
   refresh,
