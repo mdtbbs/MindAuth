@@ -11,6 +11,7 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express + React/Vi
 | 前端开发者 | [architecture/frontend.md](architecture/frontend.md) |
 | 调用 API / 排查接口问题 | [api/README.md](api/README.md)（通用约定 + 全端点索引），再进入对应域文档 |
 | 第三方应用接入方 | [third-party-integration.md](third-party-integration.md)（对外接入文档：OIDC Discovery、注册应用、接入示例） |
+| 维护旧版设备授权实现 | [DEVICE_AUTH.md](DEVICE_AUTH.md)（内部参考，当前不属于第三方公开 API 契约） |
 | 运维 / 部署 | [operations/deployment.md](operations/deployment.md) → [operations/configuration.md](operations/configuration.md) → [operations/runbook.md](operations/runbook.md) |
 | 安全审计 | [architecture/security.md](architecture/security.md) |
 | AI 编码助手 | [../CLAUDE.md](../CLAUDE.md)（英文权威索引），按其 Documentation Map 深入本目录 |
@@ -24,6 +25,7 @@ docs/
 ├── api/                        API 参考（通用约定 + 按业务域分组的端点文档）
 ├── operations/                 部署、配置参考、运维手册
 ├── third-party-integration.md  对外：第三方系统接入文档
+├── DEVICE_AUTH.md              RFC 8628 设备授权旧版内部实现参考（未纳入公开契约）
 ├── release/                    发布说明归档
 └── superpowers/                历史实施计划归档（superpowers 工作流约定路径，勿动）
 ```

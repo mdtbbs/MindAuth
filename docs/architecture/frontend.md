@@ -28,7 +28,7 @@ MindAuth 前端是基于 React 18 + Vite + TypeScript 的双入口 SPA：用户�
 frontend/src/
 ├── main.tsx            # 用户 SPA 入口（ErrorBoundary → AuthProvider → ToastProvider → UserApp）
 ├── admin.tsx           # 管理 SPA 入口（ErrorBoundary → AdminApp）
-├── user/               # 用户 SPA：UserApp.tsx 路由表 + pages/（9 个页面）+ components/（AuthShell、AccountShell）
+├── user/               # 用户 SPA：UserApp.tsx 路由表 + pages/ + components/
 ├── admin/              # 管理 SPA：AdminApp.tsx 路由表 + AdminAuthProvider + pages/（7 个页面）+ components/AdminShell.tsx
 ├── shared/             # 双端共用的通用 UI 组件与 Hook
 ├── api/                # client.ts（fetch 封装）、types.ts（接口类型）、useResource.ts（数据获取 Hook）
@@ -50,16 +50,29 @@ frontend/src/
 | `/verify-email` | `VerifyEmailPage.tsx` |
 | `/authorize` | `OAuthAuthorizePage.tsx`（OAuth 授权确认） |
 | `/dashboard` | `DashboardPage.tsx` |
-| `/account-settings` | `AccountSettingsPage.tsx` |
+| `/profile` | `ProfilePage.tsx` |
+| `/security` | `SecurityPage.tsx` |
+| `/sessions` | `SessionsPage.tsx` |
+| `/activity` | `ActivityPage.tsx` |
+| `/authorizations` | `AuthorizationsPage.tsx` |
+| `/notifications` | `NotificationsPage.tsx` |
+| `/developer` | `DeveloperPage.tsx` |
+| `/account-settings` | `AccountSettingsPage.tsx` compatibility redirect to `/profile` or the matching new route |
 | `/` | `Navigate` → `/login` |
 | `*` | `ErrorPage.tsx`（status=404） |
 
 布局组件（`user/components/`）：
 
-- **AuthShell** — 认证页外壳（整屏背景 + 居中卡片，仿阿里云）：品牌 header + 单列居中的表单卡片（`max-width: 27.5rem`），用于登录/注册/重置等公开页。背景默认为浅蓝方格网格（`--auth-bg`/`--auth-grid-line`，暗色主题有对应变体）；管理端可上传自定义背景图，AuthShell 经 `GET /api/public/auth-page-config` 获取（**模块级 Promise 缓存**，SPA 生命周期内仅请求一次，失败静默回退默认网格），有图时以 `cover` 铺满并叠加 `--auth-scrim` 可读性遮罩。旧版 hero 双栏布局（eyebrow/heroTitle/heroFeatures）已移除。
-- **AccountShell** — 登录后外壳：顶部品牌栏 + 左侧账户侧边栏（头像、`navItems` 导航、`activeNavKey` 高亮）+ 内容区，用于 Dashboard 与账户设置。
+- **AuthShell** — 登录、注册、密码重置等公开认证页共用的浅色双栏外壳：顶部品牌栏与账号服务提示条；左侧承载表单，右侧介绍 MDTBBS 社区，桌面端最大宽度约 `68rem`，窄屏隐藏介绍区并单列显示表单。认证页使用论坛蓝色及简洁边框样式。与账户中心共用 `LegalFooter`，提供 MDTBBS 用户协议、隐私政策、关于与声明页面，以及工信部和公安备案查询链接。管理端可上传的认证页背景图由 `GET /api/public/auth-page-config` 获取（**模块级 Promise 缓存**，SPA 生命周期内仅请求一次，失败静默回退），作为右侧介绍区的低透明度背景。
+- **AccountShell** — 登录后身份中心外壳：顶部品牌栏和用户菜单；桌面端提供分组侧栏，平板收窄侧栏，手机使用带键盘焦点管理的导航抽屉。认证状态加载期间保留 shell。
+- **DashboardPage** — 身份摘要、账户安全状态、最近设备、已授权应用和最多三条通知。各数据模块单独加载、报错并可重试。
+- **ProfilePage** — 头像、横幅、用户名和账户自定义资料。
+- **SecurityPage** — 邮箱验证与更换、手机号绑定、密码、社交账号关联和账户删除。
+- **SessionsPage / ActivityPage / AuthorizationsPage / NotificationsPage** — 分别管理登录设备、登录记录、OAuth 授权和通知；撤销设备/应用授权、删除账户等操作由确认对话框保护。
+- **DeveloperPage** — 提供 OAuth/OIDC 接入文档入口和授权管理入口。
+- **`AccountPageParts.tsx`** — section、设置行、空状态、加载错误、状态标签、日期和 User-Agent 展示 helpers。
 
-**AccountSettingsPage 的分区**：个人资料 / 账号与安全 / 自定义字段 / 危险操作 四个 tab。原「隐私设置」tab 已移除（后端不存在 `/api/account/privacy` 端点，属死 UI）；自定义字段区使用用户端 `GET/PUT /api/account/fields`（按 `field_key` 键控），删除账户携带后端必填的 `password` 确认字段。
+`/account-settings` 保留为兼容入口：旧 `section`/`tab` 参数跳转到对应的新路由，旧 `social=qq_bound` 跳转至安全设置；自定义字段仍使用用户端 `GET/PUT /api/account/fields`，没有改变后端 API。
 
 **旧 hash 路由兼容**：`main.tsx` 在渲染前调用 `routes/legacyHashRoutes.ts` 的 `normalizeLegacyHashRoutes()`，将 `/#/login`、`/#/reset-password?token=abc` 等 7 条旧 vanilla SPA hash 路由用 `history.replaceState` 重写为等价路径路由（保留 query），使迁移前的书签与邮件链接继续有效。旧 SPA 同时使用过 `#login` 与 `#/login` 两种写法，匹配时前导斜杠可选，两种形式均可归一化。
 
@@ -126,7 +139,7 @@ frontend/src/
 
 `design/` 三个 CSS 文件（两个入口均全量引入，不依赖 monorepo 的 `shared-styles/`）：
 
-- `tokens.css` — 设计变量（`--color-primary: #ff6b35` 等品牌色、背景、间距、字体）。圆角令牌已整体收直为方正风格：`--radius-sm/md/lg/xl/2xl` 为 2/3/4/4/6px（`--radius-full` 保留用于头像/徽章类圆形元素）；另含认证页背景变量 `--auth-bg`/`--auth-grid-line`/`--auth-scrim`（默认网格与自定义背景遮罩，均有暗色变体）
+- `tokens.css` — 设计变量（`--color-primary: #ff6b35` 等后台品牌色、背景、间距、字体）。圆角令牌为 2/3/4/4/6px（`--radius-full` 保留给圆形头像/徽章）；认证页与用户身份中心在各自 shell 范围内覆盖品牌、表面和主题变量，不影响管理端。
 - `components.css` — 全局 reset + 组件类样式
 - `layout.css` — 布局工具类（`.container`、响应式断点等）
 

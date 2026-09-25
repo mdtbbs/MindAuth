@@ -42,8 +42,9 @@ npm start            # Production mode (port 4001)
 npm run dev          # Development with --watch auto-reload
 npm run test         # Unit tests (alias of test:unit)
 npm run test:unit    # Pure unit tests, no external services (node --test tests/unit/*.test.js)
-npm run test:integration # DB-backed tests; requires MySQL + RUN_INTEGRATION=1 (else skipped)
-npm run test:e2e     # E2E tests (Playwright; USE_MEMORY_REDIS=1 to skip real Redis)
+npm run test:db:prepare # Prepares only a test_* / *_test database with real migrations and seeds
+npm run test:integration # DB-backed tests; requires native MySQL-compatible + Redis/Valkey and RUN_INTEGRATION=1
+npm run test:e2e     # E2E tests (Playwright; native MySQL-compatible + Redis/Valkey)
 npm run typecheck    # TypeScript type checking (frontend only)
 ```
 
@@ -438,4 +439,4 @@ Migration `009_native_client_sessions.sql` adds the official Mindustry Mod clien
 - SMTP password / Aliyun SMS access-key-secret stored plaintext at rest (回显已脱敏). Encrypting at rest needs app-level key management.
 
 ---
-*Last updated: 2026-07-27*
+*Last updated: 2026-09-02*

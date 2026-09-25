@@ -55,6 +55,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loginMethod, setLoginMethod] = useState<'password' | 'qq'>('password');
 
   useEffect(() => {
     if (user && !authLoading) {
@@ -94,10 +95,10 @@ export function LoginPage() {
     }
   }
 
-  const title = isOAuthFlow && clientName ? `登录 ${clientName}` : '登录 MindAuth';
+  const title = isOAuthFlow && clientName ? `登录 ${clientName}` : '登录';
   const description = isOAuthFlow
     ? `继续后将返回 ${clientName || '目标应用'} 完成授权。`
-    : '使用您的 MindAuth 账户访问控制台、账户中心与授权应用。';
+    : '使用 MDTBBS 账号访问论坛与相关服务。';
 
   return (
     <AuthShell
@@ -117,43 +118,77 @@ export function LoginPage() {
     >
       <form id="login-form" onSubmit={handleSubmit} data-testid="login-form">
         <div className="stack">
-          {isOAuthFlow && clientName ? (
-            <div className="status-badge status-badge--info">正在连接应用：{clientName}</div>
-          ) : null}
-          {formError || errorParam || messageParam ? (
-            <div className="auth-form__alert" role="alert">
-              <div className="status-badge status-badge--danger">登录失败</div>
-              <p className="section-description auth-form__alert-text">{formError || messageParam || errorParam}</p>
-            </div>
-          ) : null}
-          <TextField
-            id="username"
-            label="用户名或邮箱"
-            name="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="请输入用户名或邮箱"
-            hint="请输入您的 MindAuth 用户名或邮箱"
-            autoComplete="username"
-            autoFocus
-          />
-          <TextField
-            id="password"
-            label="密码"
-            type="password"
-            name="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="请输入密码"
-            autoComplete="current-password"
-          />
-          <Button type="submit" fullWidth size="lg" loading={loading} data-testid="login-submit">
-            登录
-          </Button>
-          <div className="auth-divider" aria-hidden="true"><span>或</span></div>
-          <a className="btn btn--secondary btn--lg btn--full" href={qqLoginHref} data-testid="qq-login">
-            <span aria-hidden="true" style={{ fontWeight: 700 }}>Q</span> 使用 QQ 登录
-          </a>
+          <div className="auth-method-tabs" role="tablist" aria-label="选择登录方式">
+            <button
+              id="password-login-tab"
+              type="button"
+              role="tab"
+              aria-selected={loginMethod === 'password'}
+              aria-controls="login-method-panel"
+              className="auth-method-tab"
+              onClick={() => setLoginMethod('password')}
+            >
+              账号密码
+            </button>
+            <button
+              id="qq-login-tab"
+              type="button"
+              role="tab"
+              aria-selected={loginMethod === 'qq'}
+              aria-controls="login-method-panel"
+              className="auth-method-tab"
+              onClick={() => setLoginMethod('qq')}
+            >
+              QQ 登录
+            </button>
+          </div>
+
+          <div id="login-method-panel" role="tabpanel" aria-labelledby={`${loginMethod}-login-tab`}>
+            {isOAuthFlow && clientName ? (
+              <div className="status-badge status-badge--info auth-login__context">正在连接应用：{clientName}</div>
+            ) : null}
+            {formError || errorParam || messageParam ? (
+              <div className="auth-form__alert" role="alert">
+                <div className="status-badge status-badge--danger">登录失败</div>
+                <p className="section-description auth-form__alert-text">{formError || messageParam || errorParam}</p>
+              </div>
+            ) : null}
+
+            {loginMethod === 'password' ? (
+              <div className="stack auth-method-panel">
+                <TextField
+                  id="username"
+                  label="用户名或邮箱"
+                  name="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="请输入用户名或邮箱"
+                  autoComplete="username"
+                  autoFocus
+                />
+                <TextField
+                  id="password"
+                  label="密码"
+                  type="password"
+                  name="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="请输入密码"
+                  autoComplete="current-password"
+                />
+                <Button type="submit" fullWidth size="lg" loading={loading} data-testid="login-submit">
+                  登录
+                </Button>
+              </div>
+            ) : (
+              <div className="auth-method-panel auth-method-panel--qq">
+                <p>使用已绑定的 QQ 账号登录 MDTBBS。</p>
+                <a className="btn btn--primary btn--lg btn--full" href={qqLoginHref} data-testid="qq-login">
+                  使用 QQ 登录
+                </a>
+              </div>
+            )}
+          </div>
         </div>
       </form>
     </AuthShell>

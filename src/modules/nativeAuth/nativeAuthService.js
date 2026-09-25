@@ -203,7 +203,8 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
     await audit({ userId: claims.sub, clientId: 'mdtbbs_android', event: 'native.phone.success', method: 'sms', req }); return { phone_verified: true };
   }
   async function exchange({ clientId, clientSecret, code, codeVerifier, req }) {
-    if (clientId !== 'mdtbbs_android' || !process.env.NATIVE_MINDFOURM_CLIENT_SECRET || !timingSafeCompare(hashClientSecret(clientSecret || ''), hashClientSecret(process.env.NATIVE_MINDFOURM_CLIENT_SECRET))) throw new NativeAuthError('INVALID_CLIENT', 401, '服务端客户端认证失败');
+    if (!['mdtbbs_android', 'mdtbbs_mindustry'].includes(clientId) || !process.env.NATIVE_MINDFOURM_CLIENT_SECRET || !timingSafeCompare(hashClientSecret(clientSecret || ''), hashClientSecret(process.env.NATIVE_MINDFOURM_CLIENT_SECRET))) throw new NativeAuthError('INVALID_CLIENT', 401, '服务端客户端认证失败');
+    await clientConfig(clientId);
     if (!code || !codeVerifier || typeof codeVerifier !== 'string') throw new NativeAuthError('AUTHORIZATION_CODE_INVALID', 400, '授权码无效');
     const digest = hmac(`code:${code}`); const [rows] = await pool.execute('SELECT c.*, NOW() AS db_now, u.username, u.email, u.avatar_url, u.phone_verified FROM native_authorization_codes c JOIN users u ON u.id = c.user_id WHERE c.code_digest = ? LIMIT 1', [digest]); const record = rows[0];
     if (!record) throw new NativeAuthError('AUTHORIZATION_CODE_INVALID', 400, '授权码无效');

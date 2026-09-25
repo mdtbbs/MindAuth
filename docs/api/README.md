@@ -97,9 +97,9 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 | GET | `/api/csrf-token` | 无 | — | 获取/刷新 CSRF 令牌 |
 | GET | `/api/public/auth-page-config` | 无 | 60/分钟 | 登录页外观公开配置（见下文） |
 
-### Android Native Auth 域
+### Android 与 Mindustry Native Auth
 
-第一方 `mdtbbs_android` 使用 `/api/v1/native`，不签发 MindAuth Cookie、access token 或 refresh token；成功后只返回 90 秒的一次性 authorization code。客户端必须先创建 transaction 并提供 RFC 7636 `S256` PKCE challenge。Android 仅可调用 transaction/password/SMS/QQ 接口；`POST /api/v1/native/auth/exchange` 仅供 MindFourm 后端调用，必须携带部署环境配置的 `NATIVE_MINDFOURM_CLIENT_SECRET`（可用 `X-Mindfourm-Client-Secret` 传递），绝不可进入 APK。
+第一方 `mdtbbs_android` 与 `mdtbbs_mindustry` 使用 `/api/v1/native`，不签发 MindAuth Cookie、access token 或 refresh token；成功后只返回 90 秒的一次性 authorization code。两个客户端都必须先创建 transaction 并提供 RFC 7636 `S256` PKCE challenge。`mdtbbs_android` 保留 password/SMS/QQ 方法；`mdtbbs_mindustry` 是独立 public client，只允许 password method，且不配置客户端 secret。`POST /api/v1/native/auth/exchange` 仅供 MindFourm 后端调用，必须携带部署环境配置的 `NATIVE_MINDFOURM_CLIENT_SECRET`（可用 `X-Mindfourm-Client-Secret` 传递），绝不可进入 APK 或 Mod jar。
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
@@ -166,11 +166,13 @@ Native 错误采用共享 API JSON 结构 `{success:false, code, message}`；常
 | POST | `/api/introspect` | 客户端 | 60/分钟 | 令牌内省（RFC 7662） |
 | POST | `/api/revoke` | 客户端 | 60/分钟 | 令牌吊销（RFC 7009） |
 | GET | `/api/userinfo` | Bearer | 30/分钟 | OIDC 用户信息 |
-| GET | `/api/user` | Bearer | 30/分钟 | 用户信息（旧版 MindFourm 兼容端点） |
-| POST | `/api/verify` | 无 | 30/分钟 | 会话令牌验证（同域场景） |
-| GET | `/api/authorizations` | 会话 | — | 当前用户已授权应用列表 |
-| DELETE | `/api/authorizations/:client_id` | 会话 | — | 撤销对某应用的授权 |
+| GET | `/api/user` | Bearer | 30/分钟 | 用户信息（旧版 MindFourm 兼容端点，不供新接入） |
+| POST | `/api/verify` | 无 | 30/分钟 | 会话令牌验证（内部同域场景） |
+| GET | `/api/authorizations` | 会话 | — | 当前用户已授权应用列表（内部） |
+| DELETE | `/api/authorizations/:client_id` | 会话 + CSRF | — | 撤销对某应用的授权（内部） |
 | GET | `/api/health` | 无 | — | 健康检查（MySQL + Redis） |
+
+当前代码还包含 RFC 8628 设备授权路由 `/api/device/code`、`/api/device/verify`、`/api/device/approve` 和 `/api/device/token`。它们不属于第三方公开契约；旧版 [DEVICE_AUTH.md](../DEVICE_AUTH.md) 所列路径和流程与运行时代码不一致，详情见 [OAuth API 参考](oauth.md)。
 
 ### 账户域 — 详见 [account.md](account.md)
 

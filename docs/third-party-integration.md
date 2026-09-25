@@ -1,522 +1,198 @@
-# 第三方系统接入文档
+# MindAuth 第三方 OAuth API 接入指南
 
-## 概述
+本文面向需要用 MindAuth 为网站提供登录的第三方开发者。本次对外接口契约覆盖 OAuth 2.0 Authorization Code + PKCE S256；完成客户端注册后，按本指南接入。端点参数、响应与错误码见 [OAuth / OIDC API 参考](api/oauth.md)，其中标记为“内部”或“旧版兼容”的端点不属于第三方接入接口。
 
-MindAuth 提供 OAuth 2.0 单点登录（SSO）服务，支持第三方系统接入。用户在 MindAuth 登录后，访问第三方系统时可实现无感登录。
+> **维护提示：** 修改 `src/routes/oauth.js`、`src/modules/oauth/*` 或 OIDC Discovery 元数据时，需同步更新本文和 [API 参考](api/oauth.md)。
 
-MindAuth 支持以下标准：
-- OAuth 2.0 Authorization Code Flow (RFC 6749)
-- PKCE S256 (RFC 7636)
-- Token Introspection (RFC 7662)
-- Token Revocation (RFC 7009)
-- OpenID Connect Discovery 1.0
+## 接入前先确认
 
-> **注意：** MindFourm（论坛）已完全切换到 OAuth-only 用户同步模式。不再支持 service-key 方式的直接用户同步。所有第三方系统必须通过 OAuth 2.0 流程接入。
+- 使用 **Authorization Code + PKCE S256**。MindAuth 的 `/api/token` 还要求 `client_id` 和 `client_secret`，因此换 token 必须由可信后端完成。浏览器、SPA、桌面或手机客户端不得保存或发送 `client_secret`。
+- PKCE 不能代替客户端保密。本流程不支持纯 SPA、桌面或移动端直接换取令牌；若应用没有可信后端，请先与 MindAuth 管理员确认已批准的接入方案，不要把密钥打包进客户端。
+- MindAuth 发布 OIDC Discovery 元数据和 UserInfo，但**不签发 ID Token，也不提供 JWKS**。需要验证签名 ID Token 的 OIDC 客户端不能直接使用当前契约；登录后应由后端调用 UserInfo，并以 `issuer + sub` 作为外部用户标识。
+- `/api/native/*` 与 `/api/v1/native/*` 是预先登记的第一方客户端接口，不是第三方 OAuth 接口。其他应用不得收集 MindAuth 密码或调用 Native Password Login。
+- RFC 8628 设备授权端点虽存在于当前服务，但未纳入本次公开契约；仓库中的 [设备授权实现说明](DEVICE_AUTH.md) 是旧版内部参考，暂勿依赖其中示例集成。
 
-**Native Password API 边界：** `/api/native/*` 仅供 MDTBBS 官方 Mindustry Mod 的 `mdtbbs-mindustry-mod` public client 使用。第三方应用不得收集 MindAuth 密码或调用 Native Password Login；请使用本文档的 Authorization Code + PKCE。Mod 不含 `client_secret`，其 `client_id` 不是可验证身份的秘密。生产 Mod 必须固定访问 `https://auth.mdtbbs.cn` 并执行正常 TLS 证书验证。Native API 不属于 OAuth password grant，也不会加入 OIDC Discovery 的 `grant_types_supported`。
+## 1. 注册 OAuth 应用
 
----
+联系 MindAuth 管理员创建客户端，并提供应用名称和完整回调 URL。生产回调必须使用 HTTPS。回调地址必须与注册值**逐字完全一致**，包括协议、主机、端口、路径和查询部分；不支持通配符。管理端还会拒绝 localhost 和私有/内部网络地址。
 
-## 1. OIDC Discovery
+取得以下配置后，将密钥放在服务端密钥管理或环境变量中：
 
-MindAuth 提供 OIDC Discovery 端点，第三方可自动发现所有 OAuth 端点：
-
-```
-GET /.well-known/openid-configuration
-```
-
-**响应示例：**
-```json
-{
-  "issuer": "https://auth.example.com",
-  "authorization_endpoint": "https://auth.example.com/api/authorize",
-  "token_endpoint": "https://auth.example.com/api/token",
-  "userinfo_endpoint": "https://auth.example.com/api/userinfo",
-  "revocation_endpoint": "https://auth.example.com/api/revoke",
-  "introspection_endpoint": "https://auth.example.com/api/introspect",
-  "response_types_supported": ["code"],
-  "subject_types_supported": ["public"],
-  "scopes_supported": ["openid", "profile", "email"],
-  "token_endpoint_auth_methods_supported": ["client_secret_post"],
-  "code_challenge_methods_supported": ["S256"],
-  "grant_types_supported": ["authorization_code", "refresh_token"]
-}
-```
+| 配置 | 用途 |
+|---|---|
+| `client_id` | 客户端公开标识 |
+| `client_secret` | 仅后端调用 token、refresh、introspect、revoke 时使用 |
+| `redirect_uri` | 注册过的回调地址 |
+| MindAuth issuer | 部署方提供的认证服务根地址，例如 `https://auth.example.com` |
 
----
-
-## 2. 注册应用
-
-联系管理员在 `http://your-auth-server/admin` 创建 OAuth 应用，获取：
-
-| 参数 | 说明 |
-|------|------|
-| `client_id` | 应用标识，公开可见 |
-| `client_secret` | 应用密钥，**仅后端使用，禁止前端暴露** |
-| `redirect_uri` | 回调地址，必须严格匹配（不支持通配符） |
-
-> **安全限制：** `redirect_uri` 不允许指向私有 IP 地址（如 `localhost`、`127.0.0.1`、`10.x.x.x`、`192.168.x.x`），以防止 SSRF 攻击。生产环境请使用公网域名。
-
----
-
-## 3. API 接口
-
-### 3.1 授权端点
-
-用户未登录时，跳转到此端点：
-
-```
-GET /api/authorize?redirect_uri={redirect_uri}&client_id={client_id}&state={state}&code_challenge={challenge}&code_challenge_method=S256
-```
-
-**参数：**
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| `redirect_uri` | 是 | 注册时配置的回调地址 |
-| `client_id` | 是 | 应用标识 |
-| `state` | 推荐 | 防 CSRF 随机字符串，回调时原样返回 |
-| `code_challenge` | 推荐 | PKCE S256 challenge（Base64URL(SHA256(code_verifier))） |
-| `code_challenge_method` | 推荐 | 固定为 `S256` |
-
-**响应：**
-- 用户已登录：重定向到 `redirect_uri?code={code}&state={state}`
-- 用户未登录：重定向到 React 登录页面，登录成功后自动跳回
-
----
-
-### 3.2 Token 端点
-
-第三方后端用 code 换取 token：
-
-```
-POST /api/token
-Content-Type: application/json
-
-{
-  "grant_type": "authorization_code",
-  "code": "授权码",
-  "client_id": "应用标识",
-  "client_secret": "应用密钥",
-  "code_verifier": "PKCE code_verifier（如果使用 PKCE）"
-}
-```
-
-**响应成功：**
-```json
-{
-  "access_token": "xxx",
-  "token_type": "Bearer",
-  "refresh_token": "xxx",
-  "expires_in": 3600,
-  "scope": "openid profile email"
-}
-```
-
-> **注意：** 响应中不包含用户信息。请使用 `access_token` 调用 `/api/userinfo` 获取用户信息（见 3.4）。
-
-**响应失败（RFC 6749 格式）：**
-```json
-{
-  "error": "invalid_grant",
-  "error_description": "无效、过期或已使用的授权码"
-}
-```
-
-**错误码：**
-| error | HTTP | 说明 |
-|-------|------|------|
-| `unsupported_grant_type` | 400 | grant_type 缺失或不为 `authorization_code` |
-| `invalid_request` | 400 | 缺少必需参数（code/client_id/client_secret），或该授权码使用了 PKCE 但未提供 code_verifier |
-| `invalid_client` | 401 | client_id 未注册或 client_secret 错误 |
-| `invalid_grant` | 401 | code 无效、过期或已使用；code 与 client_id 不匹配；redirect_uri 不匹配；code_verifier 校验失败 |
-| `server_error` | 500 | 服务器内部错误 |
-
----
-
-### 3.3 Token 刷新
-
-使用 refresh_token 获取新的 access_token：
-
-```
-POST /api/refresh
-Content-Type: application/json
-
-{
-  "grant_type": "refresh_token",
-  "refresh_token": "xxx",
-  "client_id": "应用标识",
-  "client_secret": "应用密钥"
-}
-```
-
-**响应成功：**
-```json
-{
-  "access_token": "新的 access_token",
-  "token_type": "Bearer",
-  "refresh_token": "新的 refresh_token（rotation）",
-  "expires_in": 3600,
-  "scope": "openid profile email"
-}
-```
-
-> **注意：** MindAuth 使用 refresh token rotation。每次刷新都会返回新的 refresh_token，旧的立即失效。
-
----
-
-### 3.4 UserInfo 端点
-
-使用 access_token 获取用户信息（OIDC 标准）：
-
-```
-GET /api/userinfo
-Authorization: Bearer {access_token}
-```
-
-**响应（字段随 token 的 scope 变化）：**
-```json
-{
-  "sub": "1",
-  "id": 1,
-  "username": "用户名",
-  "name": "用户名",
-  "avatar_url": "/uploads/avatars/xxx.webp",
-  "phone_verified": true,
-  "phone_verified_at": "2026-01-01T00:00:00.000Z",
-  "phone_masked": "138****8000",
-  "ban_status": "none",
-  "is_muted": false,
-  "updated_at": 1735689600,
-  "custom_fields": { "字段key": "值" },
-  "email": "邮箱",
-  "email_verified": true
-}
-```
-
-**字段说明：**
-- `sub`：始终返回（用户 ID 的字符串形式）
-- `profile` scope：返回 `id`、`username`、`name`、`avatar_url`、`phone_verified`、`phone_verified_at`、`phone_masked`、`ban_status`、`is_muted`、`updated_at`，以及 `custom_fields`（仅公开的自定义字段，无值时省略该字段）。例如管理员公开配置的 `qq` 字段会以 `custom_fields.qq` 返回；该字段是用户资料，不是认证凭据，第三方应兼容字段缺失。
-- `email` scope：返回 `email`、`email_verified`
-- 响应中**不包含** `created_at` 字段
-
----
-
-### 3.5 Token Introspection (RFC 7662)
-
-验证 access_token 是否有效：
-
-```
-POST /api/introspect
-Content-Type: application/json
-
-{
-  "token": "access_token",
-  "client_id": "应用标识",
-  "client_secret": "应用密钥"
-}
-```
-
----
-
-### 3.6 Token Revocation (RFC 7009)
-
-撤销 access_token 或 refresh_token：
-
-```
-POST /api/revoke
-Content-Type: application/json
-
-{
-  "token": "token_to_revoke",
-  "client_id": "应用标识",
-  "client_secret": "应用密钥"
-}
-```
-
-> 即使 token 不存在，也返回 `{ "success": true }`（符合 RFC 7009）。
-
----
-
-### 3.7 Session 验证端点（同域场景）
-
-同域情况下可直接验证 session token：
-
-```
-POST /api/verify
-Content-Type: application/json
-
-{
-  "session_token": "用户的session token"
-}
-```
-
-**响应成功：**
-```json
-{
-  "success": true,
-  "user": {
-    "id": 1,
-    "username": "用户名",
-    "email": "邮箱",
-    "phone_verified": false,
-    "phone_verified_at": null,
-    "created_at": "注册时间"
-  }
-}
-```
-
----
-
-## 4. 接入示例
-
-### 4.1 前端跳转
-
-```javascript
-// 检测用户未登录时，跳转到认证中心
-const authServer = 'https://auth.example.com';
-const clientId = 'YOUR_CLIENT_ID';
-const redirectUri = 'https://your-app.com/callback';
-const state = crypto.randomUUID(); // 防 CSRF
-
-// 可选：PKCE
-const codeVerifier = crypto.randomUUID();
-const codeChallenge = btoa(
-  await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier))
-).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-sessionStorage.setItem('oauth_state', state);
-sessionStorage.setItem('code_verifier', codeVerifier);
-
-window.location.href = `${authServer}/api/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&client_id=${clientId}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256`;
-```
-
-### 4.2 后端处理回调（Node.js Express）
-
-```javascript
-// 回调路由处理
-app.get('/callback', async (req, res) => {
-  const { code, state } = req.query;
-
-  // 验证 state 防 CSRF
-  if (state !== req.session.expectedState) {
-    return res.status(403).send('Invalid state');
-  }
-
-  if (!code) {
-    return res.status(400).send('缺少授权码');
-  }
-
-  // 调用认证中心换取 token
-  const response = await fetch('https://auth.example.com/api/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'authorization_code',
-      code,
-      client_id: process.env.MINDAUTH_CLIENT_ID,
-      client_secret: process.env.MINDAUTH_CLIENT_SECRET,
-      code_verifier: req.session.codeVerifier // 如果使用 PKCE
-    })
-  });
-
-  const result = await response.json();
-
-  if (response.ok) {
-    // result = { access_token, token_type, refresh_token, expires_in, scope }
-
-    // 用 access_token 调用 /api/userinfo 获取用户信息
-    const userinfoRes = await fetch('https://auth.example.com/api/userinfo', {
-      headers: { 'Authorization': `Bearer ${result.access_token}` }
+请让管理员为客户端启用 `require_pkce`。MindAuth 只接受 PKCE `S256`，不接受 `plain`。
+
+## 2. 发现端点
+
+向 `{issuer}/.well-known/openid-configuration` 发起 GET 请求，可读取授权、token、userinfo、撤销和内省端点。使用返回的端点 URL，避免在应用中散落硬编码地址。
+
+当前实现有两个需要适配的地方：
+
+1. Discovery 的 `grant_types_supported` 包含 `refresh_token`，但刷新请求实际发送到单独的 `{issuer}/api/refresh`，而不是 `/api/token`。
+2. Discovery 仅用于发现支持的端点和部分元数据；MindAuth 不返回 `id_token` 或 `jwks_uri`。用户资料需通过 UserInfo 获取。
+
+## 3. 登录流程
+
+1. 第三方后端创建不可预测的 `state` 和 PKCE `code_verifier`，暂存在与浏览器会话绑定的服务端 session 中。
+2. 计算 `code_challenge = BASE64URL(SHA256(code_verifier))`，将浏览器重定向到 `/api/authorize`。
+3. MindAuth 要求用户登录后，把浏览器重定向到注册的回调地址，并附上一次性 `code` 和原样返回的 `state`。回调地址已有的查询参数会保留。
+4. 第三方后端校验 `state`，然后把 `code`、客户端凭证和 `code_verifier` POST 到 `/api/token`。
+5. 后端用返回的 `access_token` 调用 `/api/userinfo`，再创建本地登录会话。
+
+授权码有效期为 5 分钟且只能兑换一次。`state` 应当随机、单次使用，并在回调时与发起登录的服务端会话比对。
+
+## 4. Node.js / Express 示例
+
+以下示例假设 Express 已配置**服务端 session 存储**和 HTTPS 安全 Cookie。把回调 URL 配成第 1 节登记的同一个值。示例将 verifier 保存在服务端 session，不经过浏览器存储。
+
+```js
+import { createHash, randomBytes } from 'node:crypto';
+
+const ISSUER = process.env.MINDAUTH_ISSUER; // 例如 https://auth.example.com
+const CLIENT_ID = process.env.MINDAUTH_CLIENT_ID;
+const CLIENT_SECRET = process.env.MINDAUTH_CLIENT_SECRET; // 仅服务端
+const REDIRECT_URI = 'https://app.example.com/oauth/callback';
+
+const discoveryResponse = await fetch(new URL('/.well-known/openid-configuration', ISSUER));
+if (!discoveryResponse.ok) throw new Error('MindAuth Discovery 请求失败');
+const discovery = await discoveryResponse.json();
+if (discovery.issuer !== ISSUER) throw new Error('MindAuth issuer 不匹配');
+
+app.get('/login', (req, res) => {
+  const state = randomBytes(32).toString('base64url');
+  // 32 随机字节编码后为 43 字符，符合 PKCE verifier 长度要求。
+  const codeVerifier = randomBytes(32).toString('base64url');
+  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+
+  req.session.oauth = { state, codeVerifier };
+
+  const authorizeUrl = new URL(discovery.authorization_endpoint);
+  authorizeUrl.search = new URLSearchParams({
+    response_type: 'code',
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: 'openid profile email',
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  }).toString();
+
+  res.redirect(authorizeUrl.toString());
+});
+
+app.get('/oauth/callback', async (req, res, next) => {
+  try {
+    const pending = req.session.oauth;
+    delete req.session.oauth; // state/verifier 只允许使用一次
+
+    const { code, state } = req.query;
+    if (!pending || typeof state !== 'string' || state !== pending.state) {
+      return res.status(400).send('OAuth state 校验失败');
+    }
+    if (typeof code !== 'string') {
+      return res.status(400).send('回调缺少授权码');
+    }
+
+    const tokenResponse = await fetch(discovery.token_endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        code,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        code_verifier: pending.codeVerifier,
+      }),
     });
-    const user = await userinfoRes.json();
-    // { sub, id, username, email, ... }（字段随 scope 变化，见 3.4）
+    const tokens = await tokenResponse.json();
+    if (!tokenResponse.ok) {
+      console.error('MindAuth token exchange failed:', tokens.error);
+      return res.status(401).send('MindAuth 登录失败，请重新发起登录');
+    }
 
-    // 创建本地会话
-    req.session.user = user;
-    req.session.accessToken = result.access_token;
-    req.session.refreshToken = result.refresh_token;
-    res.redirect('/dashboard');
-  } else {
-    res.status(401).send(result.error_description || result.error);
+    const userInfoResponse = await fetch(discovery.userinfo_endpoint, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const claims = await userInfoResponse.json();
+    if (!userInfoResponse.ok || !claims.sub) {
+      return res.status(401).send('无法读取 MindAuth 用户资料');
+    }
+
+    // 登录成功后重新生成 session ID，避免 session fixation。
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((error) => error ? reject(error) : resolve());
+    });
+
+    // 按 issuer + sub 查找/创建本地账号；只保存应用所需资料。
+    // 如需保留 token，应使用受保护的服务端存储。
+    req.session.user = {
+      issuer: ISSUER,
+      sub: claims.sub,
+      username: claims.username,
+      email: claims.email,
+    };
+    await new Promise((resolve, reject) => {
+      req.session.save((error) => error ? reject(error) : resolve());
+    });
+    res.redirect('/');
+  } catch (error) {
+    next(error);
   }
 });
 ```
 
-### 4.3 后端处理回调（Python Flask）
+确保回调 URL 不会记录或转发 `code`、`state` 等查询参数；兑换成功后立即跳转到不带 OAuth 参数的站内页面。实际部署还应配置安全 Cookie 属性。
 
-```python
-from flask import Flask, request, redirect, session
-import requests
+## 5. 令牌和用户资料
 
-app = Flask(__name__)
+### 兑换授权码
 
-@app.route('/callback')
-def callback():
-    code = request.args.get('code')
-    state = request.args.get('state')
+`POST {issuer}/api/token`，请求体为 JSON（不接受 `application/x-www-form-urlencoded`）：
 
-    if state != session.get('expected_state'):
-        return 'Invalid state', 403
-
-    if not code:
-        return '缺少授权码', 400
-
-    response = requests.post('https://auth.example.com/api/token', json={
-        'grant_type': 'authorization_code',
-        'code': code,
-        'client_id': 'YOUR_CLIENT_ID',
-        'client_secret': 'YOUR_CLIENT_SECRET'
-    })
-
-    result = response.json()
-
-    if response.ok:
-        # result = { access_token, token_type, refresh_token, expires_in, scope }
-        # 用 access_token 调用 /api/userinfo 获取用户信息
-        user = requests.get(
-            'https://auth.example.com/api/userinfo',
-            headers={'Authorization': f"Bearer {result['access_token']}"}
-        ).json()
-        session['user'] = user
-        session['access_token'] = result['access_token']
-        session['refresh_token'] = result['refresh_token']
-        return redirect('/dashboard')
-    else:
-        return result.get('error_description') or result.get('error'), 401
-```
-
-### 4.4 同域场景（前端直接调用）
-
-```javascript
-// 从 Cookie 获取 session token（同域情况下 Cookie 共享）
-const sessionToken = getCookie('session'); // 需自己实现获取 cookie
-
-// 验证并获取用户信息
-async function getUserInfo() {
-  const response = await fetch('https://auth.example.com/api/verify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_token: sessionToken })
-  });
-
-  const result = await response.json();
-  if (result.success) {
-    return result.user;
-  }
-  return null;
+```json
+{
+  "grant_type": "authorization_code",
+  "code": "callback 中的一次性授权码",
+  "client_id": "客户端标识",
+  "client_secret": "仅服务端持有的客户端密钥",
+  "code_verifier": "发起授权时暂存的原始 verifier"
 }
 ```
 
----
+成功返回 `access_token`、`token_type`、`refresh_token`、`expires_in` 和 `scope`，不含用户对象。授权码使用 PKCE 时 `code_verifier` 必填。
 
-## 5. 接入流程图
+### 读取 UserInfo
 
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   用户      │    │  第三方系统  │    │  MindAuth   │
-└─────────────┘    └─────────────┘    └─────────────┘
-       │                 │                   │
-       │  1.访问第三方   │                   │
-       │────────────────>│                   │
-       │                 │                   │
-       │                 │ 2.检测未登录      │
-       │                 │ 跳转 /api/authorize│
-       │                 │──────────────────>│
-       │                 │                   │
-       │                 │                   │ 3.检查登录状态
-       │                 │                   │    已登录→生成code
-       │                 │                   │    未登录→显示React登录页
-       │                 │                   │
-       │  4.如未登录     │                   │
-       │    用户登录     │                   │
-       │────────────────────────────────────>│
-       │                 │                   │
-       │                 │ 5.重定向回调      │
-       │                 │   带 code + state │
-       │                 │<──────────────────│
-       │                 │                   │
-       │                 │ 6.后端用 code     │
-       │                 │   换取 tokens     │
-       │                 │──────────────────>│
-       │                 │                   │
-       │                 │ 7.返回 tokens     │
-       │                 │   (含refresh)     │
-       │                 │<──────────────────│
-       │                 │                   │
-       │  8.登录成功     │                   │
-       │<────────────────│                   │
-       │                 │                   │
-```
+调用 `GET {issuer}/api/userinfo` 并发送 `Authorization: Bearer {access_token}`。响应字段由授权 scope 决定：`sub` 始终存在；`profile` 提供用户资料；`email` 提供 `email` 和 `email_verified`。只申请和保存业务确实需要的 scope 与字段。完整 claim 清单见 [OAuth / OIDC API 参考](api/oauth.md)。
 
----
+### 刷新与撤销
 
-## 6. 安全注意事项
+- access token 默认有效 1 小时；refresh token 默认有效 30 天。刷新使用 `POST {issuer}/api/refresh`，请求体包含 `grant_type: "refresh_token"`、当前 `refresh_token`、`client_id` 和 `client_secret`。
+- 每次刷新都会轮换 refresh token。必须原子替换并保存新 token，旧 token 立即失效；重放旧 token 会返回 `invalid_grant`。若怀疑凭证泄漏，请在 MindAuth 撤销该客户端授权，不要假设重放会自动撤销同一用户的其他令牌。
+- `POST {issuer}/api/revoke` 可撤销当前客户端自己的 access token 或 refresh token。内省使用 `POST {issuer}/api/introspect`；这些端点都需要客户端凭证。完整请求和响应见 [OAuth / OIDC API 参考](api/oauth.md)。
+- MindAuth 的浏览器退出不会自动清除第三方应用的本地 session。第三方需自行结束本地 session；若保存了 OAuth token，也应按产品退出策略撤销它们。
 
-| 项目 | 说明 |
-|------|------|
-| **client_secret** | 仅在第三方后端使用，**禁止暴露给前端** |
-| **code 有效期** | 5分钟，一次性使用，用后即失效 |
-| **redirect_uri** | 必须与注册时配置的完全匹配 |
-| **HTTPS** | 生产环境必须使用 HTTPS |
-| **state 参数** | 强烈建议使用 state 参数防止 CSRF 攻击 |
-| **PKCE** | 推荐使用 PKCE S256 增强安全性 |
-| **refresh rotation** | 每次刷新返回新 refresh_token，旧的立即失效 |
-| **SSRF 防护** | redirect_uri 不允许指向私有 IP 地址 |
+## 6. 常见错误与安全边界
 
----
+| 情况 | 处理方式 |
+|---|---|
+| `invalid_redirect` | 确认请求中的 `redirect_uri` 与管理端登记值逐字一致。授权请求校验失败会显示 MindAuth 自己的错误页，不会把错误重定向到未验证的回调地址。 |
+| `invalid_grant` | 授权码可能已过期、已使用、发给另一个客户端，或 PKCE verifier 不匹配；重新发起整个登录流程。 |
+| `invalid_client` | 检查服务端配置的 `client_id` / `client_secret`，不要将 secret 发给浏览器。 |
+| UserInfo 返回 `invalid_token` | access token 无效或过期；按需使用 refresh token 轮换，失败时重新登录。 |
 
-## 7. 测试示例
+不要把以下内容当作第三方 OAuth 接入方式：
 
-### 测试用例
+- `POST /api/verify`：内部 session-token 校验接口，不是跨域登录方案；不要从浏览器读取或转交 MindAuth session Cookie。
+- `GET /api/user`：旧版兼容端点。新接入应使用按 scope 过滤的 `/api/userinfo`。
+- `/api/native/*` 与 `/api/v1/native/*`：仅预先登记的第一方客户端使用，不得让第三方应用收集 MindAuth 用户密码。
 
-```bash
-# 1. 登录用户
-# username 参数也可以传已验证格式的邮箱；邮箱匹配会忽略大小写并去除首尾空格。
-curl -X POST http://localhost:4001/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"testuser","password":"test123456"}' \
-  -c cookies.txt
+## 相关文档
 
-# 2. 获取授权码
-curl -L -b cookies.txt \
-  "http://localhost:4001/api/authorize?redirect_uri=http://localhost:4001/callback&client_id=YOUR_CLIENT_ID"
-
-# 3. 用 code 换取 token
-curl -X POST http://localhost:4001/api/token \
-  -H "Content-Type: application/json" \
-  -d '{"grant_type":"authorization_code","code":"获得的code","client_id":"YOUR_CLIENT_ID","client_secret":"YOUR_CLIENT_SECRET"}'
-
-# 4. 用 access_token 获取用户信息
-curl http://localhost:4001/api/userinfo \
-  -H "Authorization: Bearer 获得的access_token"
-```
-
----
-
-## 8. 常见问题
-
-**Q: code 可以重复使用吗？**
-A: 不可以，code 只能使用一次，使用后立即失效。
-
-**Q: code 有效期多久？**
-A: 5分钟，超时后无法使用。
-
-**Q: 同域和跨域有什么区别？**
-A:
-- 同域：可直接通过 Cookie 共享 session，调用 `/api/verify`
-- 跨域：必须通过 OAuth 流程，使用 code 换取 token，再调用 `/api/userinfo` 获取用户信息
-
-**Q: 如何处理用户退出登录？**
-A: 第三方系统需自行处理本地会话清理，MindAuth 的退出不会自动通知第三方。如需检测用户是否已退出，可在 access_token 过期后调用 `/api/introspect` 检查。
-
-**Q: 支持 PKCE 吗？**
-A: 支持。仅支持 S256 方法（不接受 plain）。在 `/api/authorize` 时传 `code_challenge` 和 `code_challenge_method=S256`，在 `/api/token` 时传 `code_verifier`。
-
-**Q: MindFourm 还使用 service-key 同步用户吗？**
-A: 不再使用。MindFourm 已完全切换到 OAuth-only 模式，所有用户同步通过 OAuth 2.0 授权码流程完成。
-
----
-
-## 9. 联系方式
-
-如有问题请联系管理员。
+- [OAuth / OIDC API 参考](api/oauth.md)：稳定外部端点的参数、响应与错误码，并区分内部和旧版端点。
+- [API 总索引](api/README.md)：认证方式、错误格式和全量端点索引。

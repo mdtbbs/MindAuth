@@ -1,15 +1,18 @@
 # OAuth / OIDC API
 
-MindAuth OAuth 2.0 / OIDC 域全部端点的内部参考文档，涵盖协议端点、授权管理端点、发现端点与健康检查。
+MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理端点、发现端点与健康检查。
 
 > **维护提示**：修改 src/routes/oauth.js、src/modules/oauth/* 时需同步更新本文档及 [../third-party-integration.md](../third-party-integration.md)。
 
-> **文档分工**：本文档面向**内部开发者**，参考式覆盖全部端点（含仅内部使用的会话端点）。面向第三方接入方的教程式文档见 [../third-party-integration.md](../third-party-integration.md)。通用约定（错误格式、认证方式）见 [README.md](README.md)。
+> **文档分工**：第三方接入教程见 [../third-party-integration.md](../third-party-integration.md)。该指南定义当前对外支持的 Authorization Code + PKCE S256 契约。下文标记为“内部”或“旧版兼容”的端点不供新的第三方接入使用；RFC 8628 设备授权端点暂未纳入稳定外部契约。通用约定（错误格式、认证方式）见 [README.md](README.md)。
 
 **通用说明**：
 
 - 路由适配层：`src/routes/oauth.js`（挂载于 `/api`）；业务逻辑：`src/modules/oauth/oauthIssuer.js`。
 - 协议端点请求体为 **JSON**（`Content-Type: application/json`），不支持 form-encoded。
+- 对外接入流程和服务端示例见 [第三方 OAuth 接入指南](../third-party-integration.md)。MindAuth 发布 Discovery 和 UserInfo，但不签发 ID Token、也不提供 `jwks_uri`；依赖签名 ID Token 验证的客户端不适用于当前契约。
+- 当前公开契约端点：`GET /api/authorize`、`POST /api/token`、`POST /api/refresh`、`GET /api/userinfo`、`POST /api/introspect`、`POST /api/revoke` 和 `GET /.well-known/openid-configuration`。`client_secret` 通过 JSON body 提交；不能保密该值的客户端不应调用这些凭证端点。
+- 当前代码还保留 RFC 8628 设备授权实现，但运行时挂载路径是 `/api/device/*`，旧文档使用的 `/api/oauth/device/*` 与实际路由不符；验证链接和审批表单也尚未与 CSRF/请求体处理对齐，因此不应作为已发布接口使用。细节见 [设备授权内部实现参考](../DEVICE_AUTH.md)。
 - 标准错误格式（RFC 6749）：`{ "error": "<code>", "error_description": "<中文描述>" }`。未捕获异常返回 `500 server_error`。
 - CSRF：`/token` `/refresh` `/introspect` `/revoke` `/verify` 在豁免名单中；`DELETE /authorizations/:client_id` **需要** `X-CSRF-Token`。
 - 速率限制（按 IP）：`/authorize` `/token` `/refresh` `/introspect` `/revoke` 各 60 次/分钟；`/userinfo` `/user` `/verify` 共享 30 次/分钟（`ratelimit:verify_api`）。
@@ -88,6 +91,8 @@ MindAuth OAuth 2.0 / OIDC 域全部端点的内部参考文档，涵盖协议端
 
 刷新令牌端点（RFC 6749 §6，独立路径而非复用 /token）。**认证**：body `client_id` + `client_secret`。
 
+> **接入提示：** Discovery 的 `grant_types_supported` 声明支持 `refresh_token`，但当前实现将刷新请求放在 `/api/refresh`；不要把 refresh grant POST 到 `/api/token`。
+
 | 参数（body） | 必填 | 说明 |
 |------|------|------|
 | `grant_type` | 是 | 必须为 `refresh_token` |
@@ -106,7 +111,7 @@ MindAuth OAuth 2.0 / OIDC 域全部端点的内部参考文档，涵盖协议端
 **特殊行为**：
 
 - **轮换（rotation）**：每次刷新旧 token 立即 `revoked=1` 并签发新 refresh_token，在 MySQL 事务内以 `SELECT … FOR UPDATE` 保证原子性，防并发重复兑换。
-- **Replay 检测**：使用已撤销的 refresh_token 会触发告警并**撤销该 user/client 对的全部 refresh_token**（遏制令牌泄漏）。
+- **Replay 检测**：重放已撤销的 refresh_token 会触发告警并返回 `401 invalid_grant`。当前事务在错误时回滚，因此不会联动撤销该 user/client 对的其他 refresh_token；不要依赖重放触发全量吊销。怀疑泄漏时应显式撤销用户对该客户端的授权。
 
 ---
 
@@ -145,13 +150,15 @@ UserInfo 端点（OIDC Core §5.3）。**认证**：`Authorization: Bearer {acce
 | `profile` | `name` `id` `username` `avatar_url` `phone_verified` `phone_verified_at` `phone_masked` `ban_status` `is_muted` `updated_at`（Unix 秒），另有 `custom_fields`（仅公开自定义字段有值时出现） |
 | `email` | `email` `email_verified` |
 
+> 当前 `updated_at` 的实现值取自账号的 `created_at`，不是最近修改时间。第三方不要将其解释为资料更新时间；如需可靠更新时间，应忽略该 claim，等待契约修正。
+
 错误：缺失/格式错误的 Authorization 头、token 无效或过期、用户不存在 → 401 `invalid_token`。
 
 ---
 
 ## GET /api/user（旧版兼容）
 
-供旧版 MindFourm 使用的扁平用户信息端点，**不做 scope 过滤**。新接入请用 `/api/userinfo`。**认证**：`Authorization: Bearer {access_token}`。
+供旧版 MindFourm 使用的扁平用户信息端点，**不做 scope 过滤**。新接入请用 `/api/userinfo`。**认证**：`Authorization: Bearer {access_token}`。该端点不属于新第三方接入契约。
 
 **成功响应**：
 
@@ -205,9 +212,9 @@ UserInfo 端点（OIDC Core §5.3）。**认证**：`Authorization: Bearer {acce
 
 ---
 
-## POST /api/verify
+## POST /api/verify（内部）
 
-会话令牌验证端点（自定义，非 OAuth 标准），供**同域**服务直接校验 `session` Cookie 值。**认证**：body 中的 session_token 本身。
+会话令牌验证端点（自定义，非 OAuth 标准），供**同域内部服务**直接校验 `session` Cookie 值。**认证**：body 中的 session_token 本身。此端点不属于第三方接入方式；不要读取、传递或验证 MindAuth 浏览器 session Cookie 来实现跨站登录。
 
 | 参数（body） | 必填 | 说明 |
 |------|------|------|
@@ -226,6 +233,8 @@ UserInfo 端点（OIDC Core §5.3）。**认证**：`Authorization: Bearer {acce
 ## GET /.well-known/openid-configuration
 
 OIDC Discovery 1.0 / RFC 8414 元数据端点（定义于 `src/app.js`）。无认证。注意：MindAuth 不签发 RS256 ID Token，无 `jwks_uri`；用户信息经 `/api/userinfo` 获取。
+
+Discovery 元数据没有单独的 refresh endpoint 字段；虽然 `grant_types_supported` 包含 `refresh_token`，本服务实际使用上文记录的 `/api/refresh`。
 
 **响应**（`baseUrl` 取自 `BASE_URL` 配置）：
 

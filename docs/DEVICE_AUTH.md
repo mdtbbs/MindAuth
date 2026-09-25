@@ -1,4 +1,6 @@
-# Device Authorization Flow (RFC 8628)
+# Device Authorization Flow (RFC 8628) — 内部实现参考
+
+> **暂未纳入第三方公开 API 契约。** 本文保留了历史实现说明和示例，不应作为外部集成依据：运行时路由挂载为 `/api/device/*`，旧文档所写 `/api/oauth/device/*` 不存在；`verification_uri_complete` 也指向未实现的验证页面，审批表单与 CSRF 及 JSON 请求处理不匹配。面向第三方的已支持流程见 [第三方 OAuth API 接入指南](third-party-integration.md)。
 
 MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受限的设备（如 Mindustry Mod、CLI 工具、智能电视）通过用户在另一个设备上授权来获取访问令牌。
 

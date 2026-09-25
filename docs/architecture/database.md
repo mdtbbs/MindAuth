@@ -43,7 +43,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
-| `native_auth_clients` | 首方 Native client 能力开关 | `mdtbbs_android` 与 `mdtbbs-mindustry-mod` 预置；方法白名单、PKCE required 标志；009 增加 Native token downstream `token_audience_client_id`（Mod 默认 `forum`） |
+| `native_auth_clients` | 首方 Native client 能力开关 | `mdtbbs_android`、legacy `mdtbbs-mindustry-mod` 与 PKCE public client `mdtbbs_mindustry`；方法白名单、PKCE required 标志；009 增加 Native token downstream `token_audience_client_id`（Forum audience 为 `forum`） |
 | `native_auth_transactions` | 10 分钟认证上下文 | public id、S256 challenge、当前状态、最终 user/method |
 | `native_sms_challenges` | Native 短信验证码 | phone/code HMAC digest、5 次上限、5 分钟过期、一次消费 |
 | `native_authorization_codes` | 90 秒一次性授权码 | code HMAC digest、client/user/transaction、PKCE challenge、条件消费 |
