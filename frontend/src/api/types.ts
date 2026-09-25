@@ -123,7 +123,7 @@ export interface LoginLog {
   id: number;
   ip: string;
   device: string;
-  login_type: 'web' | 'oauth';
+  login_type: string;
   created_at: string;
 }
 

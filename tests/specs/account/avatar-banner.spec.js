@@ -67,13 +67,13 @@ async function registerUser(page, prefix) {
 }
 
 /**
- * 注册新用户并进入账户设置「个人资料」tab。
- * 该 tab 为默认激活 tab，包含隐藏的头像/横幅 file input
+ * 注册新用户并进入个人资料路由。
+ * 页面包含隐藏的头像/横幅 file input
  * （data-testid="avatar-input" / "banner-input"）。
  */
 async function registerAndOpenProfile(page, prefix) {
   const username = await registerUser(page, prefix);
-  await page.goto('/account-settings');
+  await page.goto('/profile');
   await page.waitForSelector('[data-testid="avatar-input"]', { state: 'attached', timeout: 8000 });
   return username;
 }
@@ -109,7 +109,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.describe.serial('头像功能', () => {
-  const avatarImg = (page) => page.locator('.settings-profile .account-avatar img');
+  const avatarImg = (page) => page.locator('.profile-avatar-control__preview img');
 
   test.beforeEach(async ({ page, context }) => {
     await context.clearCookies();
@@ -170,13 +170,13 @@ test.describe.serial('头像功能', () => {
     await expect(avatarImg(page)).toBeVisible();
 
     // 上传成功后「删除头像」按钮出现在个人资料 tab
-    await page.getByRole('button', { name: '删除头像' }).click();
+    await page.getByRole('button', { name: '移除' }).click();
     await expect(toastWith(page, '头像已删除')).toBeVisible({ timeout: 5000 });
     await expect(avatarImg(page)).toHaveCount(0);
 
     // 刷新后仍显示首字母占位而非图片
     await page.reload();
-    await page.waitForSelector('.settings-profile .account-avatar', { timeout: 8000 });
+    await page.waitForSelector('.profile-avatar-control__preview', { timeout: 8000 });
     await expect(avatarImg(page)).toHaveCount(0);
   });
 
@@ -202,7 +202,7 @@ test.describe.serial('头像功能', () => {
 });
 
 test.describe.serial('横幅功能', () => {
-  const bannerImg = (page) => page.locator('.settings-banner img');
+  const bannerImg = (page) => page.locator('.profile-banner-control__preview img');
 
   test.beforeEach(async ({ page, context }) => {
     await context.clearCookies();
@@ -261,12 +261,12 @@ test.describe.serial('横幅功能', () => {
     await expect(toastWith(page, '横幅已更新')).toBeVisible({ timeout: 5000 });
     await expect(bannerImg(page)).toBeVisible();
 
-    await page.getByRole('button', { name: '删除横幅' }).click();
+    await page.getByRole('button', { name: '移除' }).click();
     await expect(toastWith(page, '横幅已删除')).toBeVisible({ timeout: 5000 });
     await expect(bannerImg(page)).toHaveCount(0);
 
     await page.reload();
-    await page.waitForSelector('.settings-banner', { timeout: 8000 });
+    await page.waitForSelector('.profile-banner-control__preview', { timeout: 8000 });
     await expect(bannerImg(page)).toHaveCount(0);
   });
 
@@ -291,7 +291,7 @@ test.describe.serial('横幅功能', () => {
 });
 
 test.describe('头像格式支持', () => {
-  const avatarImg = (page) => page.locator('.settings-profile .account-avatar img');
+  const avatarImg = (page) => page.locator('.profile-avatar-control__preview img');
 
   test.beforeEach(async ({ page, context }) => {
     await context.clearCookies();

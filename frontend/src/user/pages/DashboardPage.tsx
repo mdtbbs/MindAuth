@@ -1,476 +1,182 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import api, { ApiError } from '@/api/client';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
-import { useToast } from '@/shared/ToastProvider';
-import { Card, CardTitle, CardDescription } from '@/shared/Card';
-import { Button } from '@/shared/Button';
-import { TextField } from '@/shared/TextField';
-import { ResponsiveTable } from '@/shared/ResponsiveTable';
-import { LoadingState } from '@/shared/LoadingState';
+import api from '@/api/client';
+import { useResource } from '@/api/useResource';
+import type { Authorization, LoginLog, Notification, Session } from '@/api/types';
 import { AccountShell } from '@/user/components/AccountShell';
-import type {
-  Session,
-  Notification,
-  LoginLog,
-  Authorization,
-} from '@/api/types';
+import {
+  AccountEmptyState,
+  AccountLoadState,
+  AccountSection,
+  formatAccountDate,
+  StatusLabel,
+} from '@/user/components/AccountPageParts';
+import { Button } from '@/shared/Button';
+import { useToast } from '@/shared/ToastProvider';
 
-const DASHBOARD_NAV = [
-  { key: 'overview', label: '概览', href: '/dashboard' },
-  { key: 'settings', label: '账户设置', href: '/account-settings' },
-];
+interface SessionsResponse { success: boolean; sessions: Session[] }
+interface NotificationsResponse { success: boolean; notifications: Notification[] }
+interface AuthorizationsResponse { success: boolean; authorizations: Authorization[] }
+interface LoginLogsResponse { success: boolean; logs: LoginLog[] }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString('zh-CN');
-}
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString('zh-CN');
+function initial(name: string) {
+  return name.trim().charAt(0).toUpperCase() || 'M';
 }
 
 export function DashboardPage() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading, logout, loadCurrentUser } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
+  const sessions = useResource(
+    (signal) => api.get<SessionsResponse>('/api/sessions', { signal }),
+    [],
+    { enabled: Boolean(user) },
+  );
+  const notifications = useResource(
+    (signal) => api.get<NotificationsResponse>('/api/notifications?page=1&limit=3', { signal }),
+    [],
+    { enabled: Boolean(user) },
+  );
+  const authorizations = useResource(
+    (signal) => api.get<AuthorizationsResponse>('/api/authorizations', { signal }),
+    [],
+    { enabled: Boolean(user) },
+  );
+  const loginLogs = useResource(
+    (signal) => api.get<LoginLogsResponse>('/api/login-logs', { signal }),
+    [],
+    { enabled: Boolean(user) },
+  );
 
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loginLogs, setLoginLogs] = useState<LoginLog[]>([]);
-  const [authorizations, setAuthorizations] = useState<Authorization[]>([]);
-  const [phoneStatus, setPhoneStatus] = useState<{ phone: string | null; verified: boolean }>({
-    phone: null,
-    verified: false,
-  });
-
-  const [dataLoading, setDataLoading] = useState(true);
-  const [dataErrors, setDataErrors] = useState<Record<string, boolean>>({});
-  const [smsCode, setSmsCode] = useState('');
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [smsPhone, setSmsPhone] = useState('');
-  const [smsLoading, setSmsLoading] = useState(false);
-  const [smsSent, setSmsSent] = useState(false);
-  const [smsCooldownSeconds, setSmsCooldownSeconds] = useState(0);
-  const [revokingSessionId, setRevokingSessionId] = useState<number | string | null>(null);
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      toast('warning', '请先登录');
-      navigate('/login', { replace: true });
-    }
-  }, [user, authLoading, navigate, toast]);
-
-  const loadDashboardData = useCallback(async () => {
-    setDataLoading(true);
-    const results = await Promise.allSettled([
-      api.get<{ success: boolean; sessions: Session[] }>('/api/sessions'),
-      api.get<{ success: boolean; notifications: Notification[] }>('/api/notifications'),
-      api.get<{ success: boolean; logs: LoginLog[] }>('/api/login-logs'),
-      api.get<{ success: boolean; authorizations: Authorization[] }>('/api/authorizations'),
-      api.get<{ success: boolean; count: number }>('/api/notifications/unread-count'),
-    ]);
-    const [sessRes, notifsRes, logsRes, authsRes, unreadRes] = results;
-    setDataErrors({
-      sessions: sessRes.status === 'rejected', notifications: notifsRes.status === 'rejected',
-      logs: logsRes.status === 'rejected', authorizations: authsRes.status === 'rejected',
-    });
-    if (sessRes.status === 'fulfilled') setSessions(sessRes.value.sessions || []);
-    if (notifsRes.status === 'fulfilled') setNotifications(notifsRes.value.notifications || []);
-    if (logsRes.status === 'fulfilled') setLoginLogs(logsRes.value.logs || []);
-    if (authsRes.status === 'fulfilled') setAuthorizations(authsRes.value.authorizations || []);
-    if (unreadRes.status === 'fulfilled') setUnreadCount(unreadRes.value.count || 0);
-    setDataLoading(false);
-  }, []);
-
-  const revokeSession = useCallback(async (session: Session) => {
-    setRevokingSessionId(session.id);
-    try {
-      await api.del(`/api/sessions/${encodeURIComponent(String(session.id))}`);
-      toast('success', '设备会话已注销');
-      await loadDashboardData();
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : '注销设备会话失败');
-    } finally {
-      setRevokingSessionId(null);
-    }
-  }, [loadDashboardData, toast]);
-
-  useEffect(() => {
-    if (user) {
-      setPhoneStatus({ phone: user.phone_masked, verified: user.phone_verified });
-      loadDashboardData();
-    }
-  }, [user, loadDashboardData]);
-
-  useEffect(() => {
-    if (smsCooldownSeconds <= 0) return;
-    const timer = setInterval(() => {
-      setSmsCooldownSeconds((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [smsCooldownSeconds]);
-
-  async function handleLogout() {
-    await logout();
-    navigate('/login', { replace: true });
-  }
-
-  async function handleSendVerificationEmail() {
+  async function sendVerificationEmail() {
     try {
       await api.post('/api/email-verification/send');
       toast('success', '验证邮件已发送');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '发送失败';
-      toast('error', msg);
+    } catch (error) {
+      toast('error', error instanceof Error ? error.message : '发送验证邮件失败');
     }
   }
 
-  async function handleSendSms() {
-    if (!smsPhone.trim()) {
-      toast('error', '请输入手机号');
-      return;
-    }
-    if (smsCooldownSeconds > 0) return;
-    setSmsLoading(true);
-    try {
-      await api.post('/api/sms/send', { phone: smsPhone.trim() });
-      setSmsSent(true);
-      setSmsCooldownSeconds(60);
-      toast('success', '验证码已发送');
-    } catch (err: unknown) {
-      if (err instanceof ApiError && err.code === 'SMS_RATE_LIMITED') {
-        const waitSeconds = err.retry_after_seconds || 60;
-        setSmsCooldownSeconds(waitSeconds);
-        toast('error', `发送太频繁，请${waitSeconds}秒后重试`);
-      } else {
-        const msg = err instanceof Error ? err.message : '发送失败';
-        toast('error', msg);
-      }
-    } finally {
-      setSmsLoading(false);
-    }
-  }
-
-  async function handleVerifySms() {
-    if (!smsCode.trim()) {
-      toast('error', '请输入验证码');
-      return;
-    }
-    setSmsLoading(true);
-    try {
-      await api.post('/api/sms/verify', { phone: smsPhone.trim(), code: smsCode.trim() });
-      toast('success', '手机号绑定成功');
-      await loadCurrentUser();
-      setSmsSent(false);
-      setSmsCode('');
-      setSmsPhone('');
-      setSmsCooldownSeconds(0);
-    } catch (err: unknown) {
-      if (err instanceof ApiError && (err.code === 'SMS_RATE_LIMITED' || err.code === 'SMS_VERIFY_RATE_LIMITED')) {
-        const waitSeconds = err.retry_after_seconds || 60;
-        setSmsCooldownSeconds(waitSeconds);
-        toast('error', `操作太频繁，请${waitSeconds}秒后重试`);
-      } else {
-        const msg = err instanceof Error ? err.message : '验证失败';
-        toast('error', msg);
-      }
-    } finally {
-      setSmsLoading(false);
-    }
-  }
-
-  async function handleMarkNotificationRead(id: number) {
-    try {
-      await api.patch(`/api/notifications/${id}/read`);
-      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    } catch {
-      toast('error', '操作失败');
-    }
-  }
-
-  async function handleMarkAllRead() {
-    try {
-      await api.patch('/api/notifications/read-all');
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      toast('success', '已标记全部已读');
-    } catch {
-      toast('error', '操作失败');
-    }
-  }
-
-  if (authLoading || !user) {
-    return (
-      <div className="page--auth auth-shell__main">
-        <LoadingState />
-      </div>
-    );
-  }
-
-  const securityScore = [user.email_verified, phoneStatus.verified, sessions.length > 0].filter(Boolean).length;
+  const sessionItems = sessions.data?.sessions ?? [];
+  const latestLogin = loginLogs.data?.logs[0]?.created_at;
+  const securityIssues = user ? Number(!user.email_verified) + Number(!user.phone_verified) : 0;
 
   return (
-    <AccountShell
-      user={user}
-      title="账户概览"
-      description="集中查看您的账户信息、登录状态、通知、会话与授权应用。"
-      navItems={DASHBOARD_NAV}
-      activeNavKey="overview"
-      headerActions={
-        <>
-          <Button variant="secondary" size="sm" onClick={() => navigate('/account-settings')}>
-            账户设置
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleLogout} data-testid="logout-btn">
-            退出登录
-          </Button>
-        </>
-      }
-      heroActions={
-        <>
-          {!user.email_verified ? (
-            <Button variant="primary" onClick={handleSendVerificationEmail}>
-              发送验证邮件
-            </Button>
-          ) : null}
-          <Button variant="secondary" onClick={() => navigate('/account-settings')}>
-            管理账户设置
-          </Button>
-        </>
-      }
-    >
-      <div className="account-overview-grid">
-        {dataLoading ? <div className="section-description">正在加载账户数据…</div> : null}
-        {Object.values(dataErrors).some(Boolean) ? <div className="error-state">部分数据加载失败，请刷新重试。</div> : null}
-        <div className="stat-card">
-          <div className="stat-card__label">未读通知</div>
-          <div className="stat-card__value">{unreadCount}</div>
-          <div className="stat-card__hint">关注系统提醒与安全消息</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card__label">活跃会话</div>
-          <div className="stat-card__value">{sessions.length}</div>
-          <div className="stat-card__hint">当前设备与近期访问会话</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card__label">授权应用</div>
-          <div className="stat-card__value">{authorizations.length}</div>
-          <div className="stat-card__hint">已通过 MindAuth 授权的应用</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card__label">安全状态</div>
-          <div className="stat-card__value">{securityScore}/3</div>
-          <div className="stat-card__hint">邮箱、手机号与会话状态概览</div>
-        </div>
-      </div>
-
-      <div className="account-card-grid">
-        <Card>
-          <CardTitle>我的账户</CardTitle>
-          <CardDescription>查看基础资料与当前认证状态。</CardDescription>
-          <div className="account-summary-grid" style={{ marginTop: 'var(--space-5)' }}>
-            <div className="summary-card">
-              <div className="summary-card__label">用户名</div>
-              <div id="username-display" data-testid="username-display" className="summary-card__value">
-                {user.username}
+    <AccountShell title="账户概览" description="MDT 生态统一身份、安全、设备与授权管理。">
+      {user ? (
+        <div className="account-dashboard" data-testid="account-dashboard">
+          <AccountSection title="身份摘要" description="用于 MDT 生态服务的统一账户。">
+            <div className="identity-summary">
+              <div className="identity-summary__avatar" aria-hidden="true">
+                {user.avatar_url ? <img src={user.avatar_url} alt="" /> : initial(user.username)}
               </div>
-              <div className="summary-card__meta">角色：{user.role === 'admin' ? '管理员' : '用户'}</div>
-            </div>
-            <div className="summary-card">
-              <div className="summary-card__label">邮箱状态</div>
-              <div className="summary-card__value">{user.email_verified ? '已验证' : '待验证'}</div>
-              <div id="verified-badge" data-testid="verified-badge" className="summary-card__meta text-truncate">
-                {user.email}
-              </div>
-            </div>
-            <div className="summary-card">
-              <div className="summary-card__label">注册时间</div>
-              <div className="summary-card__value">{formatDate(user.created_at)}</div>
-              <div className="summary-card__meta">最近登录见下方记录</div>
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <CardTitle>手机号绑定</CardTitle>
-          <CardDescription>用于提升账户安全性与恢复能力。</CardDescription>
-          <div className="info-list" style={{ marginTop: 'var(--space-5)' }}>
-            {phoneStatus.phone ? (
-              <div className="info-row">
-                <div className="info-row__main">
-                  <span className={`info-row__icon ${phoneStatus.verified ? 'info-row__icon--success' : 'info-row__icon--warning'}`}>📱</span>
-                  <div className="info-row__content">
-                    <div className="info-row__label">已绑定手机号</div>
-                    <div className="info-row__value">{phoneStatus.phone}</div>
-                    <div className="info-row__meta">{phoneStatus.verified ? '当前手机号已验证。' : '当前手机号尚未验证。'}</div>
-                  </div>
-                </div>
-                <div className="info-row__actions">
-                  <span className={`status-badge ${phoneStatus.verified ? 'status-badge--success' : 'status-badge--warning'}`}>
-                    {phoneStatus.verified ? '已验证' : '待验证'}
-                  </span>
+              <div className="identity-summary__main">
+                <h2>{user.username}</h2>
+                <p>{user.email}</p>
+                <div className="identity-summary__statuses">
+                  <StatusLabel needsAction={!user.email_verified}>{user.email_verified ? '邮箱已验证' : '邮箱待验证'}</StatusLabel>
+                  <StatusLabel needsAction={!user.phone_verified}>{user.phone_verified ? '手机号已绑定' : '未绑定手机号'}</StatusLabel>
                 </div>
               </div>
-            ) : (
-              <div className="stack stack--sm">
-                <TextField
-                  label="手机号"
-                  type="tel"
-                  placeholder="请输入手机号"
-                  value={smsPhone}
-                  onChange={(e) => setSmsPhone(e.target.value)}
-                />
-                <div className="cluster">
-                  <Button onClick={handleSendSms} loading={smsLoading} disabled={smsCooldownSeconds > 0}>
-                    {smsCooldownSeconds > 0 ? `重新发送 (${smsCooldownSeconds}s)` : '发送验证码'}
-                  </Button>
-                </div>
-                {smsSent ? (
-                  <div className="cluster" style={{ alignItems: 'end' }}>
-                    <div style={{ flex: 1, minWidth: '12rem' }}>
-                      <TextField
-                        label="验证码"
-                        type="text"
-                        placeholder="输入验证码"
-                        value={smsCode}
-                        onChange={(e) => setSmsCode(e.target.value)}
-                      />
-                    </div>
-                    <Button variant="secondary" onClick={handleVerifySms} loading={smsLoading}>
-                      验证
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      <div className="account-card-grid">
-        <Card>
-          <div className="card__header">
-            <div>
-              <CardTitle>通知中心</CardTitle>
-              <CardDescription>查看平台消息并处理未读通知。</CardDescription>
+              <Link className="account-text-link identity-summary__action" to="/profile">管理个人资料 <span aria-hidden="true">→</span></Link>
             </div>
-            {unreadCount > 0 ? (
-              <Button size="sm" variant="ghost" onClick={handleMarkAllRead}>
-                全部已读
-              </Button>
-            ) : null}
-          </div>
-          {notifications.length === 0 ? (
-            <div className="empty-state">暂无通知</div>
-          ) : (
-            <div className="notice-list">
-              {notifications.slice(0, 6).map((n) => (
-                <div key={n.id} className={`notice-item ${n.is_read ? '' : 'notice-item--unread'}`.trim()}>
-                  <div className="notice-item__header">
-                    <span className="notice-item__title">{n.title}</span>
-                    <span className="notice-item__date">{formatDate(n.created_at)}</span>
-                  </div>
-                  <p className="notice-item__content">{n.content}</p>
-                  {!n.is_read ? (
-                    <div className="notice-item__footer">
-                      <Button size="sm" variant="ghost" onClick={() => handleMarkNotificationRead(n.id)}>
-                        标记已读
-                      </Button>
-                    </div>
+          </AccountSection>
+
+          <AccountSection title="账户安全" description="根据当前账户设置显示需要处理的事项。">
+            <div className={`security-overview${securityIssues ? ' security-overview--attention' : ''}`} role="status">
+              <strong>{securityIssues ? `需要完成 ${securityIssues} 项安全设置` : '未发现需要处理的安全问题'}</strong>
+              {securityIssues ? (
+                <ul>
+                  {!user.email_verified ? (
+                    <li>
+                      邮箱尚未验证，可用于账号恢复
+                      <Button type="button" variant="secondary" size="sm" onClick={sendVerificationEmail}>发送验证邮件</Button>
+                    </li>
                   ) : null}
-                </div>
-              ))}
+                  {!user.phone_verified ? (
+                    <li>手机号尚未绑定，可在 <Link to="/security">登录与安全</Link> 中完成。</li>
+                  ) : null}
+                </ul>
+              ) : null}
             </div>
-          )}
-        </Card>
+            <dl className="account-facts">
+              <div><dt>邮箱</dt><dd>{user.email_verified ? '已验证' : '待验证'}</dd></div>
+              <div><dt>手机号</dt><dd>{user.phone_verified ? (user.phone_masked || '已绑定') : '未绑定'}</dd></div>
+              <div><dt>最近登录</dt><dd>
+                <AccountLoadState loading={loginLogs.loading} error={loginLogs.error} retry={loginLogs.reload}>
+                  {latestLogin ? formatAccountDate(latestLogin, true) : '暂无登录记录'}
+                </AccountLoadState>
+              </dd></div>
+            </dl>
+            <Link className="account-text-link account-section__inline-link" to="/security">查看登录与安全 <span aria-hidden="true">→</span></Link>
+          </AccountSection>
 
-        <Card>
-          <CardTitle>登录记录</CardTitle>
-          <CardDescription>按时间查看近期账户访问活动。</CardDescription>
-          <div style={{ marginTop: 'var(--space-5)' }}>
-            {loginLogs.length === 0 ? (
-              <div className="empty-state">暂无登录记录</div>
-            ) : (
-              <div className="info-list" id="login-logs-container" data-testid="login-logs-container">
-                {loginLogs.slice(0, 8).map((log) => (
-                  <div key={log.id} className="info-row log-item">
-                    <div className="info-row__main">
-                      <span className={`info-row__icon ${log.login_type === 'oauth' ? 'info-row__icon--info' : 'info-row__icon--primary'}`}>
-                        {log.login_type === 'oauth' ? '🔐' : '🖥️'}
-                      </span>
-                      <div className="info-row__content">
-                        <div className="info-row__label">{log.login_type === 'oauth' ? 'OAuth 登录' : 'Web 登录'}</div>
-                        <div className="info-row__value">{log.ip}</div>
-                        <div className="info-row__meta">{log.device || '未知设备'} · {formatDateTime(log.created_at)}</div>
+          <AccountSection
+            title="最近设备"
+            description="近期访问过 MindAuth 的浏览器与客户端。"
+            action={<Link className="account-text-link" to="/sessions">查看全部 <span aria-hidden="true">→</span></Link>}
+          >
+            <AccountLoadState loading={sessions.loading} error={sessions.error} retry={sessions.reload}>
+              {sessionItems.length ? (
+                <div className="account-list">
+                  {sessionItems.slice(0, 3).map((session) => (
+                    <div className="account-list__item" key={session.id}>
+                      <div>
+                        <strong>{session.device_info || (session.session_type === 'native' ? 'Native 客户端' : 'Web 浏览器')}</strong>
+                        <p>{session.ip_address || 'IP 未提供'} · 最近活动 {formatAccountDate(session.last_active_at, true)}</p>
                       </div>
+                      {session.is_current ? <StatusLabel>当前设备</StatusLabel> : null}
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
+                  ))}
+                </div>
+              ) : <AccountEmptyState>没有活跃的登录设备。</AccountEmptyState>}
+            </AccountLoadState>
+          </AccountSection>
 
-      <Card>
-        <CardTitle>活跃会话</CardTitle>
-        <CardDescription>查看并注销登录设备。</CardDescription>
-        <div style={{ marginTop: 'var(--space-5)' }}>
-          <ResponsiveTable
-            columns={[
-              { header: 'IP', accessor: 'ip', render: (s) => s.ip_address },
-              { header: '设备', accessor: 'device', render: (s) => s.device_info || '未知' },
-              { header: '最近活跃', accessor: 'last_active', render: (s) => formatDateTime(s.last_active_at) },
-              {
-                header: '状态',
-                accessor: 'status',
-                render: (s) => (
-                  <span className={`status-badge ${s.is_current ? 'status-badge--success' : 'status-badge--info'}`}>
-                    {s.is_current ? '当前会话' : '活跃'}
-                  </span>
-                ),
-              },
-              {
-                header: '操作',
-                accessor: 'action',
-                render: (s) => s.is_current ? '当前设备' : (
-                  <Button variant="danger" size="sm" loading={revokingSessionId === s.id} onClick={() => revokeSession(s)}>
-                    注销
-                  </Button>
-                ),
-              },
-            ]}
-            data={sessions}
-            keyExtractor={(s) => s.id}
-            emptyMessage="暂无活跃会话"
-          />
-        </div>
-      </Card>
+          <AccountSection
+            title="已授权应用"
+            description="可以查看应用获得的权限并随时撤销授权。"
+            action={<Link className="account-text-link" to="/authorizations">查看全部 <span aria-hidden="true">→</span></Link>}
+          >
+            <AccountLoadState loading={authorizations.loading} error={authorizations.error} retry={authorizations.reload}>
+              {authorizations.data?.authorizations.length ? (
+                <div className="account-list">
+                  {authorizations.data.authorizations.slice(0, 2).map((authorization) => (
+                    <div className="account-list__item" key={authorization.id}>
+                      <div>
+                        <strong>{authorization.client_name}</strong>
+                        <p>{authorization.client_id} · {authorization.scope || '未提供权限说明'}</p>
+                      </div>
+                      <span className="account-list__meta">最近使用 {formatAccountDate(authorization.last_used_at, true)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : <AccountEmptyState>没有已授权的应用。</AccountEmptyState>}
+            </AccountLoadState>
+          </AccountSection>
 
-      <Card>
-        <CardTitle>授权应用</CardTitle>
-        <CardDescription>查看已经通过 MindAuth 建立授权关系的应用。</CardDescription>
-        <div id="authorizations-container" data-testid="authorizations-container" style={{ marginTop: 'var(--space-5)' }}>
-          {authorizations.length === 0 ? (
-            <div className="empty-state">暂无授权应用</div>
-          ) : (
-            <ResponsiveTable
-              columns={[
-                { header: '应用', accessor: 'name', render: (a) => a.client_name },
-                { header: '权限', accessor: 'scope', render: (a) => a.scope },
-                { header: '授权时间', accessor: 'created', render: (a) => formatDate(a.created_at) },
-                {
-                  header: '最近使用',
-                  accessor: 'last_used',
-                  render: (a) => (a.last_used_at ? formatDate(a.last_used_at) : '—'),
-                },
-              ]}
-              data={authorizations}
-              keyExtractor={(a) => a.id}
-              emptyMessage="暂无授权应用"
-            />
-          )}
+          <AccountSection
+            title="重要通知"
+            description="显示最近的账户与安全消息。"
+            action={<Link className="account-text-link" to="/notifications">通知中心 <span aria-hidden="true">→</span></Link>}
+          >
+            <AccountLoadState loading={notifications.loading} error={notifications.error} retry={notifications.reload}>
+              {notifications.data?.notifications.length ? (
+                <div className="account-list">
+                  {notifications.data.notifications.slice(0, 3).map((notification) => (
+                    <article className="account-list__item account-notice" key={notification.id}>
+                      <div>
+                        <strong>{notification.title}</strong>
+                        {notification.content ? <p>{notification.content}</p> : null}
+                      </div>
+                      <span className="account-list__meta">{formatAccountDate(notification.created_at)}</span>
+                    </article>
+                  ))}
+                </div>
+              ) : <AccountEmptyState>暂无需要处理的通知。</AccountEmptyState>}
+            </AccountLoadState>
+          </AccountSection>
         </div>
-      </Card>
+      ) : null}
     </AccountShell>
   );
 }

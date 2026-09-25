@@ -9,6 +9,7 @@ import { UserApp } from '@/user/UserApp';
 import '@/design/tokens.css';
 import '@/design/components.css';
 import '@/design/layout.css';
+import '@/user/account-center.css';
 
 // Redirect legacy hash routes before rendering
 normalizeLegacyHashRoutes();

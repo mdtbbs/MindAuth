@@ -107,7 +107,8 @@ test.describe('完整登录流程', () => {
     const username = await registerUser(page, 'pw_full');
 
     // 退出登录，再手动登录一次验证登录流程
-    await page.click('[data-testid="logout-btn"]');
+    await page.locator('.account-user-menu summary').click();
+    await page.getByRole('button', { name: '退出登录' }).click();
     await page.waitForURL('**/login', { timeout: 5000 });
 
     await page.waitForSelector('#login-form', { timeout: 5000 });
@@ -116,9 +117,8 @@ test.describe('完整登录流程', () => {
     await page.click('#login-form button[type="submit"]');
 
     // dashboard 渲染并展示用户信息
-    await page.waitForSelector('#username-display', { timeout: 10000 });
-    await expect(page.locator('#username-display')).toContainText(username);
-    await expect(page.locator('#verified-badge')).toBeVisible();
+    await expect(page.locator('.identity-summary__main h2')).toContainText(username, { timeout: 10000 });
+    await expect(page.locator('.identity-summary__statuses')).toContainText('邮箱已验证');
   });
 });
 
@@ -204,7 +204,7 @@ test.describe('邮箱验证状态', () => {
 
     // 注册流程已完成邮箱验证码校验，邮箱状态摘要卡应显示「已验证」。
     await expect(page.getByText('已验证', { exact: true })).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('#verified-badge')).toBeVisible();
+    await expect(page.locator('.identity-summary__statuses')).toContainText('邮箱已验证');
   });
 });
 
@@ -324,20 +324,19 @@ test.describe.serial('账户自助功能', () => {
     await registerUser(page, 'pw_account');
 
     await page.goto('/account-settings');
-    // 账号与安全 tab：修改密码 + 修改邮箱（页头另有同名快捷按钮，需限定侧栏导航）
-    await page.locator('.settings-nav__button', { hasText: '账号与安全' }).click({ timeout: 8000 });
+    await page.waitForURL('**/profile', { timeout: 5000 });
+    await page.goto('/security');
     await expect(page.locator('#change-password-form')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('#change-email-form')).toBeVisible();
-    // 危险操作 tab：删除账户
-    await page.locator('.settings-nav__button', { hasText: '危险操作' }).click();
-    await expect(page.locator('[data-testid="delete-account-form"]')).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: '删除账户' }).click();
+    await expect(page.getByRole('dialog', { name: '确认删除账户' })).toBeVisible();
+    await expect(page.getByRole('dialog').getByLabel('当前密码')).toBeVisible();
   });
 
   test('修改密码功能', async ({ page }) => {
     await registerUser(page, 'pw_pwd');
 
-    await page.goto('/account-settings');
-    await page.locator('.settings-nav__button', { hasText: '账号与安全' }).click({ timeout: 8000 });
+    await page.goto('/security');
     await page.waitForSelector('#change-password-form', { timeout: 5000 });
     await page.fill('#old_password', 'TestPass123');
     await page.fill('#new_password', 'NewPass123');
@@ -350,8 +349,7 @@ test.describe.serial('账户自助功能', () => {
   test('错误旧密码修改失败', async ({ page }) => {
     await registerUser(page, 'pw_pwd_err');
 
-    await page.goto('/account-settings');
-    await page.locator('.settings-nav__button', { hasText: '账号与安全' }).click({ timeout: 8000 });
+    await page.goto('/security');
     await page.waitForSelector('#change-password-form', { timeout: 5000 });
     await page.fill('#old_password', 'wrongpassword');
     await page.fill('#new_password', 'NewPass123');
@@ -362,20 +360,49 @@ test.describe.serial('账户自助功能', () => {
 });
 
 test.describe('Dashboard日志和授权', () => {
+  test('概览展示身份中心内容并移除统计 KPI', async ({ page }) => {
+    const username = await registerUser(page, 'pw_center');
+    await expect(page.getByRole('heading', { name: '身份摘要' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: username })).toBeVisible();
+    await expect(page.getByText('安全状态 3/3')).toHaveCount(0);
+    await expect(page.getByText('未读通知', { exact: true })).toHaveCount(0);
+
+    await page.setViewportSize({ width: 820, height: 900 });
+    await expect(page.locator('.account-shell__sidebar')).toBeVisible();
+    await expect(page.getByRole('button', { name: '打开导航' })).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    await page.emulateMedia({ colorScheme: 'dark' });
+    const darkShellColor = await page.locator('.account-shell').evaluate((element) => getComputedStyle(element).backgroundColor);
+    expect(darkShellColor).toBe('rgb(17, 21, 27)');
+    await page.emulateMedia({ colorScheme: 'light' });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const menu = page.getByRole('button', { name: '打开导航' });
+    await expect(menu).toBeVisible();
+    await menu.click();
+    const navigation = page.getByRole('navigation', { name: '账户导航' }).last();
+    await expect(navigation.getByRole('link', { name: '登录设备' })).toBeVisible();
+    await navigation.getByRole('link', { name: '登录设备' }).click();
+    await expect(page).toHaveURL(/\/sessions$/);
+    await expect(page.getByRole('heading', { name: '登录设备', exact: true })).toBeVisible();
+  });
+
   test('登录后显示登录记录', async ({ page }) => {
     await registerUser(page, 'pw_logs');
 
     // 注册时自动登录会产生一条 Web 登录记录
-    await page.waitForSelector('#login-logs-container', { timeout: 8000 });
-    const logs = await page.locator('.log-item').count();
+    await page.goto('/activity');
+    await page.waitForSelector('.account-activity-table tbody tr', { timeout: 8000 });
+    const logs = await page.locator('.account-activity-table tbody tr').count();
     expect(logs).toBeGreaterThanOrEqual(1);
   });
 
   test('登录后显示授权应用', async ({ page }) => {
     await registerUser(page, 'pw_auth');
 
-    await page.waitForSelector('#authorizations-container', { timeout: 8000 });
-    const container = await page.locator('#authorizations-container').textContent();
-    expect(container).toContain('暂无授权应用');
+    await page.goto('/authorizations');
+    await expect(page.getByText('没有已授权的应用')).toBeVisible({ timeout: 8000 });
   });
 });
