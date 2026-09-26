@@ -14,6 +14,7 @@ const passwordLogin = require('../modules/auth/passwordLogin');
 const challengeManager = require('../modules/challenges/challengeManager');
 const notificationCenter = require('../modules/notifications/notificationCenter');
 const config = require('../config');
+const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const loginRateLimiter = createClientAwareRateLimiter(config.rateLimit.login);
@@ -164,6 +165,17 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   const emailLower = String(email).toLowerCase().trim();
   if (!isValidEmail(emailLower)) {
     return res.status(400).json({ success: false, message: '邮箱格式不正确' });
+  }
+
+  let emailDecision;
+  try {
+    emailDecision = await emailPolicy.checkEmail(emailLower, { purpose: 'register', ipAddress: getClientIp(req) });
+  } catch (err) {
+    console.error('[Register] Email policy lookup failed:', err.message);
+    return res.status(503).json({ success: false, code: 'EMAIL_POLICY_UNAVAILABLE', message: '注册服务暂不可用，请稍后重试' });
+  }
+  if (!emailDecision.allowed) {
+    return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
   }
 
   if (!isValidPassword(password)) {

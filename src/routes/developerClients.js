@@ -38,7 +38,7 @@ router.put('/:id', async (req, res) => {
 router.post('/:id/submit', async (req, res) => {
   try {
     await registry.submitOwnerApplication(req.user.id, Number(req.params.id));
-    res.json({ success: true, status: 'approved' });
+    res.json({ success: true, status: 'pending' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message || '提交审核失败' });
   }

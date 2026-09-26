@@ -42,7 +42,7 @@ async function adminLogin(page) {
   await page.getByPlaceholder('管理员用户名').fill('testadmin');
   await page.getByPlaceholder('管理员密码').fill('AdminPass123');
   await page.getByRole('button', { name: '登录' }).click();
-  await page.waitForSelector('.admin-sidebar__brand-title', { timeout: 8000 });
+  await page.getByRole('navigation', { name: '管理导航' }).waitFor({ timeout: 8000 });
 }
 
 // Clear rate limits before all tests
@@ -153,12 +153,12 @@ test.describe('管理员后台', () => {
   });
 
   test('管理员登录成功', async ({ page }) => {
-    await expect(page.locator('.admin-sidebar__brand-title')).toContainText('MindAuth Admin');
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible();
+    await expect(page.locator('.admin-sidebar__brand')).toContainText('MindAuth');
+    await expect(page.getByRole('heading', { name: '总览' })).toBeVisible();
   });
 
   test('查看邮件配置', async ({ page }) => {
-    await page.goto('/admin#/settings');
+    await page.goto('/admin#/messaging');
     await expect(page.getByPlaceholder('smtp.example.com')).toBeVisible({ timeout: 8000 });
     await expect(page.getByPlaceholder('SMTP 用户名')).toBeVisible();
     await expect(page.getByRole('button', { name: '保存配置' })).toBeVisible();
@@ -188,7 +188,7 @@ test.describe('管理员后台', () => {
 
   test('退出登录', async ({ page }) => {
     // 窄屏（mobile 项目）下侧栏折叠在「显示菜单」里
-    const menuToggle = page.getByRole('button', { name: '显示菜单' });
+    const menuToggle = page.getByRole('button', { name: '菜单' });
     if (await menuToggle.isVisible().catch(() => false)) {
       await menuToggle.click();
     }
@@ -218,26 +218,24 @@ test.describe.serial('管理员用户管理', () => {
   test.beforeEach(async ({ page }) => {
     await adminLogin(page);
     await page.goto('/admin#/users');
-    await page.waitForSelector('table tbody tr', { timeout: 10000 });
+    await expect(page.getByRole('heading', { name: '用户', exact: true })).toBeVisible({ timeout: 10000 });
   });
 
   test('查看用户列表', async ({ page }) => {
-    // 列表分页展示（testadmin 可能不在第一页，用搜索用例单独覆盖）
+    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 10000 });
     const users = await page.locator('table tbody tr').count();
     expect(users).toBeGreaterThan(0);
   });
 
   test('搜索用户', async ({ page }) => {
-    await page.getByPlaceholder('搜索用户名或邮箱').fill('testadmin');
-    await page.getByRole('button', { name: '搜索' }).click();
+    await page.getByPlaceholder('搜索用户名 / 邮箱 / 用户 ID / IP').fill('testadmin');
     await expect(page.locator('table tbody tr', { hasText: 'testadmin' }).first()).toBeVisible({ timeout: 8000 });
   });
 
   test('按角色筛选', async ({ page }) => {
     // 前面的用例注册过普通用户，按「普通用户」过滤应有结果
     await page.locator('select').first().selectOption('user');
-    await page.getByRole('button', { name: '搜索' }).click();
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 8000 });
     const users = await page.locator('table tbody tr').count();
     expect(users).toBeGreaterThan(0);
   });
@@ -394,9 +392,8 @@ test.describe('Dashboard日志和授权', () => {
 
     // 注册时自动登录会产生一条 Web 登录记录
     await page.goto('/activity');
-    await page.waitForSelector('.account-activity-table tbody tr', { timeout: 8000 });
-    const logs = await page.locator('.account-activity-table tbody tr').count();
-    expect(logs).toBeGreaterThanOrEqual(1);
+    await expect(page.getByRole('heading', { name: '近期登录' })).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('.account-activity-table tbody tr, .account-activity-list__item').first()).toContainText('Web 登录');
   });
 
   test('登录后显示授权应用', async ({ page }) => {

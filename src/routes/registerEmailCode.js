@@ -29,6 +29,8 @@ const { isValidEmail } = require('../utils/validation');
 const { sendRegistrationCodeEmail } = require('../utils/email');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const config = require('../config');
+const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
+const { getClientIp } = require('../utils/request');
 
 const CODE_TTL = 300; // 5 minutes
 const MAX_VERIFY_FAILURES = 5;
@@ -80,6 +82,11 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
         code: 'INVALID_EMAIL',
         message: '邮箱格式不正确',
       });
+    }
+
+    const policy = await emailPolicy.checkEmail(email, { purpose: 'register', ipAddress: getClientIp(req) });
+    if (!policy.allowed) {
+      return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
     }
 
     // 1. Check whether email is already registered.

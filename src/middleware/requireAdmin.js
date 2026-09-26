@@ -7,10 +7,10 @@ const {
 
 const ROLE_PERMISSIONS = {
   super_admin: ['*'],
-  user_admin: ['users.read', 'users.write', 'users.reset_password', 'users.delete', 'users.ban', 'users.unlock', 'authorizations.read', 'login_logs.read'],
-  security_admin: ['users.read', 'users.ban', 'users.unlock', 'audit_logs.read', 'sms_audit.read', 'ip_bans.read', 'ip_bans.write'],
-  config_admin: ['config.read', 'config.write', 'clients.read', 'clients.write', 'sms_config.read', 'sms_config.write', 'email_config.read', 'email_config.write'],
-  readonly_admin: ['users.read', 'authorizations.read', 'login_logs.read', 'audit_logs.read', 'sms_audit.read', 'clients.read', 'config.read', 'sms_config.read', 'email_config.read', 'ip_bans.read'],
+  user_admin: ['dashboard.read', 'users.read', 'users.write', 'users.reset_password', 'users.delete', 'users.ban', 'users.unlock', 'authorizations.read', 'authorizations.revoke', 'login_logs.read', 'sessions.read', 'sessions.revoke'],
+  security_admin: ['dashboard.read', 'users.read', 'users.ban', 'users.unlock', 'audit_logs.read', 'sms_audit.read', 'ip_bans.read', 'ip_bans.write', 'email_rules.read', 'email_rules.write', 'sessions.read', 'sessions.revoke', 'security.read'],
+  config_admin: ['dashboard.read', 'config.read', 'config.write', 'clients.read', 'clients.write', 'developers.read', 'developers.review', 'sms_config.read', 'sms_config.write', 'email_config.read', 'email_config.write', 'email_rules.read', 'email_rules.write'],
+  readonly_admin: ['dashboard.read', 'users.read', 'authorizations.read', 'login_logs.read', 'audit_logs.read', 'sms_audit.read', 'clients.read', 'developers.read', 'config.read', 'sms_config.read', 'email_config.read', 'ip_bans.read', 'email_rules.read', 'sessions.read', 'security.read'],
 };
 
 function normalizeRole(role) {

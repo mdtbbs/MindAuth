@@ -22,16 +22,18 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | 角色 | 权限 |
 |------|------|
 | `super_admin` | `*`（全部权限） |
-| `user_admin` | `users.read`, `users.write`, `users.reset_password`, `users.delete`, `users.ban`, `users.unlock`, `authorizations.read`, `login_logs.read` |
-| `security_admin` | `users.read`, `users.ban`, `users.unlock`, `audit_logs.read`, `sms_audit.read`, `ip_bans.read`, `ip_bans.write` |
-| `config_admin` | `config.read`, `config.write`, `clients.read`, `clients.write`, `sms_config.read`, `sms_config.write`, `email_config.read`, `email_config.write` |
-| `readonly_admin` | `users.read`, `authorizations.read`, `login_logs.read`, `audit_logs.read`, `sms_audit.read`, `clients.read`, `config.read`, `sms_config.read`, `email_config.read`, `ip_bans.read` |
+| `user_admin` | `dashboard.read`，用户读写/处置/重置密码/删除，`authorizations.read/revoke`，`sessions.read/revoke`，`login_logs.read` |
+| `security_admin` | `dashboard.read`，用户查看/封禁/解锁，审计与短信日志，`ip_bans.read/write`，`email_rules.read/write`，`sessions.read/revoke`，`security.read` |
+| `config_admin` | `dashboard.read`，`config.read/write`，OAuth 客户端读写，`developers.read/review`，邮件/短信配置读写，`email_rules.read/write` |
+| `readonly_admin` | `dashboard.read`，用户/授权/会话/登录/审计/短信/客户端/配置/IP 规则/邮箱策略/风控只读权限 |
 
 额外约束（`users.js` 内实现，权限之上叠加）：
 
 - 对管理员角色账号的操作（改角色/删除/封禁等）仅 `super_admin` 可执行；
 - 不能对自己的账号执行删除/封禁/禁言/自降级；
 - 不能删除、封禁或降级**最后一个** `super_admin`/`admin`。
+
+邮箱策略权限为 `email_rules.read` / `email_rules.write`；会话为 `sessions.read` / `sessions.revoke`；开发者应用列表与审核分别为 `developers.read` / `developers.review`。管理员账号页使用 `admins.read` / `admins.write`，当前仅 `super_admin`。
 
 ## 管理员会话（auth.js）
 
@@ -78,7 +80,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 |------|------|------|------|----------|------|
 | GET | `/api/admin/clients` | `clients.read` | — | — | 列表：`id, name, client_id, redirect_uri, require_pkce, created_at`（**不含 secret**） |
 | POST | `/api/admin/clients` | `clients.write` | 20 次/小时 | `name`*, `redirect_uri`*, `require_pkce` | 创建客户端（见下文） |
-| PUT | `/api/admin/clients/:id` | `clients.write` | — | `name`*, `redirect_uri`*, `require_pkce` | 更新；`require_pkce` 省略时不改动该标志；`redirect_uri` 同样过 SSRF 校验 |
+| PUT | `/api/admin/clients/:id` | `clients.write` | — | `name`*, `redirect_uri`*, `require_pkce`, `scopes` | 更新客户端名称、回调地址、PKCE 与 scope；scope 必须是非空且无重复的受支持列表。已启用客户端的 scope 发生变化时会在事务中撤销全部授权和 refresh token，并清除关联 access token；`require_pkce` 省略时不改动该标志；回调地址过 SSRF 校验 |
 | POST | `/api/admin/clients/:id/rotate-secret` | `clients.write` | — | — | 轮换客户端密钥：旧 secret 立即失效，返回 `{ client_id, client_secret }`，**新 secret 仅此一次回显**；客户端不存在 404；写审计 `client.rotate_secret` |
 | DELETE | `/api/admin/clients/:id` | `clients.write` | — | — | 删除客户端 |
 
@@ -196,20 +198,52 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | 方法 | 路径 | 权限 | 限流 | 参数摘要 | 说明 |
 |------|------|------|------|----------|------|
 | GET | `/api/admin/authorizations` | `authorizations.read` | — | query: `page`, `limit`(默认 50), `user_id` | OAuth 授权记录（联查用户名与客户端名），按 `last_used_at` 倒序 |
-| DELETE | `/api/admin/authorizations/:id` | `users.write` | — | — | 撤销一条授权记录，并经 `oauthIssuer.revokeAuthorization` **联动吊销该 user/client 的全部 refresh token（MySQL）与 access token（Redis）**；记录不存在 404 |
-| GET | `/api/admin/login-logs` | `login_logs.read` | — | query: `page`, `limit`(默认 100), `user_id`, `login_type`(web/oauth) | 登录日志（含 ip/device/login_type） |
+| DELETE | `/api/admin/authorizations/:id` | `authorizations.revoke` | — | — | 撤销授权并联动吊销对应 refresh/access token；写管理员审计 |
+| GET | `/api/admin/login-logs` | `login_logs.read` | — | query: `page`, `limit`, `user_id`, `login_type`, `ip`, `start_date`, `end_date` | 仅记录成功登录，含 IP、设备和类型 |
 
 ## 管理审计日志（auditLogs.js）
 
 | 方法 | 路径 | 权限 | 限流 | 参数摘要 | 说明 |
 |------|------|------|------|----------|------|
-| GET | `/api/admin/audit-logs` | `audit_logs.read` | — | query: `page`, `limit`(≤100，默认 50), `action`, `target_type`, `admin_id`, `start_date`, `end_date` | 管理员操作审计（`admin_audit_logs`），按时间倒序，返回 `logs` + `pagination` |
+| GET | `/api/admin/audit-logs` | `audit_logs.read` | — | query: `page`, `limit`(≤100，默认 50), `action`, `target_type`, `target_id`, `admin_id`, `start_date`, `end_date` | 管理员操作审计（`admin_audit_logs`），按时间倒序，返回 `logs` + `pagination` |
 
 ## 短信审计日志（smsAuditLogs.js）
 
 | 方法 | 路径 | 权限 | 限流 | 参数摘要 | 说明 |
 |------|------|------|------|----------|------|
 | GET | `/api/admin/sms-audit-logs` | `sms_audit.read` | — | query: `page`, `limit`(≤100，默认 50), `user_id`, `action`(send_code/verify_code), `success`(0/1/true/false), `code`, `ip_address`, `phone_last4`(4 位数字), `start_date`, `end_date` | 短信发送/校验审计；过滤参数非法返回 400 并附错误 `code`（如 `INVALID_ACTION`）；手机号仅存脱敏值 `phone_masked` |
+
+## 邮箱策略（emailPolicy.js）
+
+写操作要求 `admin_session`、CSRF 双提交校验、对应 RBAC 权限和限流。规则存入 `email_domain_rules`，事件只记邮箱域名，不存完整邮箱或验证码。
+
+| 方法 | 路径 | 权限 | 参数摘要 | 说明 |
+|------|------|------|----------|------|
+| GET | `/api/admin/email-policy` | `email_rules.read` | query: `search`, `policy`, `enabled` | 返回最多 500 条规则和 `allowlist_mode` |
+| POST | `/api/admin/email-policy` | `email_rules.write` | `match_type`, `pattern`, `policy`, `reason`, `enabled` | 新增规则；域名小写、IDN 规范化并移除 `@` |
+| PUT | `/api/admin/email-policy/:id` | `email_rules.write` | 同上 | 更新规则并失效共享缓存 |
+| DELETE | `/api/admin/email-policy/:id` | `email_rules.write` | — | 删除规则并审计 |
+| PATCH | `/api/admin/email-policy/mode` | `email_rules.write` | `allowlist_mode`(boolean) | 切换白名单模式；deny 始终优先 |
+| POST | `/api/admin/email-policy/batch` | `email_rules.write` | `patterns`（换行/逗号/空格分隔，最多 200 项） | 批量新增 exact deny 规则，重复项跳过 |
+
+普通模式允许未命中地址，deny 命中则拒绝；白名单模式只允许命中 allow 且未命中 deny 的地址。用户侧拒绝统一返回 `EMAIL_DOMAIN_BLOCKED`，不泄露规则或备注。
+
+统一服务也接入 `POST /api/register/send-code`、`POST /api/register`（`purpose=register`）、`POST /api/account/change-email`（`change_email`）、`POST /api/email-verification/send` 与 `/verify`（`verification`）、`POST /api/v1/native/register`（`native_register`）、社交账号自动注册和管理员改邮箱（`admin_change_email`）。规则仅影响后续注册/验证/改邮箱，不会自动更改或封禁已存在账号。
+
+## 开发者应用审核与账号运营
+
+| 方法 | 路径 | 权限 | 参数摘要 | 说明 |
+|------|------|------|----------|------|
+| GET | `/api/admin/overview` | `dashboard.read` | — | 运营指标、待处理事项、近期活动与安全摘要 |
+| GET | `/api/admin/developer-applications` | `developers.read` | — | 列出第三方应用与审核状态 |
+| PATCH | `/api/admin/developer-applications/:id/review` | `developers.review` | `status`, `approved_scopes`, `review_reason` | 批准/拒绝；拒绝原因必填；停用或 scope 变更撤销现有授权与令牌 |
+| GET | `/api/admin/users/admins` | `admins.read` | — | 列出管理员、权限和最近登录；仅超级管理员 |
+| DELETE | `/api/admin/users/:id/sessions` | `sessions.revoke` | — | 注销用户全部 Web/Native 会话并审计 |
+| DELETE | `/api/admin/users/:id/sessions/:sessionId` | `sessions.revoke` | — | 注销单个会话；Native ID 使用 `native:` 前缀 |
+| DELETE | `/api/admin/users/:id/authorizations` | `authorizations.revoke` | — | 撤销用户全部客户端授权及对应 access/refresh token |
+| POST | `/api/admin/clients/:id/revoke-authorizations` | `clients.write` | — | 撤销客户端授权和令牌，不停用客户端 |
+| POST | `/api/admin/users/:id/email-verification/send` | `users.write` | — | 按邮箱策略检查后重发验证邮件 |
+| PUT | `/api/admin/users/:id/email` | `users.write` | `email`, `override_policy` | 发送验证邮件，验证后更新；策略覆盖仅限 super_admin 并记录审计 |
 
 ## 测试专用端点
 

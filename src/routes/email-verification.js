@@ -6,6 +6,8 @@ const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
+const { getClientIp } = require('../utils/request');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -41,6 +43,11 @@ router.post('/send', requireAuth, sendRateLimiter, async (req, res) => {
     // Check if already verified
     if (user.email_verified === 1) {
       return res.status(400).json({ success: false, message: '邮箱已验证' });
+    }
+
+    const emailDecision = await emailPolicy.checkEmail(user.email, { purpose: 'verification', userId: user.id, ipAddress: getClientIp(req) });
+    if (!emailDecision.allowed) {
+      return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
     }
 
     // Generate verification token — store only its hash server-side; the raw
@@ -103,6 +110,11 @@ router.post('/verify', async (req, res) => {
 
     if (!record) {
       return res.status(400).json({ success: false, message: '验证链接无效或已过期' });
+    }
+
+    const emailDecision = await emailPolicy.checkEmail(record.email, { purpose: 'verification', userId: record.user_id, ipAddress: getClientIp(req) });
+    if (!emailDecision.allowed) {
+      return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
     }
 
     // Update user email_verified and possibly email

@@ -81,32 +81,35 @@ frontend/src/
 
 ## 管理 SPA
 
-`AdminApp.tsx`（`HashRouter` → `AdminAuthProvider` → `ToastProvider` → `AdminRouter`）。登录页 `AdminLoginPage` 直接静态引入；其余 6 个页面全部经 `React.lazy` 代码分割，按需加载并以 `Suspense fallback={<LoadingState />}` 兜底：
+`AdminApp.tsx`（`HashRouter` → `AdminAuthProvider` → `ToastProvider` → `AdminRouter`）。登录页 `AdminLoginPage` 静态引入，业务页面使用 `React.lazy` 分割，并以 `Suspense fallback={<LoadingState />}` 兜底：
 
 | Hash 路径 | 页面组件（lazy） |
 |-----------|------------------|
-| `#/` 与 `#/dashboard` | `AdminDashboardPage` |
-| `#/users` | `AdminUsersPage` |
-| `#/clients` | `AdminClientsPage` |
-| `#/security` | `AdminSecurityPage` |
-| `#/settings` | `AdminSettingsPage` |
-| `#/logs` | `AdminLogsPage` |
-| `*` | `Navigate` → `#/` |
+| `#/`、`#/dashboard` | 总览 `AdminDashboardPage` |
+| `#/users`、`#/users/:id` | 用户列表与详情页 |
+| `#/admins`、`#/sessions` | 管理员、会话与授权 |
+| `#/risk`、`#/email-policy`、`#/ip-rules` | 风控中心、邮箱策略、IP 规则 |
+| `#/applications`、`#/clients` | 开发者应用审核、OAuth 应用 |
+| `#/messaging`、`#/registration`、`#/user-fields`、`#/appearance` | 邮件短信、注册认证、资料字段、登录页外观 |
+| `#/login-logs`、`#/admin-logs`、`#/sms-logs` | 登录记录、管理日志、短信记录 |
+| `#/security`、`#/settings`、`#/logs` | 兼容跳转至新路由 |
 
 `AdminRouter` 逻辑：`loading` 时显示 `LoadingState`；未登录（`admin === null`）渲染 `AdminLoginPage`；已登录则渲染 `AdminShell` 包裹的路由。
 
-**AdminShell 的 RBAC 导航过滤**：`NAV_ITEMS` 中除仪表盘外每项声明 `permission`，经 `useAdminAuth().hasPermission()` 过滤（`permissions` 含 `*` 或对应权限名才显示）：
+**AdminShell 的 RBAC 导航过滤**：导航按概览、账号、安全、开放平台、系统和记录分组；每项声明 permission，经 `useAdminAuth().hasPermission()` 过滤（`permissions` 含 `*` 或对应权限名才显示）。图标为内联 SVG；窄屏使用可关闭的抽屉导航。管理员用户名、角色和退出操作位于侧栏底部。
 
 | 导航项 | 权限名 |
 |--------|--------|
-| 仪表盘 | 无（始终显示） |
-| 用户管理 | `users.read` |
-| OAuth 客户端 | `clients.read` |
-| 安全设置 | `ip_bans.read` |
-| 系统配置 | `config.read` |
-| 日志查看 | `audit_logs.read` |
+| 总览 | `dashboard.read` |
+| 用户 / 管理员 / 会话 | `users.read` / `admins.read` / `sessions.read` |
+| 风控 / 邮箱策略 / IP 规则 | `security.read` / `email_rules.read` / `ip_bans.read` |
+| 应用申请 / OAuth 应用 | `developers.read` / `clients.read` |
+| 邮件短信 / 注册认证 / 用户字段 / 外观 | 对应 email、sms、config 读权限 |
+| 登录 / 管理 / 短信记录 | `login_logs.read` / `audit_logs.read` / `sms_audit.read` |
 
-**AdminSettingsPage 的 tab**：邮件配置 / 短信配置 / 系统配置 / 登录页外观 四个 tab（各自声明所需权限，经 `hasPermission` 过滤）。「登录页外观」tab 提供认证页自定义背景图的预览、上传与恢复默认（调用 `POST/DELETE /api/admin/auth-background`，写操作需 `config.write`）；系统配置 tab 的通用键值列表**隐藏 `auth_background_url`**，避免绕过「登录页外观」的旧文件清理逻辑形成双入口。
+系统配置默认展示人类可读的注册、密码、会话选项；原始 `system_config` 键值折叠在“高级配置”。邮件与短信共用页面并分 Tab；验证问题位于注册与认证页面；登录页背景维护独立路由，继续经 `POST/DELETE /api/admin/auth-background` 上传或恢复。
+
+用户列表用 `useResource`、防抖搜索和 AbortController，详情页分为概览、安全、会话、OAuth 授权、登录记录、通知与审计。管理日志的 JSON 详情使用 Dialog 展示；新列表处理 loading、error、empty 和重试状态。
 
 ## 与后端的契约
 

@@ -31,7 +31,7 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
     }
 
     for (const uri of uris) {
-      const validation = clientRegistry.validateRedirectUri(uri);
+      const validation = clientRegistry.validateManagedRedirectUri(uri);
       if (!validation.valid) return res.status(400).json({ success: false, message: validation.error });
     }
 
@@ -47,7 +47,7 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
   }
 });
 
-router.patch('/:id/review', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
+router.patch('/:id/review', requireAdmin, requireAdminPermission('developers.review'), async (req, res) => {
   try {
     await clientRegistry.reviewClient(parseInt(req.params.id, 10),
       { status: req.body?.status, approvedScopes: req.body?.approved_scopes },
@@ -81,6 +81,17 @@ router.post('/:id/rotate-secret', requireAdmin, requireAdminPermission('clients.
   }
 });
 
+router.post('/:id/revoke-authorizations', requireAdmin, requireAdminPermission('clients.write'), clientCreateLimiter, async (req, res) => {
+  try {
+    const result = await clientRegistry.revokeClientAuthorizations(parseInt(req.params.id, 10),
+      { adminId: req.adminUser.id, ipAddress: getClientIp(req) });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    const status = err.message === '客户端不存在' ? 404 : 500;
+    res.status(status).json({ success: false, message: err.message || '撤销客户端授权失败' });
+  }
+});
+
 // DELETE /clients/:id - Delete client
 router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
@@ -100,28 +111,31 @@ router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), asy
 router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, redirect_uri, redirect_uris, require_pkce } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce, scopes } = req.body;
     const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
     if (!name || !uris.length) {
       return res.status(400).json({ success: false, message: '名称和回调地址必填' });
     }
 
+    const current = await clientRegistry.getClient(parseInt(id, 10));
+    if (!current) return res.status(404).json({ success: false, message: '客户端不存在' });
     for (const uri of uris) {
-      const validation = clientRegistry.validateRedirectUri(uri);
+      const validation = clientRegistry.validateManagedRedirectUri(uri, current);
       if (!validation.valid) return res.status(400).json({ success: false, message: validation.error });
     }
 
     await clientRegistry.updateClient(
       parseInt(id),
-      { name, redirect_uris: uris, require_pkce },
+      { name, redirect_uris: uris, require_pkce, scopes },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 
     res.json({ success: true });
   } catch (err) {
     console.error('Update client error:', err);
-    res.status(500).json({ success: false, message: '更新失败' });
+    const status = err.message === '客户端不存在' ? 404 : 400;
+    res.status(status).json({ success: false, message: err.message || '更新失败' });
   }
 });
 

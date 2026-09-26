@@ -75,10 +75,26 @@ async function getAuthCode(request, clientId = CLIENT_ID) {
   const url = `/api/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`;
   const res = await request.get(url, { maxRedirects: 0 });
   expect(res.status()).toBe(302);
-  const location = res.headers()['location'];
-  const match = location.match(/code=([^&]+)/);
-  expect(match).toBeTruthy();
-  return match[1];
+  let location = new URL(res.headers()['location'], 'http://localhost');
+  if (location.pathname === '/authorize') {
+    const csrf = await (await request.get('/api/csrf-token')).json();
+    const consent = await request.post('/api/authorize/consent', {
+      headers: { 'X-CSRF-Token': csrf.csrf_token || '' },
+      data: {
+        decision: 'approve', client_id: location.searchParams.get('client_id'),
+        redirect_uri: location.searchParams.get('redirect_uri'), response_type: location.searchParams.get('response_type'),
+        state: location.searchParams.get('state'), scope: location.searchParams.get('scope'),
+        code_challenge: location.searchParams.get('code_challenge'), code_challenge_method: location.searchParams.get('code_challenge_method'),
+      },
+    });
+    expect(consent.status()).toBe(200);
+    const result = await consent.json();
+    expect(result.success).toBe(true);
+    location = new URL(result.redirect_to, 'http://localhost');
+  }
+  const code = location.searchParams.get('code');
+  expect(code).toBeTruthy();
+  return code;
 }
 
 /** Helper: exchange auth code for tokens */
@@ -88,6 +104,7 @@ async function exchangeToken(request, code, clientId = CLIENT_ID, clientSecret =
       code,
       client_id: clientId,
       client_secret: clientSecret,
+      redirect_uri: REDIRECT_URI,
       grant_type: 'authorization_code'
     }
   });
@@ -190,6 +207,7 @@ test.describe('POST /api/token — response shape', () => {
         code: 'x',
         client_id: 'bad_client',
         client_secret: 'bad_secret',
+        redirect_uri: REDIRECT_URI,
         grant_type: 'authorization_code'
       }
     });
@@ -204,6 +222,7 @@ test.describe('POST /api/token — response shape', () => {
         code: 'nonexistent_code',
         client_id: CLIENT_ID,
         client_secret: CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
         grant_type: 'authorization_code'
       }
     });

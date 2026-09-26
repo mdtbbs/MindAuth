@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '@/api/client';
 import { useAdminAuth } from '../AdminAuthProvider';
 import { useToast } from '@/shared/ToastProvider';
@@ -10,18 +11,25 @@ import { ResponsiveTable } from '@/shared/ResponsiveTable';
 import { SkeletonTable } from '@/shared/Skeleton';
 import type { AdminOAuthClient, AdminCreatedClient } from '@/api/types';
 
+const SUPPORTED_SCOPES = [
+  'openid', 'profile', 'email', 'forum.read', 'forum.write',
+  'resource.read', 'resource.download', 'resource.upload',
+  'notification.read', 'message.read', 'message.write',
+] as const;
+
 export function AdminClientsPage() {
+  const navigate = useNavigate();
   const { hasPermission } = useAdminAuth();
   const { toast } = useToast();
 
   const [clients, setClients] = useState<AdminOAuthClient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editClient, setEditClient] = useState<AdminOAuthClient | null>(null);
   const [deleteClient, setDeleteClient] = useState<AdminOAuthClient | null>(null);
   const [rotateClient, setRotateClient] = useState<AdminOAuthClient | null>(null);
-  const [reviewClient, setReviewClient] = useState<AdminOAuthClient | null>(null);
-  const [reviewScopes, setReviewScopes] = useState<string[]>([]);
+  const [revokeClient, setRevokeClient] = useState<AdminOAuthClient | null>(null);
   const [createdSecret, setCreatedSecret] = useState<AdminCreatedClient | null>(null);
   const [secretDialogTitle, setSecretDialogTitle] = useState('客户端创建成功');
 
@@ -29,15 +37,19 @@ export function AdminClientsPage() {
   const [name, setName] = useState('');
   const [redirectUri, setRedirectUri] = useState('');
   const [requirePkce, setRequirePkce] = useState(false);
+  const [scopes, setScopes] = useState<string[]>([]);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
   const loadClients = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; clients: AdminOAuthClient[] }>('/api/admin/clients');
       setClients(res.clients);
-    } catch {
-      toast('error', '获取客户端列表失败');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '获取客户端列表失败';
+      setLoadError(message);
+      toast('error', message);
     } finally {
       setLoading(false);
     }
@@ -117,6 +129,7 @@ export function AdminClientsPage() {
     if (!editClient) return;
 
     if (!name.trim()) { setFormError('名称必填'); return; }
+    if (!scopes.length) { setFormError('至少选择一个 OAuth Scope'); return; }
     const uriError = validateRedirectUri(redirectUri);
     if (uriError) {
       setFormError(uriError);
@@ -130,6 +143,7 @@ export function AdminClientsPage() {
         name: name.trim(),
         redirect_uris: redirectUriValues(),
         require_pkce: requirePkce,
+        scopes,
       });
       setEditClient(null);
       resetForm();
@@ -177,18 +191,27 @@ export function AdminClientsPage() {
     }
   }
 
-  async function handleReview(client: AdminOAuthClient, status: 'approved' | 'rejected' | 'suspended', scopes = client.requested_scopes) {
+  async function handleReview(client: AdminOAuthClient, status: 'approved' | 'suspended', scopes = client.approved_scopes) {
     try {
       await api.patch(`/api/admin/clients/${client.id}/review`, {
         status,
         approved_scopes: status === 'approved' ? scopes : [],
       });
-      setReviewClient(null);
       await loadClients();
-      toast('success', status === 'approved' ? '应用已批准' : status === 'rejected' ? '应用已拒绝' : '应用已停用');
+      toast('success', status === 'approved' ? '应用已启用' : '应用已停用');
     } catch (error) {
       toast('error', error instanceof Error ? error.message : '审核操作失败');
     }
+  }
+
+  async function handleRevokeAuthorizations() {
+    if (!revokeClient) return;
+    setFormLoading(true);
+    try {
+      await api.post(`/api/admin/clients/${revokeClient.id}/revoke-authorizations`);
+      setRevokeClient(null); await loadClients(); toast('success', '该客户端的全部授权和令牌已撤销');
+    } catch (error) { toast('error', error instanceof Error ? error.message : '撤销授权失败'); }
+    finally { setFormLoading(false); }
   }
 
   function openEdit(client: AdminOAuthClient) {
@@ -196,6 +219,7 @@ export function AdminClientsPage() {
     setName(client.name);
     setRedirectUri((client.redirect_uris || [{ redirect_uri: client.redirect_uri }]).map(item => item.redirect_uri).join('\n'));
     setRequirePkce(client.require_pkce ?? false);
+    setScopes([...(client.status === 'approved' ? client.approved_scopes : client.requested_scopes)]);
     setFormError('');
   }
 
@@ -215,6 +239,8 @@ export function AdminClientsPage() {
       <Card>
         {loading ? (
           <SkeletonTable rows={5} columns={4} />
+        ) : loadError ? (
+          <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadClients()}>重试</Button></div>
         ) : (
           <ResponsiveTable
             columns={[
@@ -244,7 +270,7 @@ export function AdminClientsPage() {
               {
                 header: '应用类型 / 状态',
                 accessor: 'client_type',
-                render: (c) => <span>{c.client_type === 'public' ? 'Public' : 'Confidential'} · {c.party_type === 'first_party' ? '第一方' : '第三方'} · {c.status}</span>,
+                render: (c) => <span>{c.client_type === 'public' ? 'Public Client' : 'Confidential Client'} · {c.party_type === 'first_party' ? '第一方' : '第三方'} · {({ pending: '待审核', approved: '已启用', suspended: '已停用', rejected: '已拒绝', draft: '草稿' } as Record<string, string>)[c.status] || c.status}</span>,
               },
               {
                 header: 'Scope',
@@ -255,7 +281,7 @@ export function AdminClientsPage() {
                 header: 'PKCE',
                 accessor: 'pkce',
                 render: (c) => c.require_pkce ? (
-                  <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)' }}>启用</span>
+                  <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)' }}>{c.client_type === 'public' ? 'S256 必需' : '启用'}</span>
                 ) : (
                   <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>关闭</span>
                 ),
@@ -269,6 +295,8 @@ export function AdminClientsPage() {
                   </span>
                 ),
               },
+              { header: 'Owner / 授权用户', accessor: 'owner', render: (c) => <span>{c.owner_username || '平台应用'}<small className="admin-cell-sub">{c.authorization_count || 0} 人授权</small></span> },
+              { header: '最近使用', accessor: 'last_used', render: (c) => c.last_used_at ? new Date(c.last_used_at).toLocaleString('zh-CN') : '—' },
               {
                 header: '操作',
                 accessor: 'actions',
@@ -276,9 +304,10 @@ export function AdminClientsPage() {
                   <div className="cluster" style={{ gap: 'var(--space-1)' }}>
                     <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>编辑</Button>
                     {c.client_type === 'confidential' ? <Button size="sm" variant="ghost" onClick={() => setRotateClient(c)}>轮换密钥</Button> : null}
-                    {c.status === 'pending' ? <><Button size="sm" onClick={() => { setReviewClient(c); setReviewScopes(c.requested_scopes); }}>审核 Scope</Button><Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'rejected')}>拒绝</Button></> : null}
+                    {c.status === 'pending' && c.party_type === 'third_party' ? <Button size="sm" onClick={() => navigate('/applications')}>前往审核</Button> : null}
                     {c.status === 'approved' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'suspended')}>停用</Button> : null}
                     {c.status === 'suspended' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'approved', c.approved_scopes)}>恢复</Button> : null}
+                    {c.status === 'approved' && <Button size="sm" variant="secondary" onClick={() => setRevokeClient(c)}>撤销全部授权</Button>}
                     <Button size="sm" variant="danger" onClick={() => setDeleteClient(c)}>删除</Button>
                   </div>
                 ) : <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>只读</span>,
@@ -290,6 +319,10 @@ export function AdminClientsPage() {
           />
         )}
       </Card>
+
+      <Dialog open={!!revokeClient} onClose={() => setRevokeClient(null)} title="撤销客户端全部授权" footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setRevokeClient(null)}>取消</Button><Button variant="danger" onClick={() => void handleRevokeAuthorizations()} loading={formLoading}>确认撤销</Button></div>}>
+        <p>将撤销 <strong>{revokeClient?.name}</strong> 的全部用户授权，并立即吊销相关 access token 和 refresh token。此操作不会停用客户端。</p>
+      </Dialog>
 
       {/* Create Dialog */}
       <Dialog
@@ -334,23 +367,6 @@ export function AdminClientsPage() {
         </div>
       </Dialog>
 
-      <Dialog
-        open={Boolean(reviewClient)}
-        onClose={() => setReviewClient(null)}
-        title={`审核 ${reviewClient?.name || '应用'}`}
-        footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setReviewClient(null)}>取消</Button><Button onClick={() => reviewClient && void handleReview(reviewClient, 'approved', reviewScopes)}>批准所选 Scope</Button></div>}
-      >
-        <div className="stack">
-          <p>只批准应用确实需要的权限。批准后的 Scope 将成为 OAuth 运行时上限。</p>
-          {(reviewClient?.requested_scopes || []).map(scope => (
-            <label className="cluster" key={scope}>
-              <input type="checkbox" checked={reviewScopes.includes(scope)} onChange={event => setReviewScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} />
-              <code>{scope}</code>
-            </label>
-          ))}
-        </div>
-      </Dialog>
-
       {/* Edit Dialog */}
       <Dialog
         open={!!editClient}
@@ -387,6 +403,24 @@ export function AdminClientsPage() {
             />
             <span style={{ fontSize: 'var(--text-sm)' }}>要求 PKCE</span>
           </label>
+          <fieldset className="field">
+            <legend className="field__label">允许的 OAuth Scope</legend>
+            <div className="admin-scope-options">
+              {SUPPORTED_SCOPES.map(scope => (
+                <label key={scope} className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={scopes.includes(scope)}
+                    onChange={(event) => setScopes(current => event.target.checked
+                      ? [...current, scope]
+                      : current.filter(item => item !== scope))}
+                  />
+                  <code>{scope}</code>
+                </label>
+              ))}
+            </div>
+            <span className="field__hint">修改已启用客户端的 Scope 会立即撤销它的全部用户授权及相关令牌。</span>
+          </fieldset>
         </div>
       </Dialog>
 

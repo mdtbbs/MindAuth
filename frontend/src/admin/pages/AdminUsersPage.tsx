@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import api from '@/api/client';
 import { useResource } from '@/api/useResource';
 import { useDebouncedValue } from '@/shared/useDebouncedValue';
@@ -6,404 +7,123 @@ import { useAdminAuth } from '../AdminAuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { Card } from '@/shared/Card';
 import { Button } from '@/shared/Button';
-import { TextField } from '@/shared/TextField';
-import { ResponsiveTable } from '@/shared/ResponsiveTable';
-import { SkeletonTable } from '@/shared/Skeleton';
 import { Dialog } from '@/shared/Dialog';
 import type { AdminUserListItem, PaginationData } from '@/api/types';
 
+type Action = 'ban' | 'mute' | 'unban' | 'unlock' | 'delete' | 'reset';
+
+function isLocked(user: AdminUserListItem) {
+  return Number(user.lock_level) > 0 && (!user.locked_until || new Date(user.locked_until).getTime() > Date.now());
+}
+
 export function AdminUsersPage() {
+  const [searchParams] = useSearchParams();
   const { hasPermission } = useAdminAuth();
   const { toast } = useToast();
-
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const debouncedSearch = useDebouncedValue(search, 300);
-
-  // Dialog state
+  const [role, setRole] = useState('');
+  const [emailVerified, setEmailVerified] = useState(searchParams.get('email_verified') || '');
+  const [banStatus, setBanStatus] = useState(searchParams.get('ban_status') || '');
+  const [locked, setLocked] = useState(searchParams.get('locked') || '');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [page, setPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState<AdminUserListItem | null>(null);
-  const [actionDialog, setActionDialog] = useState<'ban' | 'mute' | 'unlock' | 'delete' | 'reset' | null>(null);
+  const [action, setAction] = useState<Action | null>(null);
   const [reason, setReason] = useState('');
-  const [duration, setDuration] = useState('permanent');
-  const [actionLoading, setActionLoading] = useState(false);
+  const [duration, setDuration] = useState('24h');
+  const [customHours, setCustomHours] = useState('');
+  const [busy, setBusy] = useState(false);
+  const q = useDebouncedValue(search, 300);
 
-  // Reset to page 1 whenever the (debounced) filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch, roleFilter]);
+  useEffect(() => { setPage(1); }, [q, role, emailVerified, banStatus, locked, createdFrom, createdTo]);
 
-  const {
-    data,
-    loading,
-    error,
-    reload: loadUsers,
-  } = useResource(
-    (signal) => {
-      const params = new URLSearchParams();
-      if (debouncedSearch) params.append('search', debouncedSearch);
-      if (roleFilter) params.append('role', roleFilter);
-      params.append('page', String(currentPage));
-      params.append('limit', '20');
-      return api.get<{ success: boolean; users: AdminUserListItem[]; pagination?: PaginationData }>(
-        `/api/admin/users?${params.toString()}`,
-        { signal },
-      );
-    },
-    [currentPage, debouncedSearch, roleFilter],
-  );
+  const { data, loading, error, reload } = useResource(signal => {
+    const params = new URLSearchParams({ page: String(page), limit: '20' });
+    if (q.trim()) params.set('search', q.trim());
+    if (role) params.set('role', role);
+    if (emailVerified) params.set('email_verified', emailVerified);
+    if (banStatus) params.set('ban_status', banStatus);
+    if (locked) params.set('locked', locked);
+    if (createdFrom) params.set('created_from', createdFrom);
+    if (createdTo) params.set('created_to', createdTo);
+    return api.get<{ users: AdminUserListItem[]; pagination: PaginationData }>(`/api/admin/users?${params}`, { signal });
+  }, [page, q, role, emailVerified, banStatus, locked, createdFrom, createdTo]);
 
-  const users = data?.users ?? [];
-  const pagination = data?.pagination ?? null;
+  const users = data?.users || [];
+  const pagination = data?.pagination;
 
-  useEffect(() => {
-    if (error) toast('error', '获取用户列表失败');
-  }, [error, toast]);
-
-  function handleSearch(e: React.FormEvent) {
-    // Debounced query already drives the request; just prevent full-page submit
-    e.preventDefault();
-  }
-
-  async function handleAction() {
-    if (!selectedUser || !actionDialog) return;
-
-    setActionLoading(true);
+  async function runAction() {
+    if (!selectedUser || !action) return;
+    if ((action === 'ban' || action === 'mute') && !reason.trim()) { toast('error', '请填写处置原因'); return; }
+    if ((action === 'ban' || action === 'mute') && duration === 'custom' && (!Number.isInteger(Number(customHours)) || Number(customHours) < 1 || Number(customHours) > 8760)) { toast('error', '自定义时长须为 1 至 8760 小时'); return; }
+    setBusy(true);
     try {
-      const userId = selectedUser.id;
-
-      if (actionDialog === 'ban') {
-        await api.post(`/api/admin/users/${userId}/ban`, { reason, duration });
-        toast('success', '用户已封禁');
-      } else if (actionDialog === 'mute') {
-        await api.post(`/api/admin/users/${userId}/mute`, { reason, duration });
-        toast('success', '用户已禁言');
-      } else if (actionDialog === 'unlock') {
-        await api.post(`/api/admin/users/${userId}/unlock`);
-        toast('success', '账号已解锁');
-      } else if (actionDialog === 'delete') {
-        await api.del(`/api/admin/users/${userId}`);
-        toast('success', '用户已删除');
-      } else if (actionDialog === 'reset') {
-        await api.post(`/api/admin/users/${userId}/reset-password`);
-        toast('success', '密码已重置');
-      }
-
-      setActionDialog(null);
-      setSelectedUser(null);
-      setReason('');
-      loadUsers();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '操作失败';
-      toast('error', msg);
-    } finally {
-      setActionLoading(false);
-    }
+      const url = `/api/admin/users/${selectedUser.id}`;
+      if (action === 'ban' || action === 'mute') {
+        const selectedDuration = duration === 'custom' ? `${Number(customHours)}h` : duration;
+        await api.post(`${url}/${action}`, { reason: reason.trim(), duration: selectedDuration });
+      } else if (action === 'unban') await api.del(`${url}/ban`);
+      else if (action === 'unlock') await api.post(`${url}/unlock`);
+      else if (action === 'delete') await api.del(url);
+      else await api.post(`${url}/reset-password`);
+      toast('success', action === 'ban' ? '用户已封禁' : action === 'mute' ? '用户已禁言' : action === 'unban' ? '用户已解封' : action === 'unlock' ? '账号已解锁' : action === 'delete' ? '用户已删除' : '密码重置请求已提交');
+      setAction(null); setSelectedUser(null); setReason(''); await reload();
+    } catch (err) { toast('error', err instanceof Error ? err.message : '操作失败'); }
+    finally { setBusy(false); }
   }
 
-  function getRoleBadge(role: string) {
-    const colors: Record<string, string> = {
-      admin: 'var(--color-error)',
-      super_admin: 'var(--color-error)',
-      user_admin: 'var(--color-warning)',
-      security_admin: 'var(--color-warning)',
-      config_admin: 'var(--color-info)',
-      readonly_admin: 'var(--color-text-muted)',
-    };
-    return (
-      <span style={{
-        fontSize: 'var(--text-xs)',
-        padding: 'var(--space-1) var(--space-2)',
-        background: colors[role] || 'var(--color-bg-sunken)',
-        color: role.includes('admin') ? 'white' : 'var(--color-text)',
-        borderRadius: 'var(--radius-sm)',
-      }}>
-        {role}
-      </span>
-    );
+  async function immediateAction(user: AdminUserListItem, actionName: Action) {
+    setSelectedUser(user); setAction(actionName); setReason('');
   }
 
-  function getStatusBadge(user: AdminUserListItem) {
-    if (user.ban_status === 'banned') {
-      return <span style={{ color: 'var(--color-error)', fontSize: 'var(--text-xs)' }}>已封禁</span>;
-    }
-    if (user.ban_status === 'muted') {
-      return <span style={{ color: 'var(--color-warning)', fontSize: 'var(--text-xs)' }}>已禁言</span>;
-    }
-    if (user.lock_level > 0) {
-      return <span style={{ color: 'var(--color-warning)', fontSize: 'var(--text-xs)' }}>已锁定</span>;
-    }
-    return <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)' }}>正常</span>;
+  function status(user: AdminUserListItem) {
+    if (user.ban_status === 'banned') return <span className="admin-badge is-danger">已封禁</span>;
+    if (user.ban_status === 'muted') return <span className="admin-badge is-warning">已禁言</span>;
+    if (isLocked(user)) return <span className="admin-badge is-warning">已锁定</span>;
+    return <span className="admin-badge is-success">正常</span>;
   }
 
-  return (
-    <div>
-      <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-6)' }}>
-        用户管理
-      </h1>
+  function rowMenu(user: AdminUserListItem) {
+    return <details className="admin-row-menu"><summary aria-label={`用户 ${user.username} 的操作`}>•••</summary><div className="admin-row-menu__items">
+      <Link to={`/users/${user.id}`}>查看详情</Link>
+      {hasPermission('users.ban') && user.ban_status === 'none' && <button type="button" onClick={() => void immediateAction(user, 'ban')}>封禁</button>}
+      {hasPermission('users.ban') && user.ban_status !== 'none' && <button type="button" onClick={() => void immediateAction(user, 'unban')}>解封</button>}
+      {hasPermission('users.ban') && user.ban_status === 'none' && <button type="button" onClick={() => void immediateAction(user, 'mute')}>禁言</button>}
+      {hasPermission('users.unlock') && isLocked(user) && <button type="button" onClick={() => void immediateAction(user, 'unlock')}>解除锁定</button>}
+      {hasPermission('users.reset_password') && <button type="button" onClick={() => void immediateAction(user, 'reset')}>重置密码</button>}
+      {hasPermission('users.delete') && <button type="button" className="is-danger" onClick={() => void immediateAction(user, 'delete')}>删除用户</button>}
+    </div></details>;
+  }
 
-      {/* Search and Filter */}
-      <div style={{ marginBottom: 'var(--space-4)' }}>
-        <Card padding="sm">
-          <form onSubmit={handleSearch} className="cluster" style={{ gap: 'var(--space-3)' }}>
-          <TextField
-            label=""
-            placeholder="搜索用户名或邮箱"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: '200px' }}
-          />
-          <select
-            className="field__input"
-            value={roleFilter}
-            onChange={(e) => { setRoleFilter(e.target.value); setCurrentPage(1); }}
-            style={{ maxWidth: '150px' }}
-          >
-            <option value="">全部角色</option>
-            <option value="admin">管理员</option>
-            <option value="user">普通用户</option>
-          </select>
-          <Button type="submit" size="sm">搜索</Button>
-        </form>
-      </Card>
+  return <div className="admin-page">
+    <div className="admin-page-heading"><div><h1 className="admin-page-title">用户</h1><p className="admin-page-lead">查找账户并处理安全和访问问题。</p></div></div>
+    <Card>
+      <form className="admin-user-filters" onSubmit={e => e.preventDefault()}>
+        <label className="admin-search admin-user-search"><span className="sr-only">搜索用户名、邮箱或用户 ID</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索用户名 / 邮箱 / 用户 ID / IP" /></label>
+        <label><span className="sr-only">用户角色</span><select value={role} onChange={e => setRole(e.target.value)}><option value="">全部角色</option><option value="user">普通用户</option><option value="moderator">版主</option><option value="admin">管理员</option><option value="user_admin">用户管理员</option><option value="security_admin">安全管理员</option><option value="config_admin">配置管理员</option><option value="readonly_admin">只读管理员</option></select></label>
+        <label><span className="sr-only">邮箱验证</span><select value={emailVerified} onChange={e => setEmailVerified(e.target.value)}><option value="">邮箱状态</option><option value="true">已验证</option><option value="false">未验证</option></select></label>
+        <label><span className="sr-only">封禁状态</span><select value={banStatus} onChange={e => setBanStatus(e.target.value)}><option value="">封禁状态</option><option value="none">未处置</option><option value="muted">禁言</option><option value="banned">封禁</option></select></label>
+        <label><span className="sr-only">锁定状态</span><select value={locked} onChange={e => setLocked(e.target.value)}><option value="">锁定状态</option><option value="true">已锁定</option><option value="false">未锁定</option></select></label>
+        <label className="admin-date-filter"><span>注册自</span><input type="date" value={createdFrom} onChange={e => setCreatedFrom(e.target.value)} /></label>
+        <label className="admin-date-filter"><span>至</span><input type="date" value={createdTo} onChange={e => setCreatedTo(e.target.value)} /></label>
+      </form>
+    </Card>
+    <Card>
+      {loading ? <div className="admin-inline-state">正在加载用户…</div> : error ? <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{error.message || '获取用户列表失败'}</p><Button size="sm" variant="secondary" onClick={() => reload()}>重试</Button></div> : users.length === 0 ? <div className="admin-inline-state">没有匹配的用户</div> : <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>ID</th><th>用户</th><th>邮箱</th><th>角色</th><th>状态</th><th>注册时间</th><th>最近活动</th><th>操作</th></tr></thead><tbody>{users.map(user => <tr key={user.id}>
+        <td><code>{user.id}</code></td><td><Link className="admin-user-link" to={`/users/${user.id}`}>{user.username}</Link><small className="admin-cell-sub">{user.last_ip || '无登录 IP'}</small></td><td><span>{user.email}</span><small className="admin-cell-sub">{user.email_verified ? '邮箱已验证' : '邮箱未验证'}</small></td><td>{user.role === 'admin' ? 'super_admin' : user.role}</td><td>{status(user)}</td><td>{new Date(user.created_at).toLocaleDateString('zh-CN')}</td><td>{user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '—'}</td><td>{rowMenu(user)}</td>
+      </tr>)}</tbody></table></div>}
+      {pagination && pagination.totalPages > 1 && <div className="admin-pagination"><Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>上一页</Button><span>第 {page} / {pagination.totalPages} 页，共 {pagination.total} 人</span><Button size="sm" variant="secondary" disabled={page >= pagination.totalPages} onClick={() => setPage(p => p + 1)}>下一页</Button></div>}
+    </Card>
+
+    <Dialog open={Boolean(action)} onClose={() => setAction(null)} title={action === 'ban' ? '封禁用户' : action === 'mute' ? '禁言用户' : action === 'unban' ? '解除处置' : action === 'unlock' ? '解除锁定' : action === 'reset' ? '重置密码' : '删除用户'} footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setAction(null)}>取消</Button><Button variant={action === 'delete' || action === 'ban' || action === 'mute' ? 'danger' : 'primary'} onClick={runAction} loading={busy}>确认</Button></div>}>
+      <div className="admin-form-stack"><p>账户：<strong>{selectedUser?.username}</strong>（ID {selectedUser?.id}）</p>
+        {(action === 'ban' || action === 'mute') && <><label className="field"><span className="field__label">原因（必填）</span><textarea rows={3} maxLength={500} value={reason} onChange={e => setReason(e.target.value)} /></label><label className="field"><span className="field__label">时长</span><select value={duration} onChange={e => setDuration(e.target.value)}><option value="1h">1 小时</option><option value="24h">24 小时</option><option value="7d">7 天</option><option value="30d">30 天</option><option value="permanent">永久</option><option value="custom">自定义</option></select></label>{duration === 'custom' && <label className="field"><span className="field__label">小时数</span><input type="number" min="1" max="8760" value={customHours} onChange={e => setCustomHours(e.target.value)} /></label>}</>}
+        {action === 'reset' && <p>系统会生成临时密码并发送到用户邮箱。临时密码不会在后台显示。</p>}
+        {action === 'delete' && <div className="admin-danger-note"><strong>此操作无法恢复。</strong><p>将删除账户、OAuth 授权、令牌、登录记录、自定义资料和会话，并撤销相关设备登录。</p></div>}
+        {action === 'unlock' && <p>确认清除该账户当前的自动锁定状态？</p>}
+        {action === 'unban' && <p>确认解除该账户的封禁或禁言状态？</p>}
       </div>
-
-      {/* Users Table */}
-      <Card>
-        {loading ? (
-          <SkeletonTable rows={8} columns={6} />
-        ) : (
-          <ResponsiveTable
-            columns={[
-              {
-                header: 'ID',
-                accessor: 'id',
-                render: (u) => <span style={{ fontSize: 'var(--text-sm)' }}>{u.id}</span>,
-              },
-              {
-                header: '用户名',
-                accessor: 'username',
-                render: (u) => <span style={{ fontWeight: 'var(--weight-semibold)' }}>{u.username}</span>,
-              },
-              {
-                header: '邮箱',
-                accessor: 'email',
-                render: (u) => (
-                  <div>
-                    <span style={{ fontSize: 'var(--text-sm)' }}>{u.email}</span>
-                    {u.email_verified ? (
-                      <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)', marginLeft: 'var(--space-1)' }}>✓</span>
-                    ) : (
-                      <span style={{ color: 'var(--color-warning)', fontSize: 'var(--text-xs)', marginLeft: 'var(--space-1)' }}>?</span>
-                    )}
-                  </div>
-                ),
-              },
-              {
-                header: '角色',
-                accessor: 'role',
-                render: (u) => getRoleBadge(u.role),
-              },
-              {
-                header: '状态',
-                accessor: 'status',
-                render: (u) => getStatusBadge(u),
-              },
-              {
-                header: '注册时间',
-                accessor: 'created',
-                render: (u) => (
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                    {new Date(u.created_at).toLocaleDateString('zh-CN')}
-                  </span>
-                ),
-              },
-              {
-                header: '操作',
-                accessor: 'actions',
-                render: (u) => (
-                  <div className="cluster" style={{ gap: 'var(--space-1)' }}>
-                    {hasPermission('users.ban') && u.ban_status === 'none' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setSelectedUser(u); setActionDialog('ban'); }}
-                      >
-                        封禁
-                      </Button>
-                    )}
-                    {hasPermission('users.ban') && u.ban_status !== 'none' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          try {
-                            await api.del(`/api/admin/users/${u.id}/ban`);
-                            toast('success', '已解封');
-                            loadUsers();
-                          } catch {
-                            toast('error', '操作失败');
-                          }
-                        }}
-                      >
-                        解封
-                      </Button>
-                    )}
-                    {hasPermission('users.ban') && u.ban_status === 'none' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setSelectedUser(u); setActionDialog('mute'); }}
-                      >
-                        禁言
-                      </Button>
-                    )}
-                    {hasPermission('users.unlock') && u.lock_level > 0 && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setSelectedUser(u); setActionDialog('unlock'); }}
-                      >
-                        解锁
-                      </Button>
-                    )}
-                    {hasPermission('users.reset_password') && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setSelectedUser(u); setActionDialog('reset'); }}
-                      >
-                        重置密码
-                      </Button>
-                    )}
-                    {hasPermission('users.delete') && (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => { setSelectedUser(u); setActionDialog('delete'); }}
-                      >
-                        删除
-                      </Button>
-                    )}
-                  </div>
-                ),
-              },
-            ]}
-            data={users}
-            keyExtractor={(u) => u.id}
-            emptyMessage="暂无用户"
-          />
-        )}
-
-        {/* Pagination */}
-        {pagination && pagination.totalPages > 1 && (
-          <div className="cluster cluster--center" style={{ marginTop: 'var(--space-4)' }}>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            >
-              上一页
-            </Button>
-            <span style={{ fontSize: 'var(--text-sm)' }}>
-              {currentPage} / {pagination.totalPages}
-            </span>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={currentPage === pagination.totalPages}
-              onClick={() => setCurrentPage((p) => p + 1)}
-            >
-              下一页
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      {/* Action Dialogs */}
-      <Dialog
-        open={actionDialog === 'ban' || actionDialog === 'mute'}
-        onClose={() => { setActionDialog(null); setReason(''); }}
-        title={actionDialog === 'ban' ? '封禁用户' : '禁言用户'}
-        footer={
-          <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => { setActionDialog(null); setReason(''); }}>
-              取消
-            </Button>
-            <Button variant="danger" onClick={handleAction} loading={actionLoading}>
-              确认
-            </Button>
-          </div>
-        }
-      >
-        <div className="stack">
-          <p>确认{actionDialog === 'ban' ? '封禁' : '禁言'}用户 <strong>{selectedUser?.username}</strong>?</p>
-          <TextField
-            label="原因 (可选)"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="封禁/禁言原因"
-          />
-          <div>
-            <label className="field__label">时长</label>
-            <select
-              className="field__input"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-            >
-              <option value="24h">24小时</option>
-              <option value="7d">7天</option>
-              <option value="30d">30天</option>
-              <option value="permanent">永久</option>
-            </select>
-          </div>
-        </div>
-      </Dialog>
-
-      <Dialog
-        open={actionDialog === 'unlock'}
-        onClose={() => setActionDialog(null)}
-        title="解锁账号"
-        footer={
-          <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => setActionDialog(null)}>取消</Button>
-            <Button onClick={handleAction} loading={actionLoading}>确认解锁</Button>
-          </div>
-        }
-      >
-        <p>确认解锁用户 <strong>{selectedUser?.username}</strong>?</p>
-      </Dialog>
-
-      <Dialog
-        open={actionDialog === 'reset'}
-        onClose={() => setActionDialog(null)}
-        title="重置密码"
-        footer={
-          <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => setActionDialog(null)}>取消</Button>
-            <Button variant="danger" onClick={handleAction} loading={actionLoading}>确认重置</Button>
-          </div>
-        }
-      >
-        <p>确认重置用户 <strong>{selectedUser?.username}</strong> 的密码?临时密码将发送到用户邮箱。</p>
-      </Dialog>
-
-      <Dialog
-        open={actionDialog === 'delete'}
-        onClose={() => setActionDialog(null)}
-        title="删除用户"
-        footer={
-          <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => setActionDialog(null)}>取消</Button>
-            <Button variant="danger" onClick={handleAction} loading={actionLoading}>确认删除</Button>
-          </div>
-        }
-      >
-        <p style={{ color: 'var(--color-error)' }}>
-          警告: 此操作将永久删除用户 <strong>{selectedUser?.username}</strong> 及其所有数据,不可恢复!
-        </p>
-      </Dialog>
-    </div>
-  );
+    </Dialog>
+  </div>;
 }

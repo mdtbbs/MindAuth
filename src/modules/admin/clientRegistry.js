@@ -70,6 +70,16 @@ function validateRedirectUri(uri) {
   return { valid: true, redirect_type: 'custom_scheme' };
 }
 
+function validateManagedRedirectUri(uri, client = null) {
+  const validation = validateRedirectUri(uri);
+  if (!validation.valid) return validation;
+  const supportsLoopback = client?.client_type === 'public' && client?.party_type === 'third_party';
+  if (validation.redirect_type === 'loopback' && !supportsLoopback) {
+    return { valid: false, error: '回调地址不能使用内部网络地址或 localhost' };
+  }
+  return validation;
+}
+
 function parseScopes(value, fallback = []) {
   return normalizeScopes(value, fallback);
 }
@@ -103,10 +113,13 @@ async function syncRedirectUris(executor, clientNumericId, uris) {
 
 async function listClients() {
   const [clients] = await pool.execute(
-    `SELECT id, name, description, website_url, client_id, client_secret, redirect_uri,
-            require_pkce, client_type, party_type, status, owner_user_id,
-            requested_scopes, approved_scopes, approved_at, approved_by, created_at, updated_at
-     FROM clients ORDER BY created_at DESC`,
+    `SELECT c.id, c.name, c.description, c.website_url, c.client_id, c.client_secret, c.redirect_uri,
+            c.require_pkce, c.client_type, c.party_type, c.status, c.owner_user_id,
+            c.requested_scopes, c.approved_scopes, c.approved_at, c.approved_by, c.admin_review_note, c.created_at, c.updated_at,
+            u.username AS owner_username,
+            (SELECT COUNT(DISTINCT a.user_id) FROM authorizations a WHERE a.client_id = c.client_id) AS authorization_count,
+            (SELECT MAX(a.last_used_at) FROM authorizations a WHERE a.client_id = c.client_id) AS last_used_at
+     FROM clients c LEFT JOIN users u ON u.id = c.owner_user_id ORDER BY c.created_at DESC`,
   );
   const redirectRows = clients.length
     ? (await pool.execute(`SELECT oauth_client_id, redirect_uri, redirect_type FROM oauth_client_redirect_uris WHERE oauth_client_id IN (${clients.map(() => '?').join(',')}) ORDER BY id`, clients.map(c => c.id)))[0]
@@ -131,7 +144,7 @@ async function getClient(id) {
   const [rows] = await pool.execute(
     `SELECT id, name, description, website_url, client_id, client_secret, redirect_uri,
             require_pkce, client_type, party_type, status, owner_user_id,
-            requested_scopes, approved_scopes, approved_at, approved_by, created_at, updated_at
+            requested_scopes, approved_scopes, approved_at, approved_by, admin_review_note, created_at, updated_at
      FROM clients WHERE id = ?`, [id],
   );
   if (!rows[0]) return null;
@@ -151,7 +164,7 @@ async function createClient(data, actor) {
   const { name, require_pkce } = data;
   const redirectUris = data.redirect_uris || [data.redirect_uri];
   for (const uri of redirectUris) {
-    const validation = validateRedirectUri(uri);
+    const validation = validateManagedRedirectUri(uri);
     if (!validation.valid) throw new Error(validation.error);
   }
   if (!redirectUris.length) throw new Error('至少需要一个 Redirect URI');
@@ -177,20 +190,57 @@ async function createClient(data, actor) {
 
 async function updateClient(id, data, actor) {
   const { name, redirect_uri, redirect_uris, require_pkce } = data;
+  const requestedScopes = data.scopes;
+  if (requestedScopes !== undefined && (!Array.isArray(requestedScopes) || requestedScopes.length === 0
+    || requestedScopes.some(scope => typeof scope !== 'string' || !VALID_SCOPES.includes(scope))
+    || new Set(requestedScopes).size !== requestedScopes.length)) {
+    throw new Error('至少选择一个有效且不重复的 scope');
+  }
   const uris = redirect_uris || (redirect_uri ? [redirect_uri] : null);
+  let clientId;
+  let revokeUsers = [];
+  let scopesChanged = false;
   await transaction(async (conn) => {
-    const [rows] = await conn.execute('SELECT id FROM clients WHERE id = ? FOR UPDATE', [id]);
+    const [rows] = await conn.execute('SELECT id, client_id, client_type, party_type, status, requested_scopes, approved_scopes FROM clients WHERE id = ? FOR UPDATE', [id]);
     if (!rows[0]) throw new Error('客户端不存在');
+    const client = rows[0];
+    clientId = client.client_id;
+    if (uris) {
+      for (const uri of uris) {
+        const validation = validateManagedRedirectUri(uri, client);
+        if (!validation.valid) throw new Error(validation.error);
+      }
+    }
+    if (requestedScopes !== undefined) {
+      const previous = parseScopes(client.approved_scopes).sort();
+      const next = [...requestedScopes].sort();
+      scopesChanged = previous.length !== next.length || previous.some((scope, index) => scope !== next[index]);
+      if (client.status === 'approved' && scopesChanged) {
+        const [tokenRows] = await conn.execute(
+          `SELECT user_id FROM authorizations WHERE client_id = ?
+           UNION SELECT user_id FROM refresh_tokens WHERE client_id = ?`,
+          [client.client_id, client.client_id],
+        );
+        revokeUsers = tokenRows.map(({ user_id }) => Number(user_id));
+        await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [client.client_id]);
+        await conn.execute('DELETE FROM authorizations WHERE client_id = ?', [client.client_id]);
+      }
+    }
     const updates = [];
     const params = [];
     if (name !== undefined) { updates.push('name = ?'); params.push(name); }
     if (require_pkce !== undefined) { updates.push('require_pkce = ?'); params.push(require_pkce ? 1 : 0); }
+    if (requestedScopes !== undefined) {
+      updates.push('requested_scopes = ?'); params.push(JSON.stringify(requestedScopes));
+      if (client.status === 'approved') { updates.push('approved_scopes = ?'); params.push(JSON.stringify(requestedScopes)); }
+    }
     if (updates.length) await conn.execute(`UPDATE clients SET ${updates.join(', ')} WHERE id = ?`, [...params, id]);
     if (uris) await syncRedirectUris(conn, Number(id), uris);
   });
+  if (revokeUsers.length) await Promise.all(revokeUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, clientId)));
   await writeAdminAudit(actor.adminId, 'client.update', 'client', Number(id),
-    { name, redirect_uris: uris, require_pkce }, actor.ipAddress);
-  return { updated: true };
+    { name, redirect_uris: uris, require_pkce, scopes: requestedScopes, scopes_changed: scopesChanged, revoked_users: revokeUsers.length }, actor.ipAddress);
+  return { updated: true, scopes_changed: scopesChanged, revoked_users: revokeUsers.length };
 }
 
 async function rotateSecret(id, actor) {
@@ -211,12 +261,37 @@ async function deleteClient(id, actor) {
   return { deleted: users !== null };
 }
 
+async function revokeClientAuthorizations(id, actor) {
+  const client = await getClient(id);
+  if (!client || client.status === 'deleted') throw new Error('客户端不存在');
+  let users = [];
+  await transaction(async (conn) => {
+    const [rows] = await conn.execute('SELECT id FROM clients WHERE id = ? FOR UPDATE', [id]);
+    if (!rows[0]) throw new Error('客户端不存在');
+    const [tokenUsers] = await conn.execute(
+      `SELECT user_id FROM authorizations WHERE client_id = ?
+       UNION SELECT user_id FROM refresh_tokens WHERE client_id = ?`,
+      [client.client_id, client.client_id],
+    );
+    users = tokenUsers.map(({ user_id }) => Number(user_id));
+    await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [client.client_id]);
+    await conn.execute('DELETE FROM authorizations WHERE client_id = ?', [client.client_id]);
+  });
+  await Promise.all(users.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, client.client_id)));
+  await writeAdminAudit(actor.adminId, 'client.authorizations.revoke', 'client', Number(id), { affected_users: users.length }, actor.ipAddress);
+  return { affected_users: users.length };
+}
+
 async function revokeClientGrants(clientId, status) {
   let users = [];
   await transaction(async (conn) => {
     const [rows] = await conn.execute('SELECT id FROM clients WHERE client_id = ? FOR UPDATE', [clientId]);
     if (!rows[0]) return;
-    const [tokenUsers] = await conn.execute('SELECT DISTINCT user_id FROM refresh_tokens WHERE client_id = ?', [clientId]);
+    const [tokenUsers] = await conn.execute(
+      `SELECT user_id FROM authorizations WHERE client_id = ?
+       UNION SELECT user_id FROM refresh_tokens WHERE client_id = ?`,
+      [clientId, clientId],
+    );
     users = tokenUsers.map(({ user_id }) => Number(user_id));
     await conn.execute('UPDATE clients SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE client_id = ?', [status, clientId]);
     await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [clientId]);
@@ -299,15 +374,15 @@ async function createOwnerApplication(ownerUserId, data) {
     const [result] = await conn.execute(
       `INSERT INTO clients (name, description, website_url, client_id, client_secret, redirect_uri,
          require_pkce, client_type, party_type, status, owner_user_id, requested_scopes, approved_scopes, approved_at)
-       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', 'approved', ?, ?, ?, CURRENT_TIMESTAMP)`,
+       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', 'pending', ?, ?, '[]', NULL)`,
       [value.name, value.description, value.websiteUrl, clientId, value.redirectUris[0], ownerUserId,
-        JSON.stringify(value.requestedScopes), JSON.stringify(value.requestedScopes)],
+        JSON.stringify(value.requestedScopes)],
     );
     await syncRedirectUris(conn, result.insertId, value.redirectUris);
     return result.insertId;
   });
-  return { id, client_id: clientId, client_type: 'public', party_type: 'third_party', status: 'approved',
-    approved_scopes: value.requestedScopes, client_secret: null };
+  return { id, client_id: clientId, client_type: 'public', party_type: 'third_party', status: 'pending',
+    approved_scopes: [], client_secret: null };
 }
 
 async function assertPhoneVerifiedDeveloper(ownerUserId) {
@@ -325,6 +400,7 @@ async function updateOwnerApplication(ownerUserId, id, data) {
   let scopesChanged = false;
   let clientId;
   let affectedUsers = [];
+  let wasApproved = false;
   await transaction(async (conn) => {
     const [rows] = await conn.execute(`SELECT id, client_id, status, client_type, party_type, requested_scopes
       FROM clients WHERE id = ? AND owner_user_id = ? FOR UPDATE`, [id, ownerUserId]);
@@ -333,48 +409,43 @@ async function updateOwnerApplication(ownerUserId, id, data) {
     if (client.status === 'deleted') throw new Error('应用不存在');
     if (client.client_type !== 'public' || client.party_type !== 'third_party') throw new Error('只能修改自助创建的 Public Client');
     clientId = client.client_id;
+    wasApproved = client.status === 'approved';
     const previousScopes = parseScopes(client.requested_scopes).sort();
     const nextScopes = [...value.requestedScopes].sort();
     scopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
     await conn.execute(
-      `UPDATE clients SET name = ?, description = ?, website_url = ?, requested_scopes = ?, approved_scopes = ?,
-         status = CASE WHEN status IN ('draft', 'pending') THEN 'approved' ELSE status END,
-         approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP), approved_by = NULL
+      `UPDATE clients SET name = ?, description = ?, website_url = ?, requested_scopes = ?, approved_scopes = '[]',
+         status = 'pending', approved_at = NULL, approved_by = NULL
        WHERE id = ?`,
-      [value.name, value.description, value.websiteUrl, JSON.stringify(value.requestedScopes), JSON.stringify(value.requestedScopes), id],
+      [value.name, value.description, value.websiteUrl, JSON.stringify(value.requestedScopes), id],
     );
     await syncRedirectUris(conn, Number(id), value.redirectUris);
-    if (scopesChanged) {
-      const [tokenRows] = await conn.execute('SELECT DISTINCT user_id FROM refresh_tokens WHERE client_id = ?', [clientId]);
+    if (wasApproved) {
+      const [tokenRows] = await conn.execute(
+        `SELECT user_id FROM authorizations WHERE client_id = ?
+         UNION SELECT user_id FROM refresh_tokens WHERE client_id = ?`,
+        [clientId, clientId],
+      );
       affectedUsers = tokenRows.map(({ user_id }) => Number(user_id));
-      const [grants] = await conn.execute('SELECT user_id, scope FROM authorizations WHERE client_id = ?', [clientId]);
-      for (const grant of grants) {
-        const remaining = String(grant.scope || '').split(/\s+/).filter(scope => value.requestedScopes.includes(scope));
-        if (remaining.length) {
-          await conn.execute('UPDATE authorizations SET scope = ? WHERE user_id = ? AND client_id = ?',
-            [remaining.join(' '), grant.user_id, clientId]);
-        } else {
-          await conn.execute('DELETE FROM authorizations WHERE user_id = ? AND client_id = ?', [grant.user_id, clientId]);
-        }
-      }
+      await conn.execute('DELETE FROM authorizations WHERE client_id = ?', [clientId]);
       await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [clientId]);
     }
   });
-  if (scopesChanged) {
+  if (wasApproved) {
     await Promise.all(affectedUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, clientId)));
   }
-  return { updated: true };
+  return { updated: true, status: 'pending', re_review_required: true, scopes_changed: scopesChanged };
 }
 
 async function submitOwnerApplication(ownerUserId, id) {
   const [result] = await pool.execute(
-    `UPDATE clients SET status = 'approved', approved_scopes = requested_scopes,
-       approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP), approved_by = NULL, updated_at = CURRENT_TIMESTAMP
+    `UPDATE clients SET status = 'pending', approved_scopes = '[]',
+       approved_at = NULL, approved_by = NULL, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND owner_user_id = ? AND client_type = 'public' AND party_type = 'third_party'
        AND status IN ('draft', 'rejected')`, [id, ownerUserId],
   );
   if (!result.affectedRows) throw new Error('应用不存在或当前状态不能启用');
-  return { submitted: true, status: 'approved' };
+  return { submitted: true, status: 'pending' };
 }
 
 async function deactivateOwnerApplication(ownerUserId, id) {
@@ -444,7 +515,7 @@ function publicApplicationView(row) {
   };
 }
 
-async function reviewClient(id, { status, approvedScopes }, actor) {
+async function reviewClient(id, { status, approvedScopes, reviewReason }, actor) {
   if (!['approved', 'rejected', 'suspended', 'pending'].includes(status)) throw new Error('无效的审核状态');
   const client = await getClient(id);
   if (!client) throw new Error('客户端不存在');
@@ -457,19 +528,30 @@ async function reviewClient(id, { status, approvedScopes }, actor) {
     throw new Error('批准的 scopes 必须来自应用申请列表');
   }
   if (status === 'approved' && scopes.length === 0) throw new Error('至少批准一个 scope');
+  const safeReviewReason = typeof reviewReason === 'string' ? reviewReason.trim().slice(0, 1000) || null : null;
+  if (status === 'rejected' && !safeReviewReason) throw new Error('拒绝申请时请填写原因');
+  const previousScopes = [...client.approved_scopes].sort();
+  const nextScopes = [...scopes].sort();
+  const approvedScopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
+  const revokeCurrentGrants = status !== 'approved' || (client.status === 'approved' && approvedScopesChanged);
+  let revokedUsers = [];
+  if (revokeCurrentGrants && client.status === 'approved') {
+    revokedUsers = await revokeClientGrants(client.client_id, status === 'approved' ? 'suspended' : status);
+  }
   await pool.execute(
     `UPDATE clients SET status = ?, approved_scopes = IF(? = 'suspended', approved_scopes, ?), approved_at = IF(? = 'approved', CURRENT_TIMESTAMP, NULL),
-       approved_by = IF(? = 'approved', ?, NULL) WHERE id = ?`,
-    [status, status, JSON.stringify(status === 'approved' ? scopes : []), status, status, actor.adminId, id],
+       approved_by = IF(? = 'approved', ?, NULL), admin_review_note = ? WHERE id = ?`,
+    [status, status, JSON.stringify(status === 'approved' ? scopes : []), status, status, actor.adminId, safeReviewReason, id],
   );
-  await writeAdminAudit(actor.adminId, `client.${status}`, 'client', Number(id), { approved_scopes: scopes }, actor.ipAddress);
+  if (revokedUsers.length) await Promise.all(revokedUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, client.client_id)));
+  await writeAdminAudit(actor.adminId, `client.${status}`, 'client', Number(id), { approved_scopes: scopes, review_reason: safeReviewReason }, actor.ipAddress);
   return { updated: true };
 }
 
 module.exports = {
-  createClient, updateClient, rotateSecret, deleteClient, listClients, getClient,
+  createClient, updateClient, rotateSecret, deleteClient, revokeClientAuthorizations, listClients, getClient,
   listOwnerApplications, createOwnerApplication, updateOwnerApplication,
-  submitOwnerApplication, reviewClient, validateRedirectUri, isPrivateOrInternalHost,
+  submitOwnerApplication, reviewClient, validateRedirectUri, validateManagedRedirectUri, isPrivateOrInternalHost,
   deactivateOwnerApplication, deleteOwnerApplication, listPublicApplications, getPublicApplication,
   validateApplication, assertPhoneVerifiedDeveloper,
   _isPrivateOrInternalHost: isPrivateOrInternalHost,

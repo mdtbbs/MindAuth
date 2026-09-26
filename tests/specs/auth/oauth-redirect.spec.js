@@ -71,6 +71,9 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     const authorizeRequest = await authorizeRequestPromise;
     expect(authorizeRequest.url()).toContain(`client_id=${FORUM_CLIENT_ID}`);
 
+    // First-time grants now use an explicit consent page.
+    await page.getByRole('button', { name: '允许' }).click();
+
     const callbackRequest = await callbackRequestPromise;
     const finalUrl = callbackRequest.url();
     expect(finalUrl).toContain('code=');
@@ -122,6 +125,8 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     await page.fill('#username', testUser);
     await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
+
+    await page.getByRole('button', { name: '允许' }).click();
 
     const callbackRequest = await callbackRequestPromise;
     const finalUrl = callbackRequest.url();

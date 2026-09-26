@@ -7,6 +7,8 @@ const config = require('../../config');
 // Mount sub-routers
 // IMPORTANT: Mount specific paths first to avoid conflicts with '/' mount
 router.use('/clients', require('./clients')); // /clients, /clients/:id
+router.use('/email-policy', require('./emailPolicy')); // /email-policy
+router.use('/developer-applications', require('./developerApplications')); // /developer-applications
 router.use('/users', require('./users'));     // /users, /users/:id
 router.use('/ip-bans', require('./ipBans'));  // /ip-bans
 router.use('/challenges', require('./challenges')); // /challenges

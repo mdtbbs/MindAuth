@@ -12,6 +12,7 @@ const notificationCenter = require('../modules/notifications/notificationCenter'
 const { getClientIp } = require('../utils/request');
 const { getUserAuditLogs, logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
+const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -177,6 +178,11 @@ router.post('/change-email', requireAuth, async (req, res) => {
 
     if (!new_email || !isValidEmail(new_email)) {
       return res.status(400).json({ success: false, message: '请输入有效的邮箱地址' });
+    }
+
+    const emailDecision = await emailPolicy.checkEmail(new_email, { purpose: 'change_email', userId: user.id, ipAddress: getClientIp(req) });
+    if (!emailDecision.allowed) {
+      return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
     }
 
     // Check if email already used by another user

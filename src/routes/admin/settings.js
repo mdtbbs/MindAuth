@@ -16,6 +16,110 @@ const auditWriter = require('../../modules/audit/auditWriter');
 const { backgroundUpload } = require('../../middleware/upload');
 const { tryRemovePublicFile } = require('../../utils/publicFiles');
 const { encryptSecret } = require('../../utils/secrets');
+const { client } = require('../../redis');
+
+router.get('/overview', requireAdmin, requireAdminPermission('dashboard.read'), async (req, res) => {
+  try {
+    try {
+      const cached = await client.get('admin:overview:v1');
+      if (cached) return res.json(JSON.parse(cached));
+    } catch { /* dashboard remains available when Redis is unavailable */ }
+    const [users] = await pool.execute(`
+      SELECT COUNT(*) AS total_users,
+        COALESCE(SUM(created_at >= CURDATE()), 0) AS today_registrations,
+        COALESCE(SUM(email_verified = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)), 0) AS unverified_new_users
+      FROM users
+    `);
+    const [sessions] = await pool.execute(`
+      SELECT
+        (SELECT COUNT(*) FROM user_sessions WHERE expires_at > NOW()) AS web_sessions,
+        (SELECT COUNT(*) FROM native_client_sessions WHERE revoked_at IS NULL AND last_active_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS native_sessions
+    `);
+    const [logins] = await pool.execute('SELECT COUNT(*) AS total FROM login_logs WHERE created_at >= CURDATE()');
+    const [loginFailures] = await pool.execute("SELECT COUNT(*) AS total FROM user_audit_logs WHERE action = 'login_failed' AND created_at >= CURDATE()");
+    const [loginFailures24h] = await pool.execute("SELECT COUNT(*) AS total FROM user_audit_logs WHERE action = 'login_failed' AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+    const [lockedToday] = await pool.execute("SELECT COUNT(*) AS total FROM user_audit_logs WHERE action = 'account_locked' AND created_at >= CURDATE()");
+    const [emailBlocks] = await pool.execute('SELECT COUNT(*) AS total FROM email_policy_events WHERE created_at >= CURDATE()');
+    const [securityCounts] = await pool.execute(`
+      SELECT
+        (SELECT COUNT(*) FROM clients WHERE party_type = 'third_party' AND status = 'pending') AS pending_applications,
+        (SELECT COUNT(*) FROM users WHERE ban_status = 'banned' AND (ban_expires_at IS NULL OR ban_expires_at > NOW())) AS banned_users,
+        (SELECT COUNT(*) FROM users WHERE lock_level > 0 AND (locked_until IS NULL OR locked_until > NOW())) AS locked_users,
+        (SELECT COUNT(*) FROM ip_bans WHERE expires_at IS NULL OR expires_at > NOW()) AS active_ip_rules,
+        (SELECT COUNT(*) FROM email_policy_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) AS email_policy_hits_24h
+    `);
+
+    const [failuresByIp, recentLocks, recentEmailHits, recentSecurityActions, recentBans] = await Promise.all([
+      pool.execute(`SELECT ip_address, COUNT(*) AS failure_count, MAX(created_at) AS last_failed_at
+        FROM user_audit_logs WHERE action = 'login_failed' AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        GROUP BY ip_address ORDER BY failure_count DESC LIMIT 10`),
+      pool.execute(`SELECT a.user_id, u.username, a.ip_address, a.details, a.created_at
+        FROM user_audit_logs a LEFT JOIN users u ON u.id = a.user_id
+        WHERE a.action = 'account_locked' AND a.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        ORDER BY a.created_at DESC LIMIT 10`),
+      pool.execute(`SELECT e.id, e.email_domain, e.purpose, e.ip_address, e.created_at, r.pattern, r.policy
+        FROM email_policy_events e LEFT JOIN email_domain_rules r ON r.id = e.rule_id
+        WHERE e.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY e.created_at DESC LIMIT 10`),
+      pool.execute(`SELECT a.id, a.admin_id, a.action, a.target_type, a.target_id, a.details, a.ip_address, a.created_at
+        FROM admin_audit_logs a WHERE a.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+          AND (a.action LIKE 'user.%ban%' OR a.action IN ('user.unlock','admin.session.revoke','admin.session.revoke_all',
+            'admin.authorization.revoke_all','email_policy.mode','email_rule.create','email_rule.update','email_rule.delete',
+            'client.approved','client.rejected','client.suspended','client.delete','client.update'))
+        ORDER BY a.created_at DESC LIMIT 10`),
+      pool.execute(`SELECT a.target_id AS user_id, u.username, a.admin_id, a.details, a.created_at
+        FROM admin_audit_logs a LEFT JOIN users u ON u.id = a.target_id
+        WHERE a.action = 'user.ban' AND a.target_type = 'user' AND a.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        ORDER BY a.created_at DESC LIMIT 10`),
+    ]);
+
+    const [registered] = await pool.execute(`SELECT id, username, created_at FROM users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY created_at DESC LIMIT 8`);
+    const [successfulLogins] = await pool.execute(`SELECT l.id, u.username, l.ip, l.login_type, l.created_at FROM login_logs l JOIN users u ON u.id = l.user_id WHERE l.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY l.created_at DESC LIMIT 8`);
+    const [failedLogins] = await pool.execute(`SELECT a.id, u.username, a.ip_address, a.created_at FROM user_audit_logs a LEFT JOIN users u ON u.id = a.user_id WHERE a.action = 'login_failed' AND a.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY a.created_at DESC LIMIT 8`);
+    const [newApplications] = await pool.execute(`SELECT id, name, owner_user_id, status, created_at FROM clients WHERE party_type = 'third_party' AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY created_at DESC LIMIT 8`);
+    const [newAuthorizations] = await pool.execute(`SELECT a.id, u.username, c.name AS client_name, a.created_at FROM authorizations a JOIN users u ON u.id = a.user_id JOIN clients c ON c.client_id = a.client_id WHERE a.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY a.created_at DESC LIMIT 8`);
+
+    const activities = [
+      ...registered.map(row => ({ event_type: '用户注册', subject: row.username, created_at: row.created_at, detail: `用户 ID ${row.id}` })),
+      ...successfulLogins.map(row => ({ event_type: '登录成功', subject: row.username, created_at: row.created_at, detail: `${row.login_type} · ${row.ip}` })),
+      ...failedLogins.map(row => ({ event_type: '登录失败', subject: row.username || '未识别账号', created_at: row.created_at, detail: row.ip_address || '未知 IP' })),
+      ...newApplications.map(row => ({ event_type: 'OAuth 应用申请', subject: row.name, created_at: row.created_at, detail: `用户 ID ${row.owner_user_id || '—'} · ${row.status}` })),
+      ...newAuthorizations.map(row => ({ event_type: 'OAuth 授权', subject: row.username, created_at: row.created_at, detail: row.client_name })),
+      ...recentLocks[0].map(row => ({ event_type: '账号锁定', subject: row.username || `用户 ID ${row.user_id}`, created_at: row.created_at, detail: row.ip_address || '未知 IP' })),
+      ...recentEmailHits[0].map(row => ({ event_type: '邮箱策略拦截', subject: row.email_domain, created_at: row.created_at, detail: `${row.purpose} · ${row.ip_address || '未知 IP'}` })),
+      ...recentSecurityActions[0].map(row => ({
+        event_type: row.action === 'user.ban' ? '管理员封禁' : row.action === 'client.approved' ? 'OAuth 应用审核' : '管理员安全操作',
+        subject: `${row.target_type || '资源'} ${row.target_id || ''}`.trim(), created_at: row.created_at,
+        detail: `${row.action} · 管理员 ${row.admin_id}`,
+      })),
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 30);
+
+    const summary = users[0] || {};
+    const flags = securityCounts[0] || {};
+    const response = { success: true, overview: {
+      metrics: {
+        total_users: Number(summary.total_users || 0), today_registrations: Number(summary.today_registrations || 0),
+        active_sessions: Number(sessions[0]?.web_sessions || 0) + Number(sessions[0]?.native_sessions || 0),
+        today_logins: Number(logins[0]?.total || 0), today_login_failures: Number(loginFailures[0]?.total || 0),
+        today_risk_interceptions: Number(emailBlocks[0]?.total || 0) + Number(lockedToday[0]?.total || 0),
+      },
+      needs_attention: {
+        pending_applications: Number(flags.pending_applications || 0), unverified_new_users: Number(summary.unverified_new_users || 0),
+        locked_accounts: Number(flags.locked_users || 0), banned_users: Number(flags.banned_users || 0),
+        email_policy_hits_24h: Number(flags.email_policy_hits_24h || 0), high_failure_ips: failuresByIp[0].length,
+        login_failures_24h: Number(loginFailures24h[0]?.total || 0),
+        active_ip_rules: Number(flags.active_ip_rules || 0),
+      },
+      high_failure_ips: failuresByIp[0], recent_locks: recentLocks[0], recent_email_hits: recentEmailHits[0],
+      recent_security_actions: recentSecurityActions[0], recent_activity: activities,
+      recent_bans: recentBans[0],
+    } };
+    res.json(response);
+    client.setEx('admin:overview:v1', 30, JSON.stringify(response)).catch(() => {});
+  } catch (err) {
+    console.error('[AdminOverview] Failed:', err.message);
+    res.status(500).json({ success: false, message: '获取后台总览失败' });
+  }
+});
 
 // GET /stats - Dashboard statistics
 router.get('/stats', requireAdmin, async (req, res) => {

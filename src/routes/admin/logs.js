@@ -42,7 +42,7 @@ router.get('/authorizations', requireAdmin, requireAdminPermission('authorizatio
 // DELETE /authorizations/:id - Revoke authorization
 // Also revokes all issued access tokens (Redis) and refresh tokens (MySQL)
 // for the user/client pair, via oauthIssuer.revokeAuthorization.
-router.delete('/authorizations/:id', requireAdmin, requireAdminPermission('users.write'), async (req, res) => {
+router.delete('/authorizations/:id', requireAdmin, requireAdminPermission('authorizations.revoke'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -60,6 +60,17 @@ router.delete('/authorizations/:id', requireAdmin, requireAdminPermission('users
       clientId: rows[0].client_id,
     });
 
+    const auditWriter = require('../../modules/audit/auditWriter');
+    const { getClientIp } = require('../../utils/request');
+    await auditWriter.writeAdminAudit(
+      req.adminUser.id,
+      'oauth.authorization.revoke',
+      'authorization',
+      Number(id),
+      { user_id: rows[0].user_id, client_id: rows[0].client_id },
+      getClientIp(req),
+    );
+
     res.json({ success: true, message: '授权已撤销' });
   } catch (err) {
     console.error('Delete authorization error:', err);
@@ -70,7 +81,7 @@ router.delete('/authorizations/:id', requireAdmin, requireAdminPermission('users
 // GET /login-logs - Get login history
 router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'), async (req, res) => {
   try {
-    const { page, limit, user_id, login_type } = req.query;
+    const { page, limit, user_id, login_type, ip, start_date, end_date } = req.query;
     const pageNum = parseInt(page) || 1;
     const limitNum = Math.min(parseInt(limit) || 50, 100);
     const offset = (pageNum - 1) * limitNum;
@@ -91,6 +102,18 @@ router.get('/login-logs', requireAdmin, requireAdminPermission('login_logs.read'
     if (login_type) {
       conditions.push('l.login_type = ?');
       params.push(login_type);
+    }
+    if (ip) {
+      conditions.push('l.ip = ?');
+      params.push(String(ip).trim().slice(0, 64));
+    }
+    if (start_date && /^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
+      conditions.push('l.created_at >= ?');
+      params.push(`${start_date} 00:00:00`);
+    }
+    if (end_date && /^\d{4}-\d{2}-\d{2}$/.test(String(end_date))) {
+      conditions.push('l.created_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      params.push(`${end_date} 00:00:00`);
     }
 
     if (conditions.length > 0) {

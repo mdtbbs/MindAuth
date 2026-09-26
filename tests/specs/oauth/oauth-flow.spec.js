@@ -66,14 +66,28 @@ test.describe('OAuth Authorization Code Flow', () => {
     const authRes = await page.request.get(authorizeUrl, { maxRedirects: 0 });
     expect(authRes.status()).toBe(302);
 
-    const location = authRes.headers()['location'];
+    let location = new URL(authRes.headers()['location'], 'http://localhost');
     expect(location).toBeTruthy();
-    expect(location).toContain('code=');
+    if (location.pathname === '/authorize') {
+      const csrf = await (await page.request.get('/api/csrf-token')).json();
+      const consent = await page.request.post('/api/authorize/consent', {
+        headers: { 'X-CSRF-Token': csrf.csrf_token || '' },
+        data: {
+          decision: 'approve', client_id: location.searchParams.get('client_id'),
+          redirect_uri: location.searchParams.get('redirect_uri'), response_type: location.searchParams.get('response_type'),
+          state: location.searchParams.get('state'), scope: location.searchParams.get('scope'),
+          code_challenge: location.searchParams.get('code_challenge'), code_challenge_method: location.searchParams.get('code_challenge_method'),
+        },
+      });
+      expect(consent.status()).toBe(200);
+      const result = await consent.json();
+      expect(result.success).toBe(true);
+      location = new URL(result.redirect_to, 'http://localhost');
+    }
+    expect(location.searchParams.get('code')).toBeTruthy();
 
     // 提取授权码
-    const codeMatch = location.match(/code=([^&]+)/);
-    expect(codeMatch).toBeTruthy();
-    const authCode = codeMatch[1];
+    const authCode = location.searchParams.get('code');
 
     // Step 4: 用 code 交换 token（使用 page.request 保持认证上下文）
     const tokenRes = await page.request.post('/api/token', {

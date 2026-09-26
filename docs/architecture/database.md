@@ -1,6 +1,6 @@
 # MindAuth 数据模型
 
-MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数据，使用 Redis 承载会话缓存、短时令牌与限流计数；schema 由启动时自动执行的版本化迁移管理。
+MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承载会话缓存、短时令牌与限流计数；schema 由启动时自动执行的版本化迁移管理。
 
 > **维护提示**：修改 src/db/migrations/**、src/db/* 时需同步更新本文档。
 
@@ -26,6 +26,8 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | [`012_oauth_client_metrics.sql`](../../src/db/migrations/012_oauth_client_metrics.sql) | OAuth 日使用汇总与错误统计 |
 | [`013_seed_official_android_public_client.sql`](../../src/db/migrations/013_seed_official_android_public_client.sql) | 官方 Android Public Client 初始配置 |
 | [`014_public_clients_self_service.sql`](../../src/db/migrations/014_public_clients_self_service.sql) | 增加已删除状态与公开目录索引；仅自动启用 secret 为空、PKCE 开启、scope 全部位于允许列表且登记回调不含公网 HTTP 的 Public Client 草稿/pending；不安全旧配置保留原状态，scope 检查兼容 MySQL 5.7 |
+| [`015_email_domain_rules.sql`](../../src/db/migrations/015_email_domain_rules.sql) | 新增邮箱域名规则与命中事件表、白名单模式配置；规则唯一键为 `(match_type, pattern, policy)`，deny 与 allow 可并存 |
+| [`016_developer_application_review.sql`](../../src/db/migrations/016_developer_application_review.sql) | 增加应用审核备注，以及开发者申请/创建时间、授权创建时间、登录 IP、用户审计、封禁、锁定和 Native 活动会话索引；复用 011 已有的 owner/status 索引 |
 
 ## MySQL 表
 
@@ -57,7 +59,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
-| `clients` | OAuth 应用注册 | `client_id`（UNIQUE，软删除后不复用）、`client_secret`（Confidential Client 哈希存储；Public Client 为 NULL）、`client_type`、`party_type`、`status`、`owner_user_id`、`requested_scopes`、`approved_scopes`、`redirect_uri`、`require_pkce`。无 OAuth 资源外键 |
+| `clients` | OAuth 应用注册 | `client_id`（UNIQUE，软删除后不复用）、`client_secret`（Confidential Client 哈希存储；Public Client 为 NULL）、`client_type`、`party_type`、`status`、`owner_user_id`、`requested_scopes`、`approved_scopes`、`admin_review_note`、`redirect_uri`、`require_pkce`。无 OAuth 资源外键 |
 | `authorizations` | 用户对客户端的授权记录 | `(user_id, client_id)` UNIQUE；`scope`、`last_used_at`。`client_id` 为字符串关联 `clients.client_id`（无外键约束） |
 | `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销；009 增加 nullable `native_session_id` 关联单设备 Native family |
 
@@ -68,12 +70,19 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | `admin_audit_logs` | 管理员操作审计 | `admin_id`（无外键，管理员被删后日志保留）、`action`、`target_type`/`target_id`、`details`（JSON）、`ip_address` |
 | `user_audit_logs` | 普通用户安全事件（登录失败、改密、改邮箱等） | `user_id`（外键级联）、`action`、`details`（JSON）、`ip_address`、`user_agent` |
 
+### 邮箱策略
+
+| 表 | 用途 | 关键列与关联 |
+|----|------|-------------|
+| `email_domain_rules` | exact/suffix allow/deny 域名规则 | `(match_type, pattern, policy)` 唯一；`enabled`、`hit_count`、`last_hit_at`、`created_by`；活动规则索引支持快照加载 |
+| `email_policy_events` | 邮箱策略拒绝事件 | 只存 `email_domain`、`purpose`、可选 `user_id`/`ip_address`；不存完整邮箱或验证码；按时间、IP、规则建索引 |
+
 ### 配置
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
 | `email_config` | SMTP 配置，单行表（`CHECK (id = 1)`，种子插入 id=1） | `host`/`port`/`user`/`password`/`from`/`secure` |
-| `system_config` | 键值型运行时配置 | `key`（主键）、`value`、`description`；见下文 [runtimeConfig](#runtimeconfig-动态配置) |
+| `system_config` | 键值型运行时配置 | `key`（主键）、`value`、`description`；含 `email_allowlist_mode` 开关；见下文 [runtimeConfig](#runtimeconfig-动态配置) |
 
 ### 安全
 
@@ -124,6 +133,9 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | `sms:verify:fail:user:{userId}:{phone}` / `...:phone:{phone}` / `...:ip:{ip}` | 5min / 1h / 1h | 短信校验失败计数（阈值 5/10/20），校验成功清除 user 维度 | `modules/sms/smsBinding.js` |
 | `challenge_session:{csrfToken}` | 30min | 注册挑战问答会话状态 | `modules/challenges/challengeManager.js` |
 | `ip_bans_cache` | 5min | `ip_bans` 全表缓存（增删改时主动 DEL） | `modules/security/ipBanMatcher.js` |
+| `email_policy:snapshot:v1` | 30s | 活动邮箱域名规则和白名单模式快照；修改规则/模式时主动删除，Redis 不可用时从 MySQL 回源 | `modules/emailPolicy/emailPolicyService.js` |
+
+邮箱策略另有 1 秒进程内快照缓存；共享 Redis 键删除后多进程在本地 TTL 内最多短暂保留旧快照。
 
 ## runtimeConfig 动态配置
 

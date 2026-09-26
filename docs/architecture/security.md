@@ -102,12 +102,12 @@ Native `client_id` 白名单取自 `native_auth_clients`，仅启用 `mdtbbs-min
 | 角色 | 权限 |
 |------|------|
 | `super_admin`（旧值 `admin` 自动归一化） | `*` |
-| `user_admin` | 用户读写/重置密码/删除/封禁/解锁、授权与登录日志读 |
-| `security_admin` | 用户读+封禁/解锁、审计/短信审计读、IP 封禁读写 |
-| `config_admin` | 系统/客户端/短信/邮件配置读写 |
-| `readonly_admin` | 各资源只读 |
+| `user_admin` | 总览、用户读写/重置密码/删除/封禁/解锁、授权与登录日志读取、会话读取与撤销 |
+| `security_admin` | 总览、用户读取/封禁/解锁、审计/短信审计读取、IP 规则和邮箱策略读写、会话读取与撤销、风控读取 |
+| `config_admin` | 总览、系统/客户端/开发者应用审核/短信/邮件配置读写、邮箱策略读写 |
+| `readonly_admin` | 总览与用户/授权/会话/登录/审计/短信/客户端/开发者应用/配置/IP 规则/邮箱策略/风控只读 |
 
-路由用 `requireAdminPermission('xxx')` 声明所需权限。保护机制（`src/routes/admin/users.js`）：删除、封禁、改角色均禁止**对自己操作**；且当目标是最后一个 `super_admin`/`admin` 时拒绝移除或降级——系统永远保有至少一名超管，且管理员无法自降级。
+细分权限包括 `dashboard.read`、`email_rules.read/write`、`sessions.read/revoke`、`developers.read/review`。管理员账号管理使用 `admins.read/write`，目前仅 `super_admin` 拥有。路由用 `requireAdminPermission('xxx')` 声明所需权限，前端按同一权限集合隐藏入口并保护路由。保护机制（`src/routes/admin/users.js`）：删除、封禁、改角色均禁止**对自己操作**；且当目标是最后一个 `super_admin` 时拒绝移除或降级——系统永远保有至少一名超管，且管理员无法自降级。
 
 ## 审计三条线
 

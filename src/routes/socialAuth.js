@@ -13,6 +13,7 @@ const { isValidEmail, isValidPassword, isValidUsername } = require('../utils/val
 const sessionManager = require('../modules/sessions/sessionManager');
 const clientRegistry = require('../modules/admin/clientRegistry');
 const { logUserAudit } = require('../utils/userAudit');
+const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
 
 const router = express.Router();
 const cookieOptions = {
@@ -299,6 +300,11 @@ router.post('/qq/complete', async (req, res) => {
     // 验证字段格式
     if (!isValidUsername(username) || !isValidEmail(email) || !isValidPassword(password)) {
       return res.status(400).json({ success: false, code: 'INVALID_FIELDS', message: '用户名、邮箱或密码格式不正确' });
+    }
+
+    const emailDecision = await emailPolicy.checkEmail(email, { purpose: 'register', ipAddress: getClientIp(req) });
+    if (!emailDecision.allowed) {
+      return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
     }
 
     if (!/^\d{6}$/.test(String(emailCode))) {

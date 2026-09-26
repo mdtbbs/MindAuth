@@ -61,10 +61,29 @@ async function getAuthCode(request, clientId, redirectUri) {
     `&response_type=code&state=${encodeURIComponent('/')}`;
   const authRes = await request.get(authorizeUrl, { maxRedirects: 0 });
   expect(authRes.status()).toBe(302);
-  const location = authRes.headers()['location'];
-  const codeMatch = location.match(/code=([^&]+)/);
-  expect(codeMatch).toBeTruthy();
-  return codeMatch[1];
+  const location = new URL(authRes.headers()['location'], 'http://localhost');
+  if (location.pathname === '/authorize') {
+    const csrf = await getCsrf(request);
+    const consentRes = await request.post('/api/authorize/consent', {
+      headers: { 'X-CSRF-Token': csrf },
+      data: {
+        decision: 'approve', client_id: location.searchParams.get('client_id'),
+        redirect_uri: location.searchParams.get('redirect_uri'), response_type: location.searchParams.get('response_type'),
+        state: location.searchParams.get('state'), scope: location.searchParams.get('scope'),
+        code_challenge: location.searchParams.get('code_challenge'), code_challenge_method: location.searchParams.get('code_challenge_method'),
+      },
+    });
+    expect(consentRes.status()).toBe(200);
+    const result = await consentRes.json();
+    expect(result.success).toBe(true);
+    const consentLocation = new URL(result.redirect_to, 'http://localhost');
+    const consentCode = consentLocation.searchParams.get('code');
+    expect(consentCode).toBeTruthy();
+    return consentCode;
+  }
+  const code = location.searchParams.get('code');
+  expect(code).toBeTruthy();
+  return code;
 }
 
 test.beforeEach(async ({ request }) => {

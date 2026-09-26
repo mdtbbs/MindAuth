@@ -96,15 +96,29 @@ OAuth 客户端 CRUD 与密钥轮换，所有变更写管理员审计。
 | 导出 | 说明 |
 |------|------|
 | `createClient(data, actor)` | 创建（`data`: name/redirect_uri/require_pkce；`actor`: adminId/ipAddress），返回 `{ client_id, client_secret }` |
-| `updateClient(id, data, actor)` | 更新；`require_pkce` 仅显式传入时才更新（防部分更新误翻标志） |
+| `updateClient(id, data, actor)` | 更新；`require_pkce` 仅显式传入时才更新；已启用客户端的 scope 变更会撤销全部授权与 refresh/access token |
 | `rotateSecret(id, actor)` | 轮换密钥，返回新 `client_secret` |
 | `deleteClient(id, actor)` | 删除 |
+| `revokeClientAuthorizations(id, actor)` | 撤销该客户端全部授权、refresh token 与 access token，但不更改启用状态 |
 | `listClients()` / `getClient(id)` | 列表/单查（不返回 secret） |
 | `validateRedirectUri(uri)` | 回调地址校验，返回 `{ valid, error? }` |
 
 依赖：MySQL `clients`；`auditWriter.writeAdminAudit`；utils `token`。
 
-约束：`validateRedirectUri` 含 SSRF 防护——仅 http/https，拒绝 localhost 变体、`.local`/`.localhost`、RFC 1918 私网段、链路本地 169.254/16 与云元数据端点（`metadata.google.internal`、`169.254.169.254`）。
+约束：第三方 Public Client 新申请保持 pending，管理员审核通过前不能授权；修改已批准应用会重新审核并撤销既有授权。管理员调整已启用客户端的 OAuth scope 时，会撤销全部相关用户授权、refresh token 和 access token。`validateRedirectUri` 含 SSRF 防护——拒绝 localhost 变体、`.local`/`.localhost`、RFC 1918 私网段、链路本地 169.254/16 与云元数据端点（`metadata.google.internal`、`169.254.169.254`）；Native Public Client 可使用显式 loopback 回调。
+
+### emailPolicyService（`src/modules/emailPolicy/emailPolicyService.js`）
+
+注册、改邮箱和邮箱验证共用的域名策略服务。支持 exact/suffix 与 allow/deny，deny 优先；普通模式允许未命中地址，白名单模式要求命中 allow。域名小写、移除 `@` 并经 IDN ASCII 规范化，suffix 按标签边界匹配。
+
+| 导出 | 说明 |
+|------|------|
+| `checkEmail(email, { purpose, userId, ipAddress, override })` | 统一检查并记录域名级拒绝事件；override 仅供有权限的管理员明确使用 |
+| `normalizeDomain(value)` / `getEmailDomain(email)` | 规范化规则域名、提取邮件域名 |
+| `createRule` / `updateRule` / `deleteRule` / `listRules` | 邮箱规则 CRUD |
+| `getMode()` / `setMode(enabled)` / `invalidateCache()` | 白名单模式和 Redis/本地缓存失效 |
+
+缓存使用 Redis 共享快照（30 秒 TTL）和 1 秒本地 TTL；写规则后主动删除 Redis 键。Redis 不可用时回源 MySQL，既有邮箱账号不会因新规则被自动修改或封禁。接入入口包括 Web 验证码发送/注册、社交注册、改邮箱、验证邮件和 Native 注册。
 
 ### challengeManager（`src/modules/challenges/challengeManager.js`）
 

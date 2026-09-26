@@ -11,6 +11,7 @@ const qqProvider = require('../social/qqProvider');
 const { hashClientSecret } = require('../../utils/secrets');
 const { sendNativeSmsCode } = require('../../utils/aliyunSms');
 const { normalizePhone, isValidMainlandChinaPhone } = require('../../utils/phone');
+const defaultEmailPolicy = require('../emailPolicy/emailPolicyService');
 
 const TX_TTL_SECONDS = 600;
 const CODE_TTL_SECONDS = 90;
@@ -46,7 +47,7 @@ function verifyPhoneActionTicket(ticket) {
   return claims;
 }
 
-function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sendSms = sendNativeSmsCode, qq = qqProvider } = {}) {
+function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sendSms = sendNativeSmsCode, qq = qqProvider, emailPolicy = defaultEmailPolicy } = {}) {
   async function audit({ transactionId = null, userId = null, clientId = 'unknown', event, method = null, resultCode = null, req }) {
     try { await pool.execute('INSERT INTO native_auth_audit_logs (transaction_id, user_id, client_id, event, method, result_code, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [transactionId, userId, clientId, event, method, resultCode, req ? getClientIp(req) : null, req?.headers?.['user-agent']?.slice(0, 500) || null]); } catch (err) { console.warn('[NativeAuth] audit failed:', err.message); }
   }
@@ -165,6 +166,8 @@ function createNativeAuthService({ pool = defaultPool, redis = defaultRedis, sen
   async function register({ transactionId, challengeId, smsCode, username, password, email, phone, req }) {
     const tx = await getTransaction(transactionId);
     if (!isValidUsername(username) || !isValidPassword(password) || !isValidEmail(email)) throw new NativeAuthError('INVALID_REGISTRATION', 400, '用户名、邮箱或密码格式无效');
+    const emailDecision = await emailPolicy.checkEmail(email, { purpose: 'native_register', ipAddress: req ? getClientIp(req) : null });
+    if (!emailDecision.allowed) throw new NativeAuthError('EMAIL_DOMAIN_BLOCKED', 400, '暂不支持使用该邮箱');
     const [rows] = await pool.execute('SELECT c.*, NOW() AS db_now FROM native_sms_challenges c WHERE c.public_id = ? AND c.transaction_id = ? LIMIT 1', [challengeId, tx.id]); const challenge = rows[0];
     if (!challenge || challenge.consumed_at || new Date(challenge.expires_at) <= new Date(challenge.db_now) || !timingSafeCompare(challenge.code_digest, hmac(`sms:${challengeId}:${smsCode}`))) throw new NativeAuthError('SMS_CODE_INVALID', 400, '验证码无效或已过期');
     const normalizedPhone = normalizePhone(phone);

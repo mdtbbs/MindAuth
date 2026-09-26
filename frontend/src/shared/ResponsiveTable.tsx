@@ -38,25 +38,27 @@ export function ResponsiveTable<T>({
   }
 
   return (
-    <table className="rtable">
-      <thead>
-        <tr>
-          {columns.map((col) => (
-            <th key={col.accessor}>{col.header}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((row) => (
-          <tr key={keyExtractor(row)}>
+    <div className="rtable-wrap">
+      <table className="rtable">
+        <thead>
+          <tr>
             {columns.map((col) => (
-              <td key={col.accessor} data-label={col.header}>
-                {col.render(row)}
-              </td>
+              <th key={col.accessor}>{col.header}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {data.map((row) => (
+            <tr key={keyExtractor(row)}>
+              {columns.map((col) => (
+                <td key={col.accessor} data-label={col.header}>
+                  {col.render(row)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

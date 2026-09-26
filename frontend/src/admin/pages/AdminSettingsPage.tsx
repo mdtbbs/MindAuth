@@ -10,9 +10,10 @@ import type { EmailConfigData, SmsConfigData, SystemConfigItem } from '@/api/typ
 
 type SettingsTab = 'email' | 'sms' | 'system' | 'appearance';
 
-export function AdminSettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('email');
+export function AdminSettingsPage({ initialTab, standalone = false, showMessagingTabs = false, hideTitle = false }: { initialTab?: SettingsTab; standalone?: boolean; showMessagingTabs?: boolean; hideTitle?: boolean }) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'email');
   const { hasPermission } = useAdminAuth();
+  useEffect(() => { if (initialTab) setActiveTab(initialTab); }, [initialTab]);
 
   const tabs: { id: SettingsTab; label: string; perm: string }[] = [
     { id: 'email', label: '邮件配置', perm: 'email_config.read' },
@@ -21,35 +22,27 @@ export function AdminSettingsPage() {
     { id: 'appearance', label: '登录页外观', perm: 'config.read' },
   ];
 
-  const visibleTabs = tabs.filter((t) => hasPermission(t.perm));
+  const visibleTabs = tabs.filter((t) => hasPermission(t.perm) && (!showMessagingTabs || t.id === 'email' || t.id === 'sms'));
 
   return (
     <div>
-      <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-6)' }}>
-        系统配置
-      </h1>
+      {!hideTitle && <h1 className="admin-page-title">
+        {standalone ? (activeTab === 'email' || activeTab === 'sms' ? '邮件与短信' : activeTab === 'appearance' ? '登录页外观' : '注册与认证') : '系统配置'}
+      </h1>}
 
       {/* Tab bar */}
-      <div className="cluster" style={{ marginBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-2)' }}>
+      {(!standalone || showMessagingTabs) && <div className="admin-tabs" role="tablist" aria-label="配置分类">
         {visibleTabs.map((tab) => (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: 'var(--space-2) var(--space-4)',
-              border: 'none',
-              background: 'transparent',
-              borderBottom: activeTab === tab.id ? '2px solid var(--color-primary)' : '2px solid transparent',
-              color: activeTab === tab.id ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              fontWeight: activeTab === tab.id ? 'var(--weight-semibold)' : 'var(--weight-normal)',
-              cursor: 'pointer',
-              fontSize: 'var(--text-sm)',
-            }}
           >
-            {tab.label}
+            {showMessagingTabs ? (tab.id === 'email' ? '邮件' : '短信') : tab.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {activeTab === 'email' && <EmailConfigSection />}
       {activeTab === 'sms' && <SmsConfigSection />}
@@ -69,12 +62,19 @@ function AppearanceSection() {
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const loadBackground = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; background_url: string | null }>('/api/public/auth-page-config');
       setBackgroundUrl(res.background_url);
-    } catch { toast('error', '获取登录页背景配置失败'); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '获取登录页背景配置失败';
+      setLoadError(message);
+      toast('error', message);
+    }
     finally { setLoading(false); }
   }, [toast]);
 
@@ -116,6 +116,7 @@ function AppearanceSection() {
   }
 
   if (loading) return <LoadingState />;
+  if (loadError) return <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadBackground()}>重试</Button></div>;
 
   return (
     <Card>
@@ -167,6 +168,7 @@ function EmailConfigSection() {
   const { toast } = useToast();
   const [config, setConfig] = useState<EmailConfigData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -179,6 +181,7 @@ function EmailConfigSection() {
   const [testEmail, setTestEmail] = useState('');
 
   const loadConfig = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; config: EmailConfigData | null }>('/api/admin/email-config');
       if (res.config) {
@@ -189,7 +192,7 @@ function EmailConfigSection() {
         setFrom(res.config.from || '');
         setSecure(!!res.config.secure);
       }
-    } catch { toast('error', '获取邮件配置失败'); }
+    } catch (error) { const message = error instanceof Error ? error.message : '获取邮件配置失败'; setLoadError(message); toast('error', message); }
     finally { setLoading(false); }
   }, [toast]);
 
@@ -225,6 +228,7 @@ function EmailConfigSection() {
   }
 
   if (loading) return <LoadingState />;
+  if (loadError) return <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadConfig()}>重试</Button></div>;
 
   const canWrite = hasPermission('email_config.write');
 
@@ -277,6 +281,7 @@ function SmsConfigSection() {
   const { toast } = useToast();
   const [config, setConfig] = useState<SmsConfigData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -288,6 +293,7 @@ function SmsConfigSection() {
   const [testPhone, setTestPhone] = useState('');
 
   const loadConfig = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; config: SmsConfigData | null }>('/api/admin/sms-config');
       if (res.config) {
@@ -297,7 +303,7 @@ function SmsConfigSection() {
         setSignName(res.config.sign_name || '');
         setTemplateCode(res.config.template_code || '');
       }
-    } catch { toast('error', '获取短信配置失败'); }
+    } catch (error) { const message = error instanceof Error ? error.message : '获取短信配置失败'; setLoadError(message); toast('error', message); }
     finally { setLoading(false); }
   }, [toast]);
 
@@ -338,6 +344,7 @@ function SmsConfigSection() {
   }
 
   if (loading) return <LoadingState />;
+  if (loadError) return <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadConfig()}>重试</Button></div>;
 
   const canWrite = hasPermission('sms_config.write');
 
@@ -396,15 +403,17 @@ function SystemConfigSection() {
   const { toast } = useToast();
   const [configs, setConfigs] = useState<SystemConfigItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
   const loadConfigs = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; system: SystemConfigItem[] }>('/api/admin/config');
       // auth_background_url 由「登录页外观」tab 专管（含旧文件清理），此处隐藏避免双入口
       setConfigs((res.system || []).filter((c) => c.key !== 'auth_background_url'));
-    } catch { toast('error', '获取系统配置失败'); }
+    } catch (error) { const message = error instanceof Error ? error.message : '获取系统配置失败'; setLoadError(message); toast('error', message); }
     finally { setLoading(false); }
   }, [toast]);
 
@@ -422,58 +431,52 @@ function SystemConfigSection() {
   }
 
   if (loading) return <LoadingState />;
+  if (loadError) return <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadConfigs()}>重试</Button></div>;
 
   const canWrite = hasPermission('config.write');
+  const labels: Record<string, string> = {
+    registration_enabled: '允许新用户注册',
+    password_min_length: '密码最小长度',
+    password_require_complexity: '要求密码复杂度',
+    session_lifetime_days: '登录会话有效期（天）',
+    audit_retention_days: '管理日志保留（天）',
+    sms_audit_retention_days: '短信记录保留（天）',
+  };
+  const orderedKeys = ['registration_enabled', 'password_min_length', 'password_require_complexity', 'session_lifetime_days', 'audit_retention_days', 'sms_audit_retention_days'];
+  const readableConfigs = orderedKeys.map((key) => configs.find((cfg) => cfg.key === key)).filter((cfg): cfg is SystemConfigItem => Boolean(cfg));
+  const beginEdit = (cfg: SystemConfigItem) => { setEditingKey(cfg.key); setEditValue(cfg.value); };
+  const saveImmediate = async (cfg: SystemConfigItem, value: string) => {
+    try { await api.put(`/api/admin/config/${cfg.key}`, { value }); toast('success', '配置已更新'); await loadConfigs(); }
+    catch (err) { toast('error', err instanceof Error ? err.message : '更新失败'); }
+  };
 
-  return (
+  return <div className="admin-config-layout">
     <Card>
-      <div className="stack">
-        {configs.map((cfg) => (
-          <div key={cfg.key} className="cluster cluster--spread" style={{
-            padding: 'var(--space-3)',
-            borderBottom: '1px solid var(--color-border)',
-          }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)' }}>{cfg.key}</div>
-              {cfg.description && (
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>{cfg.description}</div>
-              )}
-            </div>
-            <div style={{ flex: 1 }}>
-              {editingKey === cfg.key ? (
-                <div className="cluster" style={{ gap: 'var(--space-2)' }}>
-                  <input
-                    className="field__input"
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <Button size="sm" onClick={() => handleSave(cfg.key)}>保存</Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditingKey(null)}>取消</Button>
-                </div>
-              ) : (
-                <div className="cluster cluster--spread">
-                  <code style={{ fontSize: 'var(--text-sm)', background: 'var(--color-bg-sunken)', padding: 'var(--space-1) var(--space-2)', borderRadius: 'var(--radius-sm)' }}>
-                    {cfg.value}
-                  </code>
-                  {canWrite && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => { setEditingKey(cfg.key); setEditValue(cfg.value); }}
-                    >
-                      编辑
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
+      <div className="admin-section-heading"><h2>注册与密码</h2><p>调整注册开关、密码要求和会话时长。</p></div>
+      <div className="admin-setting-list">
+        {readableConfigs.map((cfg) => <div key={cfg.key} className="admin-setting-row">
+          <div><strong>{labels[cfg.key]}</strong>{cfg.description && <small>{cfg.description}</small>}</div>
+          <div className="admin-setting-control">
+            {editingKey === cfg.key ? <>
+              <input aria-label={labels[cfg.key]} type="number" min="1" max="3650" value={editValue} onChange={(e) => setEditValue(e.target.value)} />
+              <Button size="sm" onClick={() => handleSave(cfg.key)}>保存</Button><Button size="sm" variant="ghost" onClick={() => setEditingKey(null)}>取消</Button>
+            </> : <>
+              <span className="admin-setting-value">{cfg.key === 'registration_enabled' || cfg.key === 'password_require_complexity' ? (cfg.value === '1' ? '开启' : '关闭') : cfg.key === 'password_min_length' ? `${cfg.value} 位` : `${cfg.value} 天`}</span>
+              {canWrite && (cfg.key === 'registration_enabled' || cfg.key === 'password_require_complexity'
+                ? <button className={`admin-switch ${cfg.value === '1' ? 'is-on' : ''}`} type="button" role="switch" aria-checked={cfg.value === '1'} aria-label={labels[cfg.key]} onClick={() => void saveImmediate(cfg, cfg.value === '1' ? '0' : '1')} />
+                : <Button size="sm" variant="secondary" onClick={() => beginEdit(cfg)}>修改</Button>)}
+            </>}
           </div>
-        ))}
-        {configs.length === 0 && (
-          <p style={{ color: 'var(--color-text-muted)' }}>暂无系统配置</p>
-        )}
+        </div>)}
+        <div className="admin-setting-row"><div><strong>邮箱注册与验证</strong><small>当前注册流程要求完成邮箱验证码校验；邮箱为账号注册方式。</small></div><span className="admin-badge is-neutral">由认证流程强制</span></div>
       </div>
     </Card>
-  );
+    <details className="admin-advanced-config">
+      <summary>高级配置（原始键值）</summary>
+      <Card><div className="admin-setting-list">{configs.map((cfg) => <div key={cfg.key} className="admin-setting-row">
+        <div><code>{cfg.key}</code>{cfg.description && <small>{cfg.description}</small>}</div>
+        <div className="admin-setting-control">{editingKey === cfg.key ? <><input value={editValue} onChange={(e) => setEditValue(e.target.value)} /><Button size="sm" onClick={() => handleSave(cfg.key)}>保存</Button><Button size="sm" variant="ghost" onClick={() => setEditingKey(null)}>取消</Button></> : <><code>{cfg.value}</code>{canWrite && <Button size="sm" variant="ghost" onClick={() => beginEdit(cfg)}>编辑</Button>}</>}</div>
+      </div>)}</div></Card>
+    </details>
+  </div>;
 }

@@ -221,6 +221,7 @@ RFC 8628 Device Flow 是受支持的第三方授权流程。客户端使用 `/ap
 | GET | `/api/admin/me` | 管理 | — | 当前管理员信息与权限 |
 | GET | `/api/admin/users` | 管理 | `users.read` | 用户列表（搜索/分页） |
 | GET | `/api/admin/users/:id` | 管理 | `users.read` | 用户详情及关联活动 |
+| GET | `/api/admin/users/admins` | 管理 | `admins.read` | 管理员目录与角色权限 |
 | PUT | `/api/admin/users/:id` | 管理 | `users.write` | 更新用户（角色/用户名等） |
 | DELETE | `/api/admin/users/:id` | 管理 | `users.delete`；10/小时 | 删除用户 |
 | POST | `/api/admin/users/:id/reset-password` | 管理 | `users.reset_password`；20/小时 | 重置用户密码 |
@@ -228,11 +229,22 @@ RFC 8628 Device Flow 是受支持的第三方授权流程。客户端使用 `/ap
 | POST | `/api/admin/users/:id/mute` | 管理 | `users.ban` | 禁言用户 |
 | DELETE | `/api/admin/users/:id/ban` | 管理 | `users.ban` | 解封/解除禁言 |
 | POST | `/api/admin/users/:id/unlock` | 管理 | `users.unlock` | 解锁被锁定账号 |
+| DELETE | `/api/admin/users/:id/sessions` | 管理 | `sessions.revoke` | 注销用户全部会话 |
+| DELETE | `/api/admin/users/:id/authorizations` | 管理 | `authorizations.revoke` | 撤销用户全部 OAuth 授权与令牌 |
+| GET | `/api/admin/overview` | 管理 | `dashboard.read` | 管理总览运营与风控数据 |
 | GET | `/api/admin/clients` | 管理 | `clients.read` | OAuth 客户端列表 |
 | POST | `/api/admin/clients` | 管理 | `clients.write`；20/小时 | 创建客户端 |
 | PUT | `/api/admin/clients/:id` | 管理 | `clients.write` | 更新客户端 |
 | POST | `/api/admin/clients/:id/rotate-secret` | 管理 | `clients.write` | 轮换客户端密钥（新 secret 仅回显一次） |
 | DELETE | `/api/admin/clients/:id` | 管理 | `clients.write` | 删除客户端 |
+| POST | `/api/admin/clients/:id/revoke-authorizations` | 管理 | `clients.write` | 撤销该客户端全部用户授权和令牌 |
+| GET | `/api/admin/developer-applications` | 管理 | `developers.read` | 开发者应用申请列表 |
+| PATCH | `/api/admin/developer-applications/:id/review` | 管理 | `developers.review` | 审核 Public Client 申请 |
+| GET | `/api/admin/email-policy` | 管理 | `email_rules.read` | 邮箱域名规则与模式 |
+| POST | `/api/admin/email-policy` | 管理 | `email_rules.write` | 新增邮箱域名规则 |
+| PUT | `/api/admin/email-policy/:id` | 管理 | `email_rules.write` | 修改邮箱域名规则 |
+| DELETE | `/api/admin/email-policy/:id` | 管理 | `email_rules.write` | 删除邮箱域名规则 |
+| PATCH | `/api/admin/email-policy/mode` | 管理 | `email_rules.write` | 切换白名单模式 |
 | GET | `/api/admin/stats` | 管理 | — | 仪表盘统计 |
 | GET | `/api/admin/email-config` | 管理 | `email_config.read` | 读取 SMTP 配置（脱敏） |
 | PUT | `/api/admin/email-config` | 管理 | `email_config.write` | 更新 SMTP 配置 |
@@ -245,7 +257,7 @@ RFC 8628 Device Flow 是受支持的第三方授权流程。客户端使用 `/ap
 | POST | `/api/admin/auth-background` | 管理 | `config.write` | 上传登录页自定义背景图（≤5MB，JPEG/PNG/WebP） |
 | DELETE | `/api/admin/auth-background` | 管理 | `config.write` | 恢复默认登录页背景 |
 | GET | `/api/admin/authorizations` | 管理 | `authorizations.read` | 全部授权记录 |
-| DELETE | `/api/admin/authorizations/:id` | 管理 | `users.write` | 撤销授权记录并吊销其令牌 |
+| DELETE | `/api/admin/authorizations/:id` | 管理 | `authorizations.revoke` | 撤销授权记录并吊销其令牌 |
 | GET | `/api/admin/login-logs` | 管理 | `login_logs.read` | 登录日志（可筛选） |
 | GET | `/api/admin/ip-bans` | 管理 | `ip_bans.read` | IP 黑名单列表 |
 | POST | `/api/admin/ip-bans` | 管理 | `ip_bans.write` | 添加 IP 封禁（IPv4/IPv6，支持 CIDR） |

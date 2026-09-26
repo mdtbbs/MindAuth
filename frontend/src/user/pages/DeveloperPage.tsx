@@ -40,6 +40,11 @@ function appLabel(application: DeveloperApplication) {
   return application.party_type === 'first_party' ? 'MDTBBS 官方应用' : '第三方应用';
 }
 
+function statusLabel(status: AppStatus) {
+  const labels: Record<AppStatus, string> = { pending: '待审核', approved: '已批准', rejected: '已拒绝', suspended: '已停用', draft: '草稿', deleted: '已删除' };
+  return labels[status] || status;
+}
+
 export function DeveloperPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -125,14 +130,14 @@ export function DeveloperPage() {
       {!isCreate && !selected && !loading ? <AccountSection title="应用不存在" description="应用已删除，或你没有管理权限。"><Link className="btn btn--secondary" to="/developer">返回开发者应用</Link></AccountSection> : null}
 
       {isCreate ? (
-        <AccountSection title="创建 Public Client" description="创建后会立即获得 client_id 并可开始 OAuth 2.0 + PKCE 登录，无需管理员审核。">
+        <AccountSection title="申请 Public Client" description="提交后会进入管理员审核。批准后应用即可使用 Authorization Code + PKCE。Public Client 不会生成 client_secret。">
           <ApplicationForm name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveLabel="创建应用" />
           {user && !user.phone_verified ? <p className="section-description">创建应用前需要先在 <Link to="/security">账户安全</Link> 完成手机号验证。</p> : null}
         </AccountSection>
       ) : null}
 
       {!isCreate && selected ? <>
-        <header className="developer-app-header"><AppAvatar name={selected.name} /><div><h2>{selected.name}</h2><p><span className={`public-app-label ${selected.party_type === 'first_party' ? 'public-app-label--official' : ''}`}>{appLabel(selected)}</span> <span className="status-badge status-badge--success">{selected.status === 'approved' ? '可立即使用' : selected.status === 'suspended' ? '已停用' : selected.status}</span></p></div><Link className="btn btn--secondary" to="/developer">返回列表</Link></header>
+        <header className="developer-app-header"><AppAvatar name={selected.name} /><div><h2>{selected.name}</h2><p><span className={`public-app-label ${selected.party_type === 'first_party' ? 'public-app-label--official' : ''}`}>{appLabel(selected)}</span> <span className={`status-badge ${selected.status === 'approved' ? 'status-badge--success' : selected.status === 'rejected' ? 'status-badge--danger' : 'status-badge--warning'}`}>{statusLabel(selected.status)}</span></p></div><Link className="btn btn--secondary" to="/developer">返回列表</Link></header>
         <nav className="developer-tabs" aria-label="应用管理分区">{tabs.map(([value, label]) => <button type="button" key={value} aria-current={tab === value ? 'page' : undefined} onClick={() => setTab(value)}>{label}</button>)}</nav>
         {tab !== 'usage' ? <AccountSection title={tab === 'overview' ? '应用概览' : tab === 'oauth' ? 'OAuth 配置' : 'API 权限'} description={tab === 'oauth' ? 'Public Client 必须使用 Authorization Code + PKCE S256。' : undefined}>
           {tab === 'overview' ? <>

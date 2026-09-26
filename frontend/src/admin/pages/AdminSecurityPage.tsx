@@ -12,8 +12,9 @@ import type { IpBan, Challenge, UserField, PaginationData } from '@/api/types';
 
 type SecurityTab = 'ip_bans' | 'challenges' | 'fields';
 
-export function AdminSecurityPage() {
-  const [activeTab, setActiveTab] = useState<SecurityTab>('ip_bans');
+export function AdminSecurityPage({ initialSection, standalone = false, hideTitle = false }: { initialSection?: SecurityTab; standalone?: boolean; hideTitle?: boolean }) {
+  const [activeTab, setActiveTab] = useState<SecurityTab>(initialSection || 'ip_bans');
+  useEffect(() => { if (initialSection) setActiveTab(initialSection); }, [initialSection]);
 
   const tabs: { id: SecurityTab; label: string; perm: string }[] = [
     { id: 'ip_bans', label: 'IP 黑名单', perm: 'ip_bans.read' },
@@ -26,12 +27,12 @@ export function AdminSecurityPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-6)' }}>
-        安全设置
-      </h1>
+      {!hideTitle && <h1 className="admin-page-title">
+        {standalone ? (activeTab === 'ip_bans' ? 'IP 规则' : activeTab === 'fields' ? '用户资料字段' : '注册验证问题') : '安全设置'}
+      </h1>}
 
       {/* Tab bar */}
-      <div className="cluster" style={{ marginBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-2)' }}>
+      {!standalone && <div className="cluster" style={{ marginBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-2)' }}>
         {visibleTabs.map((tab) => (
           <button
             key={tab.id}
@@ -50,7 +51,7 @@ export function AdminSecurityPage() {
             {tab.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {activeTab === 'ip_bans' && <IpBansSection />}
       {activeTab === 'challenges' && <ChallengesSection />}
@@ -66,10 +67,14 @@ function IpBansSection() {
   const { toast } = useToast();
   const [bans, setBans] = useState<IpBan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [pagination, setPagination] = useState<PaginationData | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [deleteBan, setDeleteBan] = useState<IpBan | null>(null);
+  const [editBan, setEditBan] = useState<IpBan | null>(null);
+  const [editReason, setEditReason] = useState('');
+  const [editExpiry, setEditExpiry] = useState('');
 
   // Form state
   const [ip, setIp] = useState('');
@@ -79,14 +84,16 @@ function IpBansSection() {
   const [formLoading, setFormLoading] = useState(false);
 
   const loadBans = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; bans: IpBan[]; pagination?: PaginationData }>(
         `/api/admin/ip-bans?page=${currentPage}&limit=20`
       );
       setBans(res.bans);
       if (res.pagination) setPagination(res.pagination);
-    } catch {
-      toast('error', '获取 IP 黑名单失败');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '获取 IP 黑名单失败';
+      setLoadError(message); toast('error', message);
     } finally {
       setLoading(false);
     }
@@ -139,6 +146,26 @@ function IpBansSection() {
     finally { setFormLoading(false); }
   }
 
+  function openEdit(ban: IpBan) {
+    setEditBan(ban);
+    setEditReason(ban.reason || '');
+    setEditExpiry(ban.expires_at ? new Date(new Date(ban.expires_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '');
+  }
+
+  async function handleEdit() {
+    if (!editBan) return;
+    setFormLoading(true);
+    try {
+      await api.put(`/api/admin/ip-bans/${editBan.id}`, { reason: editReason.trim() || null, expires_at: editExpiry ? new Date(editExpiry).toISOString() : null });
+      setEditBan(null); await loadBans(); toast('success', 'IP 规则已更新');
+    } catch (err) { toast('error', err instanceof Error ? err.message : '更新失败'); }
+    finally { setFormLoading(false); }
+  }
+
+  function setExpiryAfter(hours: number) {
+    setEditExpiry(new Date(Date.now() + hours * 60 * 60 * 1000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+  }
+
   return (
     <>
       <Card>
@@ -151,6 +178,8 @@ function IpBansSection() {
         )}
         {loading ? (
           <SkeletonTable rows={5} columns={4} />
+        ) : loadError ? (
+          <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadBans()}>重试</Button></div>
         ) : (
           <ResponsiveTable
             columns={[
@@ -166,7 +195,7 @@ function IpBansSection() {
                 header: '操作',
                 accessor: 'actions',
                 render: (b: IpBan) => (
-                  <Button size="sm" variant="danger" onClick={() => setDeleteBan(b)}>删除</Button>
+                  <div className="admin-row-actions"><Button size="sm" variant="secondary" onClick={() => openEdit(b)}>编辑</Button><Button size="sm" variant="danger" onClick={() => setDeleteBan(b)}>删除</Button></div>
                 ),
               }] : []),
             ]}
@@ -202,6 +231,15 @@ function IpBansSection() {
         </div>
       </Dialog>
 
+      <Dialog open={!!editBan} onClose={() => setEditBan(null)} title="编辑 IP 规则" footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setEditBan(null)}>取消</Button><Button onClick={handleEdit} loading={formLoading}>保存</Button></div>}>
+        <div className="admin-form-stack">
+          <p>规则：<code>{editBan?.ip_address}{editBan?.cidr_prefix != null ? `/${editBan.cidr_prefix}` : ''}</code></p>
+          <TextField label="原因" value={editReason} onChange={e => setEditReason(e.target.value)} />
+          <label className="field"><span className="field__label">到期时间（留空表示永久）</span><input className="field__input" type="datetime-local" value={editExpiry} onChange={e => setEditExpiry(e.target.value)} /></label>
+          <div className="admin-row-actions"><button type="button" onClick={() => setEditExpiry('')}>永久</button><button type="button" onClick={() => setExpiryAfter(1)}>1 小时</button><button type="button" onClick={() => setExpiryAfter(24)}>24 小时</button><button type="button" onClick={() => setExpiryAfter(24 * 7)}>7 天</button><button type="button" onClick={() => setExpiryAfter(24 * 30)}>30 天</button></div>
+        </div>
+      </Dialog>
+
       <Dialog
         open={!!deleteBan}
         onClose={() => setDeleteBan(null)}
@@ -226,6 +264,7 @@ function ChallengesSection() {
   const { toast } = useToast();
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editChallenge, setEditChallenge] = useState<Challenge | null>(null);
   const [deleteChallenge, setDeleteChallenge] = useState<Challenge | null>(null);
@@ -236,10 +275,11 @@ function ChallengesSection() {
   const [formLoading, setFormLoading] = useState(false);
 
   const loadChallenges = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; challenges: Challenge[] }>('/api/admin/challenges');
       setChallenges(res.challenges);
-    } catch { toast('error', '获取题库失败'); }
+    } catch (error) { const message = error instanceof Error ? error.message : '获取题库失败'; setLoadError(message); toast('error', message); }
     finally { setLoading(false); }
   }, [toast]);
 
@@ -298,6 +338,8 @@ function ChallengesSection() {
         )}
         {loading ? (
           <SkeletonTable rows={5} columns={4} />
+        ) : loadError ? (
+          <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadChallenges()}>重试</Button></div>
         ) : (
           <ResponsiveTable
             columns={[
@@ -380,46 +422,60 @@ function FieldsSection() {
   const { toast } = useToast();
   const [fields, setFields] = useState<UserField[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editField, setEditField] = useState<UserField | null>(null);
   const [deleteField, setDeleteField] = useState<UserField | null>(null);
 
   const [fieldKey, setFieldKey] = useState('');
   const [fieldLabel, setFieldLabel] = useState('');
   const [fieldType, setFieldType] = useState('text');
+  const [choicesText, setChoicesText] = useState('');
   const [isRequired, setIsRequired] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
   const loadFields = useCallback(async () => {
+    setLoadError('');
     try {
       const res = await api.get<{ success: boolean; fields: UserField[] }>('/api/admin/user-fields');
       setFields(res.fields);
-    } catch { toast('error', '获取字段列表失败'); }
+    } catch (error) { const message = error instanceof Error ? error.message : '获取字段列表失败'; setLoadError(message); toast('error', message); }
     finally { setLoading(false); }
   }, [toast]);
 
   useEffect(() => { loadFields(); }, [loadFields]);
 
   function resetForm() {
-    setFieldKey(''); setFieldLabel(''); setFieldType('text');
+    setFieldKey(''); setFieldLabel(''); setFieldType('text'); setChoicesText('');
     setIsRequired(false); setIsPublic(true); setFormError('');
+  }
+
+  function openFieldEditor(field?: UserField) {
+    setEditField(field || null);
+    setFieldKey(field?.field_key || ''); setFieldLabel(field?.field_label || ''); setFieldType(field?.field_type || 'text');
+    setIsRequired(Boolean(field?.is_required)); setIsPublic(field ? Boolean(field.is_public) : true);
+    try { const options = field?.options ? JSON.parse(field.options) : null; setChoicesText(Array.isArray(options?.choices) ? options.choices.join('\n') : ''); }
+    catch { setChoicesText(''); }
+    setFormError(''); setDialogOpen(true);
+  }
+
+  function fieldOptions() {
+    return fieldType === 'select' ? { choices: choicesText.split('\n').map(choice => choice.trim()).filter(Boolean) } : null;
   }
 
   async function handleCreate() {
     if (!fieldKey.trim() || !fieldLabel.trim()) { setFormError('field_key 和 field_label 必填'); return; }
-    if (!/^[a-z][a-z0-9_]{1,30}$/.test(fieldKey)) { setFormError('field_key 须为小写字母开头，仅含字母数字下划线'); return; }
+    if (!editField && !/^[a-z][a-z0-9_]{1,30}$/.test(fieldKey)) { setFormError('field_key 须为小写字母开头，仅含字母数字下划线'); return; }
+    if (fieldType === 'select' && !fieldOptions()?.choices.length) { setFormError('下拉选项至少填写一项'); return; }
 
     setFormLoading(true); setFormError('');
     try {
-      await api.post('/api/admin/user-fields', {
-        field_key: fieldKey.trim(),
-        field_label: fieldLabel.trim(),
-        field_type: fieldType,
-        is_required: isRequired,
-        is_public: isPublic,
-      });
-      setDialogOpen(false); resetForm(); loadFields(); toast('success', '字段已创建');
+      const data = { field_key: fieldKey.trim(), field_label: fieldLabel.trim(), field_type: fieldType, is_required: isRequired, is_public: isPublic, options: fieldOptions() };
+      if (editField) await api.put(`/api/admin/user-fields/${editField.id}`, { field_label: data.field_label, field_type: data.field_type, is_required: data.is_required, is_public: data.is_public, options: data.options });
+      else await api.post('/api/admin/user-fields', data);
+      setDialogOpen(false); resetForm(); setEditField(null); loadFields(); toast('success', editField ? '字段已更新' : '字段已创建');
     } catch (err: unknown) { setFormError(err instanceof Error ? err.message : '创建失败'); }
     finally { setFormLoading(false); }
   }
@@ -434,29 +490,40 @@ function FieldsSection() {
     finally { setFormLoading(false); }
   }
 
+  async function moveField(field: UserField, direction: -1 | 1) {
+    const ordered = [...fields].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+    const index = ordered.findIndex(item => item.id === field.id); const next = index + direction;
+    if (next < 0 || next >= ordered.length) return;
+    [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+    try { await api.patch('/api/admin/user-fields/sort', { orders: ordered.map((item, order) => ({ id: item.id, sort_order: order })) }); await loadFields(); }
+    catch (err) { toast('error', err instanceof Error ? err.message : '排序失败'); }
+  }
+
   return (
     <>
       <Card>
         {hasPermission('config.write') && (
           <div style={{ marginBottom: 'var(--space-4)' }}>
-            <Button size="sm" onClick={() => { resetForm(); setDialogOpen(true); }}>添加字段</Button>
+            <Button size="sm" onClick={() => openFieldEditor()}>添加字段</Button>
           </div>
         )}
         {loading ? (
           <SkeletonTable rows={5} columns={4} />
+        ) : loadError ? (
+          <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadFields()}>重试</Button></div>
         ) : (
           <ResponsiveTable
             columns={[
               { header: 'Key', accessor: 'key', render: (f) => <code style={{ fontSize: 'var(--text-xs)' }}>{f.field_key}</code> },
               { header: '标签', accessor: 'label', render: (f) => f.field_label },
-              { header: '类型', accessor: 'type', render: (f) => f.field_type },
+              { header: '类型', accessor: 'type', render: (f) => f.field_type === 'select' ? '下拉选择' : f.field_type },
               { header: '必填', accessor: 'required', render: (f) => f.is_required ? '是' : '否' },
               { header: '公开', accessor: 'public', render: (f) => f.is_public ? '是' : '否' },
               ...(hasPermission('config.write') ? [{
                 header: '操作',
                 accessor: 'actions',
                 render: (f: UserField) => (
-                  <Button size="sm" variant="danger" onClick={() => setDeleteField(f)}>删除</Button>
+                  <div className="admin-row-actions"><Button size="sm" variant="ghost" onClick={() => moveField(f, -1)}>上移</Button><Button size="sm" variant="ghost" onClick={() => moveField(f, 1)}>下移</Button><Button size="sm" variant="secondary" onClick={() => openFieldEditor(f)}>编辑</Button><Button size="sm" variant="danger" onClick={() => setDeleteField(f)}>删除</Button></div>
                 ),
               }] : []),
             ]}
@@ -470,16 +537,16 @@ function FieldsSection() {
       <Dialog
         open={dialogOpen}
         onClose={() => { setDialogOpen(false); resetForm(); }}
-        title="添加自定义字段"
+        title={editField ? '编辑自定义字段' : '添加自定义字段'}
         footer={
           <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => { setDialogOpen(false); resetForm(); }}>取消</Button>
-            <Button onClick={handleCreate} loading={formLoading}>创建</Button>
+            <Button variant="secondary" onClick={() => { setDialogOpen(false); resetForm(); setEditField(null); }}>取消</Button>
+            <Button onClick={handleCreate} loading={formLoading}>{editField ? '保存' : '创建'}</Button>
           </div>
         }
       >
         <div className="stack">
-          <TextField label="field_key" value={fieldKey} onChange={(e) => setFieldKey(e.target.value)} error={formError} hint="小写字母开头，仅含字母数字下划线" placeholder="e.g. discord_id" />
+          <TextField label="field_key" value={fieldKey} disabled={Boolean(editField)} onChange={(e) => setFieldKey(e.target.value)} error={formError} hint="小写字母开头，仅含字母数字下划线" placeholder="e.g. discord_id" />
           <TextField label="field_label" value={fieldLabel} onChange={(e) => setFieldLabel(e.target.value)} placeholder="显示名称" />
           <div>
             <label className="field__label">field_type</label>
@@ -487,9 +554,11 @@ function FieldsSection() {
               <option value="text">text</option>
               <option value="textarea">textarea</option>
               <option value="number">number</option>
+              <option value="select">select</option>
               <option value="url">url</option>
             </select>
           </div>
+          {fieldType === 'select' && <label className="field"><span className="field__label">下拉选项（每行一项）</span><textarea className="field__input" rows={4} value={choicesText} onChange={e => setChoicesText(e.target.value)} placeholder={'选项一\n选项二'} /></label>}
           <label className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={isRequired} onChange={(e) => setIsRequired(e.target.checked)} />
             <span style={{ fontSize: 'var(--text-sm)' }}>必填</span>

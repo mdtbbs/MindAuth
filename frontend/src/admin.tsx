@@ -6,6 +6,7 @@ import { ErrorBoundary } from '@/shared/ErrorBoundary';
 import '@/design/tokens.css';
 import '@/design/components.css';
 import '@/design/layout.css';
+import '@/admin/admin.css';
 
 const rootElement = document.getElementById('root');
 if (rootElement) {

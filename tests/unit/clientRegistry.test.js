@@ -7,7 +7,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { validateRedirectUri, validateApplication, assertPhoneVerifiedDeveloper, createOwnerApplication, updateOwnerApplication, deleteOwnerApplication } = require('../../src/modules/admin/clientRegistry');
+const { validateRedirectUri, validateApplication, assertPhoneVerifiedDeveloper, createOwnerApplication, updateOwnerApplication, deleteOwnerApplication, updateClient } = require('../../src/modules/admin/clientRegistry');
 const { pool } = require('../../src/db');
 const tokenStore = require('../../src/modules/oauth/tokenStore');
 
@@ -92,7 +92,7 @@ test('requires a verified phone number before a user can create an application',
   }
 });
 
-test('creates verified users Public Clients as immediately approved, secretless PKCE applications', async () => {
+test('creates verified users Public Clients as pending, secretless PKCE applications', async () => {
   const originalExecute = pool.execute;
   const originalGetConnection = pool.getConnection;
   const inserts = [];
@@ -119,10 +119,10 @@ test('creates verified users Public Clients as immediately approved, secretless 
     const second = await createOwnerApplication(9, body);
 
     assert.equal(inserts.length, 2, 'the self-service flow does not impose an application count cap');
-    assert.match(inserts[0].sql, /client_secret, redirect_uri[\s\S]*VALUES \(\?, \?, \?, \?, NULL, \?, 1, 'public', 'third_party', 'approved'/);
-    assert.deepEqual(inserts[0].params.slice(-2), ['["profile","forum.read"]', '["profile","forum.read"]']);
+    assert.match(inserts[0].sql, /client_secret, redirect_uri[\s\S]*VALUES \(\?, \?, \?, \?, NULL, \?, 1, 'public', 'third_party', 'pending'/);
+    assert.deepEqual(inserts[0].params.slice(-2), [9, '["profile","forum.read"]']);
     for (const application of [first, second]) {
-      assert.equal(application.status, 'approved');
+      assert.equal(application.status, 'pending');
       assert.equal(application.client_type, 'public');
       assert.equal(application.party_type, 'third_party');
       assert.equal(application.client_secret, null);
@@ -130,6 +130,47 @@ test('creates verified users Public Clients as immediately approved, secretless 
   } finally {
     pool.execute = originalExecute;
     pool.getConnection = originalGetConnection;
+  }
+});
+
+test('admin scope changes revoke authorizations and cached access tokens for every affected user', async () => {
+  const originalExecute = pool.execute;
+  const originalGetConnection = pool.getConnection;
+  const originalRevoke = tokenStore.revokeAccessTokensForUserClient;
+  const mutations = [];
+  const invalidated = [];
+  const connection = {
+    beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}, release: () => {},
+    execute: async (sql, params = []) => {
+      mutations.push({ sql, params });
+      if (sql.includes('FROM clients WHERE id = ? FOR UPDATE')) {
+        return [[{ id: 22, client_id: 'scope-edit-client', client_type: 'confidential', party_type: 'first_party',
+          status: 'approved', requested_scopes: '["openid","profile"]', approved_scopes: '["openid","profile"]' }]];
+      }
+      if (sql.includes('FROM authorizations WHERE client_id = ?') && sql.includes('UNION SELECT user_id FROM refresh_tokens')) {
+        return [[{ user_id: 7 }, { user_id: 11 }]];
+      }
+      return [{ affectedRows: 1 }];
+    },
+  };
+  try {
+    pool.execute = async () => [{ affectedRows: 1 }];
+    pool.getConnection = async () => connection;
+    tokenStore.revokeAccessTokensForUserClient = async (userId, clientId) => { invalidated.push([userId, clientId]); };
+
+    const result = await updateClient(22, {
+      name: 'Identity client', redirect_uris: ['https://client.example.test/callback'], require_pkce: true,
+      scopes: ['openid', 'profile', 'email'],
+    }, { adminId: 1, ipAddress: '127.0.0.1' });
+
+    assert.deepEqual(result, { updated: true, scopes_changed: true, revoked_users: 2 });
+    assert.ok(mutations.some(({ sql }) => sql.startsWith('UPDATE refresh_tokens SET revoked = 1')));
+    assert.ok(mutations.some(({ sql }) => sql.startsWith('DELETE FROM authorizations')));
+    assert.deepEqual(invalidated, [[7, 'scope-edit-client'], [11, 'scope-edit-client']]);
+  } finally {
+    pool.execute = originalExecute;
+    pool.getConnection = originalGetConnection;
+    tokenStore.revokeAccessTokensForUserClient = originalRevoke;
   }
 });
 
@@ -146,7 +187,7 @@ test('updates app details, redirects, and scopes immediately, then revokes token
         return [[{ id: 15, client_id: 'stable-client-id', status: 'approved', client_type: 'public',
           party_type: 'third_party', requested_scopes: '["profile","forum.read"]' }]];
       }
-      if (sql.startsWith('SELECT DISTINCT user_id FROM refresh_tokens')) return [[{ user_id: 9 }]];
+      if (sql.includes('FROM authorizations WHERE client_id = ?') && sql.includes('UNION SELECT user_id FROM refresh_tokens')) return [[{ user_id: 9 }]];
       if (sql.startsWith('SELECT user_id, scope FROM authorizations')) return [[{ user_id: 9, scope: 'profile forum.read' }]];
       return [{ affectedRows: 1 }];
     },
@@ -158,16 +199,15 @@ test('updates app details, redirects, and scopes immediately, then revokes token
     await assert.deepEqual(await updateOwnerApplication(9, 15, {
       name: 'New Launcher', description: 'Updated summary', website_url: 'https://example.test',
       redirect_uris: ['http://localhost:0/oauth/callback'], requested_scopes: ['profile', 'forum.write'],
-    }), { updated: true });
+    }), { updated: true, status: 'pending', re_review_required: true, scopes_changed: true });
 
     assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?')
       && params[0] === 'New Launcher' && params[3] === '["profile","forum.write"]'));
-    assert.ok(mutations.some(({ sql }) => sql.includes("status IN ('draft', 'pending') THEN 'approved'")));
+    assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?') && sql.includes("status = 'pending'") && params[3] === '["profile","forum.write"]'));
     assert.ok(mutations.some(({ sql, params }) => sql.startsWith('INSERT INTO oauth_client_redirect_uris')
       && params[1] === 'http://localhost:0/oauth/callback'));
     assert.ok(mutations.some(({ sql }) => sql.startsWith('UPDATE refresh_tokens SET revoked = 1')));
-    assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE authorizations SET scope = ?')
-      && params[0] === 'profile'));
+    assert.ok(mutations.some(({ sql }) => sql.startsWith('DELETE FROM authorizations')));
     assert.deepEqual(invalidated, [[9, 'stable-client-id']]);
   } finally {
     pool.getConnection = originalGetConnection;
@@ -186,7 +226,7 @@ test('soft-deletes owner applications, removes grants, and invalidates access to
     execute: async (sql, params = []) => {
       mutations.push({ sql, params });
       if (sql.startsWith('SELECT id FROM clients')) return [[{ id: 15 }]];
-      if (sql.startsWith('SELECT DISTINCT user_id')) return [[{ user_id: 9 }, { user_id: 12 }]];
+      if (sql.includes('FROM authorizations WHERE client_id = ?') && sql.includes('UNION SELECT user_id FROM refresh_tokens')) return [[{ user_id: 9 }, { user_id: 12 }]];
       return [{ affectedRows: 1 }];
     },
   };

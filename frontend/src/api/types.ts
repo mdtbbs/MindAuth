@@ -286,7 +286,11 @@ export interface AdminUserListItem {
   phone_verified: number | boolean;
   ban_status: string;
   lock_level: number;
+  locked_until?: string | null;
+  ban_expires_at?: string | null;
   created_at: string;
+  last_login_at?: string | null;
+  last_ip?: string | null;
 }
 
 export interface AdminUserDetail {
@@ -325,6 +329,11 @@ export interface AdminOAuthClient {
   description?: string;
   icon_url?: string;
   created_at: string;
+  owner_username?: string | null;
+  authorization_count?: number;
+  last_used_at?: string | null;
+  website_url?: string | null;
+  admin_review_note?: string | null;
 }
 
 export interface AdminCreatedClient {

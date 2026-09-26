@@ -325,7 +325,7 @@ async function revokeAllUserSessions(userId, options = {}) {
  */
 async function listUserSessions(userId, currentTokenHash) {
   const [rows] = await pool.execute(
-    `SELECT id, session_token, ip_address, device_info, created_at, last_active_at
+    `SELECT id, session_token, ip_address, user_agent, device_info, expires_at, created_at, last_active_at
      FROM user_sessions WHERE user_id = ? ORDER BY last_active_at DESC`,
     [userId]
   );
@@ -334,6 +334,8 @@ async function listUserSessions(userId, currentTokenHash) {
     id: s.id,
     session_type: 'web',
     ip_address: s.ip_address,
+    user_agent: s.user_agent,
+    expires_at: s.expires_at,
     device_info: s.device_info,
     is_current: currentTokenHash ? s.session_token === currentTokenHash : false,
     created_at: s.created_at,
@@ -349,6 +351,8 @@ async function listUserSessions(userId, currentTokenHash) {
     session_type: 'native',
     client_id: s.client_id,
     ip_address: s.ip_address,
+    user_agent: null,
+    expires_at: null,
     device_info: `${s.client_id === 'mdtbbs-mindustry-mod' ? 'MDTBBS Mindustry Mod' : 'Native Client'} · ${s.device_name}`,
     is_current: false,
     created_at: s.created_at,
