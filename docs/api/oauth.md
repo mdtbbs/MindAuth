@@ -4,14 +4,14 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 
 > **维护提示**：修改 src/routes/oauth.js、src/modules/oauth/* 时需同步更新本文档及 [../third-party-integration.md](../third-party-integration.md)。
 
-> **文档分工**：第三方接入教程见 [../third-party-integration.md](../third-party-integration.md)。该指南定义当前对外支持的 Authorization Code + PKCE S256 契约。下文标记为“内部”或“旧版兼容”的端点不供新的第三方接入使用；RFC 8628 设备授权端点暂未纳入稳定外部契约。通用约定（错误格式、认证方式）见 [README.md](README.md)。
+> **文档分工**：第三方接入教程见 [../third-party-integration.md](../third-party-integration.md) 和 [Public Client PKCE 指南](../public-client-pkce.md)。桌面、移动和浏览器原生客户端使用无 secret 的 Public Client + Authorization Code + PKCE S256；服务端集成继续使用 Confidential Client。RFC 8628 设备授权端点暂未纳入稳定外部契约。
 
 **通用说明**：
 
 - 路由适配层：`src/routes/oauth.js`（挂载于 `/api`）；业务逻辑：`src/modules/oauth/oauthIssuer.js`。
 - 协议端点请求体为 **JSON**（`Content-Type: application/json`），不支持 form-encoded。
 - 对外接入流程和服务端示例见 [第三方 OAuth 接入指南](../third-party-integration.md)。MindAuth 发布 Discovery 和 UserInfo，但不签发 ID Token、也不提供 `jwks_uri`；依赖签名 ID Token 验证的客户端不适用于当前契约。
-- 当前公开契约端点：`GET /api/authorize`、`POST /api/token`、`POST /api/refresh`、`GET /api/userinfo`、`POST /api/introspect`、`POST /api/revoke` 和 `GET /.well-known/openid-configuration`。`client_secret` 通过 JSON body 提交；不能保密该值的客户端不应调用这些凭证端点。
+- 当前公开契约端点：`GET /api/authorize`、`POST /api/token`、`GET /api/userinfo`、`POST /api/introspect`、`POST /api/revoke` 和 `GET /.well-known/openid-configuration`。`/api/token` 同时接收授权码和 refresh grant。旧 `POST /api/refresh` 暂作兼容。
 - 当前代码还保留 RFC 8628 设备授权实现，但运行时挂载路径是 `/api/device/*`，旧文档使用的 `/api/oauth/device/*` 与实际路由不符；验证链接和审批表单也尚未与 CSRF/请求体处理对齐，因此不应作为已发布接口使用。细节见 [设备授权内部实现参考](../DEVICE_AUTH.md)。
 - 标准错误格式（RFC 6749）：`{ "error": "<code>", "error_description": "<中文描述>" }`。未捕获异常返回 `500 server_error`。
 - CSRF：`/token` `/refresh` `/introspect` `/revoke` `/verify` 在豁免名单中；`DELETE /authorizations/:client_id` **需要** `X-CSRF-Token`。
@@ -26,12 +26,12 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | 参数（query） | 必填 | 说明 |
 |------|------|------|
 | `client_id` | 是 | 应用标识 |
-| `redirect_uri` | 是 | 必须与注册值**完全相等** |
-| `state` | 否 | 防 CSRF 随机串，原样附加到回调 |
-| `scope` | 否 | 空格分隔，仅允许 `openid` `profile` `email`；缺省为三者全部 |
+| `redirect_uri` | 是 | 必须匹配应用已注册的一个 URI。HTTPS 和自定义 scheme 精确匹配；loopback 只允许 `127.0.0.1` / `[::1]`，注册端口 `0` 时可匹配该 literal 上的随机运行时端口 |
+| `state` | Public 必填 | 防 CSRF 随机串，原样附加到回调 |
+| `scope` | 否 | 空格分隔，必须同时属于系统 scope 与该应用批准的 scope；缺省使用应用批准的全部 scope |
 | `response_type` | 否 | 若提供必须为 `code` |
-| `code_challenge` | 视客户端 | PKCE challenge = Base64URL(SHA256(code_verifier))；客户端 `require_pkce=1` 时必填 |
-| `code_challenge_method` | 否 | 仅接受 `S256`（不接受 plain）；缺省视为 `S256` |
+| `code_challenge` | Public 必填 | PKCE challenge = Base64URL(SHA256(code_verifier)) |
+| `code_challenge_method` | Public 必填 | 必须是 `S256`；不接受 `plain` |
 
 **响应**（均为 302 重定向，无 JSON）：
 
@@ -46,23 +46,26 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `unsupported_response_type` | response_type 存在且非 `code` |
 | `invalid_client` | client_id 未注册 |
 | `invalid_redirect` | redirect_uri 与注册值不符（非标准码） |
-| `invalid_scope` | 含 openid/profile/email 之外的 scope |
+| `invalid_scope` | scope 不在系统支持列表或不属于该客户端获批范围 |
 | `server_error` | 未捕获异常 |
 
-**特殊行为**：授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）；同时 upsert `authorizations` 记录并写入 `login_logs`（login_type=oauth）。
+**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。首次授权或请求此前未授予的 scope 时会显示同意页；缩小到已有 scope 子集可继续授权。批准后的 scope 写回现有 `authorizations` 记录。
 
 ---
 
 ## POST /api/token
 
-令牌交换端点（RFC 6749 §4.1.3）。**认证**：body 中 `client_id` + `client_secret`（timing-safe 比较）。
+令牌端点。`authorization_code` grant 兼容 RFC 6749 §4.1.3；`refresh_token` grant 也通过此路径完成。Confidential Client 使用 `client_id` + `client_secret`；Public Client 不发送 secret。
 
 | 参数（body） | 必填 | 说明 |
 |------|------|------|
-| `grant_type` | 是 | 必须为 `authorization_code` |
-| `code` | 是 | 授权码 |
-| `client_id` / `client_secret` | 是 | 客户端凭证 |
-| `code_verifier` | 视授权码 | 授权码携带 code_challenge 时必填，SHA256 后须与之匹配 |
+| `grant_type` | 是 | `authorization_code` 或 `refresh_token` |
+| `code` | 授权码 grant 必填 | 授权码 |
+| `redirect_uri` | 授权码 grant 必填 | 必须与签发授权码时一致 |
+| `refresh_token` | refresh grant 必填 | 当前 refresh token |
+| `client_id` | 是 | 应用标识 |
+| `client_secret` | Confidential 必填 | Public Client 不拥有 secret，也不能伪造形式 secret |
+| `code_verifier` | Public 必填 | 必须匹配授权时的 S256 challenge |
 
 **成功响应**（注意：**无** `success` 字段、**无** `user` 对象——用户信息请另调 `/api/userinfo`）：
 
@@ -78,26 +81,27 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 
 | error 码 | HTTP | 触发条件 |
 |------|------|------|
-| `unsupported_grant_type` | 400 | grant_type 缺失或非 `authorization_code`；或存储的 code_challenge_method 非 S256 |
-| `invalid_request` | 400 | 缺 code/client_id/client_secret；code 使用了 PKCE 但缺 code_verifier |
-| `invalid_client` | 401 | client_id/client_secret 无效 |
+| `unsupported_grant_type` | 400 | grant_type 不受支持；或存储的 code_challenge_method 非 S256 |
+| `invalid_request` | 400 | 缺当前 grant 必需参数；Public Client 缺 code_verifier |
+| `invalid_client` | 401 | client_id / Confidential secret 无效，或 Client 未批准/已停用 |
 | `invalid_grant` | 401 | code 无效/过期/已使用；code 与 client_id 不匹配；redirect_uri 不匹配；code_verifier 校验失败；授权用户不存在 |
 
 **特殊行为**：access_token 存 Redis（1h TTL，带 user/client 索引集）；refresh_token 存 MySQL（SHA-256 哈希，30 天）。
 
 ---
 
-## POST /api/refresh
+## POST /api/refresh（兼容路径）
 
-刷新令牌端点（RFC 6749 §6，独立路径而非复用 /token）。**认证**：body `client_id` + `client_secret`。
+旧版刷新端点，仍调用相同的 refresh rotation 实现。新客户端应 POST `/api/token` 并使用 `grant_type=refresh_token`。Confidential Client 提供 secret；Public Client 只需 `client_id`。
 
-> **接入提示：** Discovery 的 `grant_types_supported` 声明支持 `refresh_token`，但当前实现将刷新请求放在 `/api/refresh`；不要把 refresh grant POST 到 `/api/token`。
+> **兼容提示：** `/api/refresh` 不会立即删除，但新 SDK 应使用标准 `/api/token`。
 
 | 参数（body） | 必填 | 说明 |
 |------|------|------|
 | `grant_type` | 是 | 必须为 `refresh_token` |
 | `refresh_token` | 是 | 待轮换的刷新令牌 |
-| `client_id` / `client_secret` | 是 | 客户端凭证 |
+| `client_id` | 是 | 应用标识 |
+| `client_secret` | Confidential 必填 | Public Client 不发送 |
 
 **成功响应**：与 `/token` 相同结构（access_token / token_type / refresh_token / expires_in / scope）。
 
@@ -117,20 +121,20 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 
 ## POST /api/introspect
 
-令牌内省端点（RFC 7662）。**认证**：body `client_id` + `client_secret`。
+令牌内省端点（RFC 7662），仅供可信 Resource Server 使用。调用方必须是已批准的 Confidential Client，不能使用 Public Client 凭证探测 token。
 
 | 参数（body） | 必填 | 说明 |
 |------|------|------|
 | `token` | 是 | access_token 或 refresh_token |
-| `client_id` / `client_secret` | 是 | 客户端凭证 |
+| `client_id` / `client_secret` | 是 | 已批准 Confidential Resource Server 凭证 |
 
 **成功响应**（access token → 含 `exp`；refresh token → `token_type: "refresh_token"`、无 `exp`）：
 
 ```json
-{ "active": true, "token_type": "Bearer", "scope": "openid profile email", "client_id": "forum", "sub": "1", "exp": 1750000000 }
+{ "active": true, "token_type": "Bearer", "scope": "openid profile forum.read", "client_id": "desktop-app", "client_type": "public", "party_type": "third_party", "sub": "1", "exp": 1750000000 }
 ```
 
-不存在/过期/**不属于请求客户端**的 token 一律返回 `{ "active": false }`——客户端无法探测其他客户端的令牌。
+不存在或过期的 token 返回 `{ "active": false }`。普通 Confidential Client 只能内省自己签发的 token；配置为可信 Resource Server 的 `forum` Confidential Client 还可内省第三方 Public Client token，以便 MindFourm 验证论坛 API scope。响应中的 `client_id`、`client_type`、`party_type` 描述 token 的签发客户端，而不是内省调用方。
 
 错误：缺 token → 400 `invalid_request`；缺凭证或凭证错误 → 401 `invalid_client`。
 
@@ -172,13 +176,14 @@ UserInfo 端点（OIDC Core §5.3）。**认证**：`Authorization: Bearer {acce
 
 ## POST /api/revoke
 
-令牌撤销端点（RFC 7009）。**认证**：body `client_id` + `client_secret`。
+令牌撤销端点（RFC 7009）。Confidential Client 提供 secret；Public Client 可使用 `client_id` 撤销自己的 token。
 
 | 参数（body） | 必填 | 说明 |
 |------|------|------|
 | `token` | 是 | 待撤销的 access_token 或 refresh_token |
 | `token_type_hint` | 否 | 被接收但当前实现**未使用**（两类都会尝试） |
-| `client_id` / `client_secret` | 是 | 客户端凭证 |
+| `client_id` | 是 | 应用标识 |
+| `client_secret` | Confidential 必填 | Public Client 不发送 |
 
 **成功响应**：恒为 `{ "success": true }`——token 不存在、或属于其他客户端（拒绝撤销）时也返回成功（RFC 7009 §2.2），防探测。
 
@@ -234,7 +239,7 @@ UserInfo 端点（OIDC Core §5.3）。**认证**：`Authorization: Bearer {acce
 
 OIDC Discovery 1.0 / RFC 8414 元数据端点（定义于 `src/app.js`）。无认证。注意：MindAuth 不签发 RS256 ID Token，无 `jwks_uri`；用户信息经 `/api/userinfo` 获取。
 
-Discovery 元数据没有单独的 refresh endpoint 字段；虽然 `grant_types_supported` 包含 `refresh_token`，本服务实际使用上文记录的 `/api/refresh`。
+新客户端对 Discovery 返回的 `token_endpoint` 使用 `authorization_code` 和 `refresh_token` grants。`/api/refresh` 是向后兼容路径。
 
 **响应**（`baseUrl` 取自 `BASE_URL` 配置）：
 
@@ -248,8 +253,8 @@ Discovery 元数据没有单独的 refresh endpoint 字段；虽然 `grant_types
   "introspection_endpoint": "{baseUrl}/api/introspect",
   "response_types_supported": ["code"],
   "subject_types_supported": ["public"],
-  "scopes_supported": ["openid", "profile", "email"],
-  "token_endpoint_auth_methods_supported": ["client_secret_post"],
+  "scopes_supported": ["openid", "profile", "email", "forum.read", "forum.write", "resource.read", "resource.download", "resource.upload", "notification.read", "message.read", "message.write"],
+  "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
   "code_challenge_methods_supported": ["S256"],
   "grant_types_supported": ["authorization_code", "refresh_token"]
 }

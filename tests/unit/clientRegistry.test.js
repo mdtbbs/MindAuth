@@ -7,7 +7,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { validateRedirectUri } = require('../../src/modules/admin/clientRegistry');
+const { validateRedirectUri, validateApplication } = require('../../src/modules/admin/clientRegistry');
 
 test('accepts a normal public https URL', () => {
   assert.equal(validateRedirectUri('https://forum.example.com/callback').valid, true);
@@ -31,16 +31,44 @@ test('rejects non-http(s) protocols', () => {
   assert.equal(validateRedirectUri('javascript:alert(1)').valid, false);
 });
 
-test('blocks localhost and loopback (SSRF)', () => {
+test('allows only explicit loopback literals for native application redirects', () => {
+  for (const uri of [
+    'http://127.0.0.1:0/callback',
+    'http://127.0.0.1:49152/callback',
+    'http://[::1]:0/callback',
+    'http://[::1]:49152/callback',
+  ]) assert.equal(validateRedirectUri(uri).valid, true, `${uri} must be accepted`);
+
   for (const uri of [
     'http://localhost/cb',
-    'http://127.0.0.1/cb',
-    'http://[::1]/cb',
     'http://0.0.0.0/cb',
     'https://api.localhost/cb',
   ]) {
     assert.equal(validateRedirectUri(uri).valid, false, `${uri} must be blocked`);
   }
+});
+
+test('accepts valid custom application schemes and rejects dangerous schemes', () => {
+  assert.equal(validateRedirectUri('xenon://oauth/callback').valid, true);
+  assert.equal(validateRedirectUri('mdtbbs://oauth/callback').valid, true);
+  assert.equal(validateRedirectUri('com.example.client:/oauth2redirect').valid, true);
+  assert.equal(validateRedirectUri('com.example.client:///oauth2redirect').valid, true);
+  for (const uri of ['javascript:alert(1)', 'data:text/html,x', 'file:///tmp/callback', 'intent://oauth/callback']) {
+    assert.equal(validateRedirectUri(uri).valid, false, `${uri} must be rejected`);
+  }
+});
+
+test('validates a self-service public application and rejects scope/redirect escalation', () => {
+  const valid = validateApplication({
+    name: 'Desktop Client', website_url: 'https://client.example.org',
+    redirect_uris: ['com.example.client:/oauth2redirect', 'http://127.0.0.1:0/callback'],
+    requested_scopes: ['openid', 'profile', 'forum.read'],
+  });
+  assert.equal(valid.name, 'Desktop Client');
+  assert.deepEqual(valid.requestedScopes, ['openid', 'profile', 'forum.read']);
+  assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['https://client.example.org/cb'], requested_scopes: ['openid', 'admin'] }));
+  assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['http://192.168.1.2/cb'], requested_scopes: ['openid'] }));
+  assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['https://client.example.org/cb'], requested_scopes: 'openid profile' }));
 });
 
 test('blocks RFC1918 private ranges (SSRF)', () => {

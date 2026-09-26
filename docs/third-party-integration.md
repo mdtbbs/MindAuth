@@ -1,31 +1,31 @@
 # MindAuth 第三方 OAuth API 接入指南
 
-本文面向需要用 MindAuth 为网站提供登录的第三方开发者。本次对外接口契约覆盖 OAuth 2.0 Authorization Code + PKCE S256；完成客户端注册后，按本指南接入。端点参数、响应与错误码见 [OAuth / OIDC API 参考](api/oauth.md)，其中标记为“内部”或“旧版兼容”的端点不属于第三方接入接口。
+本文保留服务端 Confidential Client 的接入说明。Android、桌面、游戏 Mod、纯浏览器应用和第三方启动器应阅读 [Public Client PKCE 指南](public-client-pkce.md)：它们通过系统浏览器登录，不持有 `client_secret`。
 
 > **维护提示：** 修改 `src/routes/oauth.js`、`src/modules/oauth/*` 或 OIDC Discovery 元数据时，需同步更新本文和 [API 参考](api/oauth.md)。
 
 ## 接入前先确认
 
-- 使用 **Authorization Code + PKCE S256**。MindAuth 的 `/api/token` 还要求 `client_id` 和 `client_secret`，因此换 token 必须由可信后端完成。浏览器、SPA、桌面或手机客户端不得保存或发送 `client_secret`。
-- PKCE 不能代替客户端保密。本流程不支持纯 SPA、桌面或移动端直接换取令牌；若应用没有可信后端，请先与 MindAuth 管理员确认已批准的接入方案，不要把密钥打包进客户端。
+- 服务端网站可使用 Confidential Client + PKCE S256，`client_secret` 只留在后端。
+- 公开二进制或浏览器 bundle 使用开发者中心批准的 Public Client。Public Client 直接以 `client_id` + authorization code + verifier 调 `/api/token`，无 `client_secret`。
 - MindAuth 发布 OIDC Discovery 元数据和 UserInfo，但**不签发 ID Token，也不提供 JWKS**。需要验证签名 ID Token 的 OIDC 客户端不能直接使用当前契约；登录后应由后端调用 UserInfo，并以 `issuer + sub` 作为外部用户标识。
 - `/api/native/*` 与 `/api/v1/native/*` 是预先登记的第一方客户端接口，不是第三方 OAuth 接口。其他应用不得收集 MindAuth 密码或调用 Native Password Login。
 - RFC 8628 设备授权端点虽存在于当前服务，但未纳入本次公开契约；仓库中的 [设备授权实现说明](DEVICE_AUTH.md) 是旧版内部参考，暂勿依赖其中示例集成。
 
 ## 1. 注册 OAuth 应用
 
-联系 MindAuth 管理员创建客户端，并提供应用名称和完整回调 URL。生产回调必须使用 HTTPS。回调地址必须与注册值**逐字完全一致**，包括协议、主机、端口、路径和查询部分；不支持通配符。管理端还会拒绝 localhost 和私有/内部网络地址。
+Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助申请，管理员审核 Redirect URI 和 scopes。Public Client 支持 HTTPS、自定义 scheme 和显式 loopback literal；详见 [PKCE 指南](public-client-pkce.md)。
 
 取得以下配置后，将密钥放在服务端密钥管理或环境变量中：
 
 | 配置 | 用途 |
 |---|---|
 | `client_id` | 客户端公开标识 |
-| `client_secret` | 仅后端调用 token、refresh、introspect、revoke 时使用 |
+| `client_secret` | 仅 Confidential Client 的服务端凭证；Public Client 不存在该字段 |
 | `redirect_uri` | 注册过的回调地址 |
 | MindAuth issuer | 部署方提供的认证服务根地址，例如 `https://auth.example.com` |
 
-请让管理员为客户端启用 `require_pkce`。MindAuth 只接受 PKCE `S256`，不接受 `plain`。
+Confidential Client 可配置 `require_pkce`。Public Client 强制要求 PKCE。MindAuth 只接受 `S256`，不接受 `plain`。
 
 ## 2. 发现端点
 
@@ -33,22 +33,22 @@
 
 当前实现有两个需要适配的地方：
 
-1. Discovery 的 `grant_types_supported` 包含 `refresh_token`，但刷新请求实际发送到单独的 `{issuer}/api/refresh`，而不是 `/api/token`。
-2. Discovery 仅用于发现支持的端点和部分元数据；MindAuth 不返回 `id_token` 或 `jwks_uri`。用户资料需通过 UserInfo 获取。
+1. 新客户端在 Discovery 返回的 `/api/token` 使用 `authorization_code` 和 `refresh_token` grant；旧 `/api/refresh` 暂时兼容。
+2. MindAuth 不返回 `id_token` 或 `jwks_uri`。用户资料需通过 UserInfo 获取。
 
 ## 3. 登录流程
 
-1. 第三方后端创建不可预测的 `state` 和 PKCE `code_verifier`，暂存在与浏览器会话绑定的服务端 session 中。
+1. 客户端创建不可预测的 `state` 和 PKCE `code_verifier`。服务端应用可把它们保存在与浏览器会话绑定的服务端 session；Public Client 应在客户端内存或受保护存储中保管 verifier。
 2. 计算 `code_challenge = BASE64URL(SHA256(code_verifier))`，将浏览器重定向到 `/api/authorize`。
 3. MindAuth 要求用户登录后，把浏览器重定向到注册的回调地址，并附上一次性 `code` 和原样返回的 `state`。回调地址已有的查询参数会保留。
-4. 第三方后端校验 `state`，然后把 `code`、客户端凭证和 `code_verifier` POST 到 `/api/token`。
-5. 后端用返回的 `access_token` 调用 `/api/userinfo`，再创建本地登录会话。
+4. 客户端校验 `state`，然后把 `code`、`client_id`、`redirect_uri` 和 `code_verifier` POST 到 `/api/token`。只有 Confidential Client 同时提交后端 secret。
+5. 客户端用返回的 `access_token` 调用 MindFourm `/api/v1/*`；服务端网站可继续调用 `/api/userinfo` 并建立本地 session。
 
 授权码有效期为 5 分钟且只能兑换一次。`state` 应当随机、单次使用，并在回调时与发起登录的服务端会话比对。
 
-## 4. Node.js / Express 示例
+## 4. Node.js / Express Confidential Client 示例
 
-以下示例假设 Express 已配置**服务端 session 存储**和 HTTPS 安全 Cookie。把回调 URL 配成第 1 节登记的同一个值。示例将 verifier 保存在服务端 session，不经过浏览器存储。
+以下示例只演示持有服务端密钥的网站。公开桌面或移动应用不要复制 `client_secret` 代码，改用 [Public Client PKCE 指南](public-client-pkce.md)。示例假设 Express 已配置**服务端 session 存储**和 HTTPS 安全 Cookie。
 
 ```js
 import { createHash, randomBytes } from 'node:crypto';
@@ -106,6 +106,7 @@ app.get('/oauth/callback', async (req, res, next) => {
         code,
         client_id: CLIENT_ID,
         client_secret: CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
         code_verifier: pending.codeVerifier,
       }),
     });
@@ -154,12 +155,15 @@ app.get('/oauth/callback', async (req, res, next) => {
 
 `POST {issuer}/api/token`，请求体为 JSON（不接受 `application/x-www-form-urlencoded`）：
 
+下面的请求体演示 Confidential Client。Public Client 不发送 `client_secret`，并必须额外发送发起登录时保存的 `redirect_uri`；具体字段见 [Public Client 指南](public-client-pkce.md)。
+
 ```json
 {
   "grant_type": "authorization_code",
   "code": "callback 中的一次性授权码",
   "client_id": "客户端标识",
   "client_secret": "仅服务端持有的客户端密钥",
+  "redirect_uri": "https://app.example.com/oauth/callback",
   "code_verifier": "发起授权时暂存的原始 verifier"
 }
 ```
@@ -172,18 +176,18 @@ app.get('/oauth/callback', async (req, res, next) => {
 
 ### 刷新与撤销
 
-- access token 默认有效 1 小时；refresh token 默认有效 30 天。刷新使用 `POST {issuer}/api/refresh`，请求体包含 `grant_type: "refresh_token"`、当前 `refresh_token`、`client_id` 和 `client_secret`。
+- access token 默认有效 1 小时；refresh token 默认有效 30 天。新客户端在 `POST {issuer}/api/token` 使用 `grant_type: "refresh_token"`；旧 `POST {issuer}/api/refresh` 保持兼容。Public Client 只发送 `client_id` 与 `refresh_token`，Confidential Client 还发送 `client_secret`。
 - 每次刷新都会轮换 refresh token。必须原子替换并保存新 token，旧 token 立即失效；重放旧 token 会返回 `invalid_grant`。若怀疑凭证泄漏，请在 MindAuth 撤销该客户端授权，不要假设重放会自动撤销同一用户的其他令牌。
-- `POST {issuer}/api/revoke` 可撤销当前客户端自己的 access token 或 refresh token。内省使用 `POST {issuer}/api/introspect`；这些端点都需要客户端凭证。完整请求和响应见 [OAuth / OIDC API 参考](api/oauth.md)。
+- Public Client 可用 `client_id` 调用 `POST {issuer}/api/revoke` 撤销属于自己的 token。`/api/introspect` 仅供 Confidential Resource Server 使用。完整请求和响应见 [OAuth / OIDC API 参考](api/oauth.md)。
 - MindAuth 的浏览器退出不会自动清除第三方应用的本地 session。第三方需自行结束本地 session；若保存了 OAuth token，也应按产品退出策略撤销它们。
 
 ## 6. 常见错误与安全边界
 
 | 情况 | 处理方式 |
 |---|---|
-| `invalid_redirect` | 确认请求中的 `redirect_uri` 与管理端登记值逐字一致。授权请求校验失败会显示 MindAuth 自己的错误页，不会把错误重定向到未验证的回调地址。 |
+| `invalid_redirect` | 确认请求中的 `redirect_uri` 与应用登记规则匹配。授权请求校验失败会显示 MindAuth 自己的错误页，不会把错误重定向到未验证的回调地址。 |
 | `invalid_grant` | 授权码可能已过期、已使用、发给另一个客户端，或 PKCE verifier 不匹配；重新发起整个登录流程。 |
-| `invalid_client` | 检查服务端配置的 `client_id` / `client_secret`，不要将 secret 发给浏览器。 |
+| `invalid_client` | 检查应用是否已批准且未停用；Confidential Client 检查服务端 secret。Public Client 不发送 secret。 |
 | UserInfo 返回 `invalid_token` | access token 无效或过期；按需使用 refresh token 轮换，失败时重新登录。 |
 
 不要把以下内容当作第三方 OAuth 接入方式：
@@ -195,4 +199,5 @@ app.get('/oauth/callback', async (req, res, next) => {
 ## 相关文档
 
 - [OAuth / OIDC API 参考](api/oauth.md)：稳定外部端点的参数、响应与错误码，并区分内部和旧版端点。
+- [Public Client PKCE 指南](public-client-pkce.md)：桌面、移动、Mod 和浏览器原生应用接入。
 - [API 总索引](api/README.md)：认证方式、错误格式和全量端点索引。

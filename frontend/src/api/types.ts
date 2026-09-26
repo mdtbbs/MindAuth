@@ -77,6 +77,9 @@ export interface Authorization {
   id: number;
   client_id: string;
   client_name: string;
+  name?: string;
+  client_type?: 'public' | 'confidential';
+  party_type?: 'first_party' | 'third_party';
   scope: string;
   last_used_at: string | null;
   created_at: string;
@@ -310,7 +313,15 @@ export interface AdminOAuthClient {
   name: string;
   client_id: string;
   redirect_uri: string;
+  redirect_uris: { redirect_uri: string; redirect_type: string }[];
   require_pkce?: boolean;
+  client_type: 'public' | 'confidential';
+  party_type: 'first_party' | 'third_party';
+  status: 'draft' | 'pending' | 'approved' | 'rejected' | 'suspended';
+  owner_user_id: number | null;
+  requested_scopes: string[];
+  approved_scopes: string[];
+  client_secret_configured: boolean;
   description?: string;
   icon_url?: string;
   created_at: string;
@@ -319,7 +330,7 @@ export interface AdminOAuthClient {
 export interface AdminCreatedClient {
   success: boolean;
   client_id: string;
-  client_secret: string;
+  client_secret?: string | null;
 }
 
 export interface IpBan {

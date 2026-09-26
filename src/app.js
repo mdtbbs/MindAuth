@@ -23,6 +23,7 @@ const { client } = require('./redis');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const oauthRoutes = require('./routes/oauth');
+const developerClientRoutes = require('./routes/developerClients');
 const { sloLogoutHandler } = require('./routes/sloLogout');
 const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
@@ -196,6 +197,7 @@ function createApp(deps = {}) {
   app.use('/api/native', nativeClientRoutes);
   app.use('/api', authRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/developer/clients', developerClientRoutes);
   app.use('/api', oauthRoutes);
   app.use('/api/password', passwordRoutes);
   app.use('/api/email-verification', emailVerificationRoutes);
@@ -222,10 +224,11 @@ function createApp(deps = {}) {
       introspection_endpoint: `${baseUrl}/api/introspect`,
       response_types_supported: ['code'],
       subject_types_supported: ['public'],
-      scopes_supported: ['openid', 'profile', 'email'],
-      token_endpoint_auth_methods_supported: ['client_secret_post'],
+      scopes_supported: require('./modules/oauth/scopes').VALID_SCOPES,
+      token_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
       code_challenge_methods_supported: ['S256'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
+      revocation_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
     });
   });
 

@@ -53,11 +53,11 @@ npm run verify            # lint + typecheck + build
 
 ## OAuth 接入（3 步）
 
-1. 管理后台创建 OAuth 应用，获取 `client_id` / `client_secret`
-2. 重定向用户到 `/api/authorize?client_id=...&redirect_uri=...&state=...`
-3. 后端 `POST /api/token`（`grant_type=authorization_code` + `code` + 客户端凭据）换取 `access_token`
+1. 用户在开发者中心申请 Public Client，管理员批准 Redirect URI 与 scopes，得到 `client_id`（Public Client 没有 secret）
+2. 使用系统浏览器访问 `/api/authorize`，每次登录都使用 `state` 和 PKCE S256
+3. 回调后将 `code`、`redirect_uri`、`code_verifier` 和 `client_id` POST 到 `/api/token`
 
-完整接入教程（含示例代码与 FAQ）见 [docs/third-party-integration.md](docs/third-party-integration.md)。
+Public Client 桌面/移动接入见 [Public Client PKCE 指南](docs/public-client-pkce.md)；服务端 Confidential Client 接入见 [第三方 OAuth 接入指南](docs/third-party-integration.md)。
 
 ## 文档
 

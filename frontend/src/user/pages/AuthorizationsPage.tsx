@@ -56,8 +56,9 @@ export function AuthorizationsPage() {
                     <article className="authorization-item" key={item.id}>
                       <div className="authorization-item__header">
                         <div>
-                          <h3>{item.client_name}</h3>
-                          <p className="authorization-item__client">Client ID：<code>{item.client_id}</code></p>
+                        <h3>{item.client_name || item.name || item.client_id}</h3>
+                        <p className="authorization-item__client">Client ID：<code>{item.client_id}</code></p>
+                        <p>{item.client_type === 'public' ? 'Public Client' : 'Confidential Client'} · {item.party_type === 'third_party' ? '第三方应用' : '第一方应用'}</p>
                         </div>
                         <Button type="button" variant="danger" size="sm" onClick={() => setSelected(item)}>撤销授权</Button>
                       </div>
@@ -83,7 +84,7 @@ export function AuthorizationsPage() {
         title="撤销应用授权"
         footer={<><Button type="button" variant="ghost" onClick={() => setSelected(null)}>取消</Button><Button type="button" variant="danger" loading={revoking} onClick={() => void revokeAuthorization()}>确认撤销</Button></>}
       >
-        <p>撤销 <strong>{selected?.client_name}</strong> 的授权后，该应用将无法继续访问此账户，并且相关令牌会失效。</p>
+        <p>撤销 <strong>{selected?.client_name || selected?.name || selected?.client_id}</strong> 的授权后，该应用将无法继续访问此账户，并且相关令牌会失效。</p>
       </Dialog>
     </AccountShell>
   );

@@ -15,6 +15,9 @@ const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const { getClientIp } = require('../utils/request');
 const oauthIssuer = require('../modules/oauth/oauthIssuer');
+const oauthMetrics = require('../modules/oauth/oauthMetrics');
+const tokenStore = require('../modules/oauth/tokenStore');
+const { SCOPE_DESCRIPTIONS } = require('../modules/oauth/scopes');
 
 // Rate limiter for token verification / userinfo / user endpoints.
 // These endpoints are CSRF-exempt and accept bearer tokens, so a loose
@@ -40,11 +43,34 @@ const deviceApproveLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 *
 
 // Standard RFC 6749 error response
 function oauthError(res, statusCode, error, description) {
+  res.locals.oauthErrorCode = error;
   return res.status(statusCode).json({
     error,
     error_description: description
   });
 }
+
+// Persist only bounded daily aggregates for registered clients. This records
+// status/error codes, never token strings, authorization codes or request data.
+router.use((req, res, next) => {
+  const metered = new Set(['/authorize', '/authorize/consent', '/token', '/refresh', '/userinfo', '/introspect', '/revoke']);
+  if (!metered.has(req.path)) return next();
+  res.on('finish', () => {
+    void (async () => {
+      let clientId = req.body?.client_id || req.query?.client_id;
+      if (typeof clientId !== 'string') clientId = null;
+      if (!clientId && req.path === '/userinfo') {
+        const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+        if (match) clientId = (await tokenStore.getAccessToken(match[1]))?.client_id || null;
+      }
+      if (!clientId) return;
+      const location = String(res.getHeader('Location') || '');
+      const isFailure = res.statusCode >= 400 || Boolean(res.locals.oauthErrorCode) || /(?:[?&])error=/.test(location);
+      await oauthMetrics.record(clientId, isFailure ? res.locals.oauthErrorCode || (res.statusCode >= 500 ? 'server_error' : 'oauth_error') : null);
+    })().catch((error) => console.warn('[OAuth metrics] request classification failed:', error.message));
+  });
+  next();
+});
 
 // Helper to handle OAuthError in route handlers
 function handleOAuthError(res, err, context) {
@@ -79,18 +105,22 @@ router.get('/authorize', authorizeLimiter, async (req, res) => {
     });
 
     if (result.loginRedirect) {
-      // User not logged in — redirect to login with OAuth params
-      const clientData = result.client;
-      const encodedClientName = encodeURIComponent(clientData.name);
-      return res.redirect(
-        `/#/login?redirect_uri=${encodeURIComponent(redirect_uri)}` +
-        `&client_id=${client_id}` +
-        `&client_name=${encodedClientName}` +
-        `${state ? '&state=' + encodeURIComponent(state) : ''}` +
-        `${scope ? '&scope=' + encodeURIComponent(scope) : ''}` +
-        `${code_challenge ? '&code_challenge=' + encodeURIComponent(code_challenge) : ''}` +
-        `${code_challenge_method ? '&code_challenge_method=' + encodeURIComponent(code_challenge_method) : ''}`
-      );
+      const loginParams = new URLSearchParams({ client_id, redirect_uri, response_type: response_type || 'code' });
+      if (state) loginParams.set('state', state);
+      if (scope) loginParams.set('scope', scope);
+      if (code_challenge) loginParams.set('code_challenge', code_challenge);
+      if (code_challenge_method) loginParams.set('code_challenge_method', code_challenge_method);
+      loginParams.set('client_name', result.client.name);
+      return res.redirect(`/login?${loginParams.toString()}`);
+    }
+
+    if (result.consentRequired) {
+      const consentParams = new URLSearchParams({ client_id, redirect_uri, response_type: response_type || 'code' });
+      if (state) consentParams.set('state', state);
+      if (scope) consentParams.set('scope', scope);
+      if (code_challenge) consentParams.set('code_challenge', code_challenge);
+      if (code_challenge_method) consentParams.set('code_challenge_method', code_challenge_method);
+      return res.redirect(`/authorize?${consentParams.toString()}`);
     }
 
     res.redirect(result.redirectTo);
@@ -104,25 +134,67 @@ router.get('/authorize', authorizeLimiter, async (req, res) => {
   }
 });
 
+// The browser consent page receives only display-safe client and scope data.
+router.get('/authorize/consent-info', requireAuth, async (req, res) => {
+  try {
+    const { redirect_uri, client_id, state, scope, response_type, code_challenge, code_challenge_method } = req.query;
+    const result = await oauthIssuer.authorize({
+      clientId: client_id, redirectUri: redirect_uri, state, scope,
+      responseType: response_type, codeChallenge: code_challenge,
+      codeChallengeMethod: code_challenge_method, sessionToken: req.cookies.session,
+      previewOnly: true,
+    });
+    if (result.loginRedirect) return res.status(401).json({ success: false, message: '请先登录' });
+    res.json({
+      success: true,
+      consent_required: result.consentRequired,
+      client: result.client,
+      scopes: result.requestedScopes.map((name) => ({ name, ...SCOPE_DESCRIPTIONS[name] })),
+      previous_scopes: result.previousScopes || [],
+    });
+  } catch (err) {
+    handleOAuthError(res, err, 'OAuth consent preview error');
+  }
+});
+
+router.post('/authorize/consent', requireAuth, async (req, res) => {
+  try {
+    const { decision, redirect_uri, client_id, state, scope, response_type, code_challenge, code_challenge_method } = req.body || {};
+    let result;
+    if (decision === 'deny') {
+      result = await oauthIssuer.denyAuthorization({ clientId: client_id, redirectUri: redirect_uri, state });
+    } else if (decision === 'approve') {
+      result = await oauthIssuer.authorize({
+        clientId: client_id, redirectUri: redirect_uri, state, scope,
+        responseType: response_type, codeChallenge: code_challenge,
+        codeChallengeMethod: code_challenge_method, sessionToken: req.cookies.session,
+        ipAddress: getClientIp(req), consentGranted: true,
+      });
+    } else {
+      return oauthError(res, 400, 'invalid_request', '授权决定无效');
+    }
+    if (!result.redirectTo) return oauthError(res, 400, 'invalid_request', '授权流程尚未完成');
+    res.json({ success: true, redirect_to: result.redirectTo });
+  } catch (err) {
+    handleOAuthError(res, err, 'OAuth consent decision error');
+  }
+});
+
 // POST /token - Token exchange (third-party backend calls this)
 router.post('/token', tokenLimiter, async (req, res) => {
   try {
     const { code, client_id, client_secret, grant_type, code_verifier } = req.body;
-
-    // Validate grant_type
-    if (!grant_type || grant_type !== 'authorization_code') {
+    let result;
+    if (grant_type === 'authorization_code') {
+      if (!code || !client_id || !req.body.redirect_uri) return oauthError(res, 400, 'invalid_request', '缺少必需参数');
+      result = await oauthIssuer.exchangeCode({ code, clientId: client_id, clientSecret: client_secret,
+        redirectUri: req.body.redirect_uri, codeVerifier: code_verifier });
+    } else if (grant_type === 'refresh_token') {
+      if (!req.body.refresh_token || !client_id) return oauthError(res, 400, 'invalid_request', '缺少必需参数');
+      result = await oauthIssuer.refresh({ refreshToken: req.body.refresh_token, clientId: client_id, clientSecret: client_secret });
+    } else {
       return oauthError(res, 400, 'unsupported_grant_type', '不支持的 grant_type');
     }
-    if (!code || !client_id || !client_secret) {
-      return oauthError(res, 400, 'invalid_request', '缺少必需参数');
-    }
-
-    const result = await oauthIssuer.exchangeCode({
-      code,
-      clientId: client_id,
-      clientSecret: client_secret,
-      codeVerifier: code_verifier,
-    });
 
     res.json(result);
   } catch (err) {
@@ -139,7 +211,7 @@ router.post('/refresh', refreshLimiter, async (req, res) => {
     if (!grant_type || grant_type !== 'refresh_token') {
       return oauthError(res, 400, 'unsupported_grant_type', '不支持的 grant_type');
     }
-    if (!refresh_token || !client_id || !client_secret) {
+    if (!refresh_token || !client_id) {
       return oauthError(res, 400, 'invalid_request', '缺少必需参数');
     }
 
@@ -219,10 +291,6 @@ router.post('/revoke', revokeLimiter, async (req, res) => {
     if (!token) {
       return oauthError(res, 400, 'invalid_request', '缺少 token 参数');
     }
-    if (!client_id || !client_secret) {
-      return oauthError(res, 401, 'invalid_client', '缺少客户端认证');
-    }
-
     await oauthIssuer.revoke({
       token,
       tokenTypeHint: token_type_hint,

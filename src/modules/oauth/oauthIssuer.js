@@ -35,6 +35,7 @@ const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../../utils/
 const { maskPhone } = require('../../utils/phone');
 const sessionManager = require('../sessions/sessionManager');
 const tokenStore = require('./tokenStore');
+const { VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes } = require('./scopes');
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ const ACCESS_TOKEN_EXPIRY_MS = 60 * 60 * 1000;   // 1 hour
 const ACCESS_TOKEN_TTL_S = 3600;                  // 1 hour (Redis TTL)
 const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTH_CODE_TTL_S = 300;                      // 5 minutes
-const VALID_SCOPES = ['openid', 'profile', 'email'];
+const LEGACY_DEFAULT_SCOPES = ['openid', 'profile', 'email'];
 
 // ─── Error helper ─────────────────────────────────────────────
 
@@ -99,6 +100,13 @@ async function assertUserNotBanned(userId) {
   const [rows] = await pool.execute('SELECT ban_status FROM users WHERE id = ?', [userId]);
   if (!rows[0] || rows[0].ban_status === 'banned') {
     throw new OAuthError(401, 'invalid_token', rows[0] ? '用户已被封禁' : '用户不存在');
+  }
+}
+
+async function assertClientActive(clientId) {
+  const [rows] = await pool.execute('SELECT status FROM clients WHERE client_id = ? LIMIT 1', [clientId]);
+  if (!rows[0] || (rows[0].status && rows[0].status !== 'approved')) {
+    throw new OAuthError(401, 'invalid_token', '客户端未批准或已停用');
   }
 }
 
@@ -188,8 +196,8 @@ async function revokeNativeSession(sessionId) {
  * @param {string} clientSecret
  * @returns {Promise<object>} The client row
  */
-async function verifyClient(clientId, clientSecret) {
-  if (!clientId || !clientSecret) {
+async function verifyClient(clientId, clientSecret, { allowPublic = false } = {}) {
+  if (!clientId) {
     throw new OAuthError(401, 'invalid_client', '缺少客户端认证');
   }
   // Fetch by client_id only, then compare the secret in constant time —
@@ -199,6 +207,14 @@ async function verifyClient(clientId, clientSecret) {
     [clientId]
   );
   const row = rows[0];
+  if (!row || row.status && row.status !== 'approved') {
+    throw new OAuthError(401, 'invalid_client', '客户端未批准或已停用');
+  }
+  if (row.client_type === 'public') {
+    if (allowPublic && !clientSecret && !row.client_secret && row.require_pkce) return row;
+    throw new OAuthError(401, 'invalid_client', 'Public Client 不使用客户端密钥');
+  }
+  if (!clientSecret) throw new OAuthError(401, 'invalid_client', '缺少客户端认证');
   const storedSecret = row && String(row.client_secret || '');
   const presentedSecret = isHashedClientSecret(storedSecret) ? hashClientSecret(clientSecret) : String(clientSecret);
   if (!row || !timingSafeCompare(presentedSecret, storedSecret)) {
@@ -216,13 +232,59 @@ async function verifyClient(clientId, clientSecret) {
  */
 async function lookupClient(clientId) {
   const [rows] = await pool.execute('SELECT * FROM clients WHERE client_id = ?', [clientId]);
-  if (!rows[0]) {
+  if (!rows[0] || (rows[0].status && rows[0].status !== 'approved')) {
     throw new OAuthError(400, 'invalid_client', '无效的 client_id', {
       error: 'invalid_client',
       description: '无效的 client_id'
     });
   }
   return rows[0];
+}
+
+async function getRedirectUris(client) {
+  const [rows] = await pool.execute(
+    'SELECT redirect_uri, redirect_type FROM oauth_client_redirect_uris WHERE oauth_client_id = ? ORDER BY id',
+    [client.id],
+  );
+  return rows.length ? rows : (client.redirect_uri ? [{ redirect_uri: client.redirect_uri, redirect_type: 'web' }] : []);
+}
+
+function redirectUriMatches(requested, registered) {
+  if (requested === registered) return true;
+  try {
+    const requestedUrl = new URL(requested);
+    const registeredUrl = new URL(registered);
+    const loopback = (url) => url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname.toLowerCase());
+    if (!loopback(requestedUrl) || !loopback(registeredUrl)) return false;
+    if (requestedUrl.hostname.toLowerCase() !== registeredUrl.hostname.toLowerCase()) return false;
+    if (requestedUrl.pathname !== registeredUrl.pathname || requestedUrl.search !== registeredUrl.search) return false;
+    const requestedPort = requestedUrl.port ? Number(requestedUrl.port) : 80;
+    const registeredPort = registeredUrl.port ? Number(registeredUrl.port) : 80;
+    // RFC 8252 permits dynamically allocated loopback ports. Register port 0
+    // to authorize any non-privileged runtime port for this exact callback.
+    return (registeredPort === 0 && requestedPort >= 1 && requestedPort <= 65535) || requestedPort === registeredPort;
+  } catch {
+    return false;
+  }
+}
+
+function requestedScopes(scope, client) {
+  const approved = normalizeScopes(client.approved_scopes, LEGACY_DEFAULT_SCOPES);
+  const requested = typeof scope === 'string' && scope.trim()
+    ? [...new Set(scope.trim().split(/\s+/))]
+    : approved;
+  const invalid = requested.filter(value => !VALID_SCOPES.includes(value));
+  if (invalid.length) {
+    throw new OAuthError(400, 'invalid_scope', `无效的 scope: ${invalid.join(', ')}`, {
+      error: 'invalid_scope', description: `无效的 scope: ${invalid.join(', ')}`,
+    });
+  }
+  if (requested.some(value => !approved.includes(value))) {
+    throw new OAuthError(400, 'invalid_scope', '请求的 scope 未经管理员批准', {
+      error: 'invalid_scope', description: '请求的 scope 未经管理员批准',
+    });
+  }
+  return requested;
 }
 
 // ─── Authorize ────────────────────────────────────────────────
@@ -245,7 +307,7 @@ async function lookupClient(clientId) {
  * @param {string} params.ipAddress - client IP for login_logs
  * @returns {Promise<{ redirectTo?: string, loginRedirect?: string, client?: object, code?: string }>}
  */
-async function authorize({ clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, responseType, sessionToken, ipAddress }) {
+async function authorize({ clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, responseType, sessionToken, ipAddress, consentGranted = false, previewOnly = false }) {
   // 1. Validate required parameters
   if (!redirectUri || !clientId) {
     throw new OAuthError(400, 'invalid_request', '缺少必需参数', {
@@ -265,8 +327,16 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
   // 3. Look up client
   const clientData = await lookupClient(clientId);
 
-  // 4. Verify redirect_uri matches registered client
-  if (clientData.redirect_uri !== redirectUri) {
+  if (clientData.client_type === 'public' && (typeof state !== 'string' || !state || state.length > 1024)) {
+    throw new OAuthError(400, 'invalid_request', 'Public Client 请求必须提供有效的 state', {
+      error: 'invalid_request', description: 'Public Client 请求必须提供有效的 state',
+    });
+  }
+
+  // 4. Verify redirect_uri matches a registered URI. Loopback clients may
+  // register port 0 and bind a random runtime port on 127.0.0.1 or [::1].
+  const redirectUris = await getRedirectUris(clientData);
+  if (!redirectUris.some(entry => redirectUriMatches(redirectUri, entry.redirect_uri))) {
     throw new OAuthError(400, 'invalid_redirect', 'redirect_uri 不匹配', {
       error: 'invalid_redirect',
       description: 'redirect_uri 不匹配'
@@ -274,41 +344,33 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
   }
 
   // 5. PKCE validation (RFC 7636)
-  const clientRequiresPkce = clientData.require_pkce === 1;
+  const clientRequiresPkce = clientData.require_pkce === 1 || clientData.require_pkce === true || clientData.client_type === 'public';
   if (clientRequiresPkce) {
-    if (!codeChallenge) {
+    if (!codeChallenge || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) {
       throw new OAuthError(400, 'invalid_request', '该客户端要求 PKCE，缺少 code_challenge', {
         error: 'invalid_request',
         description: '该客户端要求 PKCE，缺少 code_challenge'
       });
     }
-    if (codeChallengeMethod && codeChallengeMethod !== 'S256') {
+    if (codeChallengeMethod !== 'S256') {
       throw new OAuthError(400, 'invalid_request', '仅支持 S256 code_challenge_method', {
         error: 'invalid_request',
         description: '仅支持 S256 code_challenge_method'
       });
     }
   } else if (codeChallenge) {
-    if (codeChallengeMethod && codeChallengeMethod !== 'S256') {
+    if (codeChallengeMethod !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) {
       throw new OAuthError(400, 'invalid_request', '仅支持 S256 code_challenge_method', {
         error: 'invalid_request',
         description: '仅支持 S256 code_challenge_method'
       });
     }
   }
-  const effectivePkceMethod = (codeChallenge && codeChallengeMethod) ? codeChallengeMethod : 'S256';
+  const effectivePkceMethod = 'S256';
 
   // 6. Validate scope
-  if (scope) {
-    const requestedScopes = scope.split(' ').filter(s => s);
-    const invalidScopes = requestedScopes.filter(s => !VALID_SCOPES.includes(s));
-    if (invalidScopes.length > 0) {
-      throw new OAuthError(400, 'invalid_scope', '无效的 scope: ' + invalidScopes.join(', '), {
-        error: 'invalid_scope',
-        description: '无效的 scope: ' + invalidScopes.join(', ')
-      });
-    }
-  }
+  const requested = requestedScopes(scope, clientData);
+  const requestedScope = requested.join(' ');
 
   // 7. Check if user is logged in via sessionManager
   let user = null;
@@ -324,9 +386,33 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
     return { loginRedirect: true, client: clientData };
   }
 
+  const [authorizationRows] = await pool.execute(
+    'SELECT scope FROM authorizations WHERE user_id = ? AND client_id = ? LIMIT 1',
+    [user.id, clientId],
+  );
+  const previouslyGranted = new Set(String(authorizationRows[0]?.scope || '').split(/\s+/).filter(Boolean));
+  const missingConsent = requested.some(item => !previouslyGranted.has(item));
+  if (previewOnly) {
+    return {
+      consentRequired: missingConsent,
+      client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
+        website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type },
+      requestedScopes: requested,
+      previousScopes: [...previouslyGranted],
+    };
+  }
+  if (missingConsent && !consentGranted) {
+    return {
+      consentRequired: true,
+      client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
+        website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type },
+      requestedScopes: requested,
+    };
+  }
+
   // 8. Generate authorization code
   const code = generateShortToken();
-  const effectiveScope = scope || 'openid profile email';
+  const effectiveScope = requestedScope;
 
   const authCodePayload = {
     client_id: clientId,
@@ -363,6 +449,20 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
   return { redirectTo: redirectTo.toString() };
 }
 
+async function denyAuthorization({ clientId, redirectUri, state }) {
+  if (!clientId || !redirectUri) throw new OAuthError(400, 'invalid_request', '缺少必需参数');
+  const client = await lookupClient(clientId);
+  const redirectUris = await getRedirectUris(client);
+  if (!redirectUris.some(entry => redirectUriMatches(redirectUri, entry.redirect_uri))) {
+    throw new OAuthError(400, 'invalid_redirect', 'redirect_uri 不匹配');
+  }
+  const destination = new URL(redirectUri);
+  destination.searchParams.set('error', 'access_denied');
+  destination.searchParams.set('error_description', '用户拒绝了授权请求');
+  if (state) destination.searchParams.set('state', state);
+  return { redirectTo: destination.toString() };
+}
+
 // ─── Token Exchange ───────────────────────────────────────────
 
 /**
@@ -378,7 +478,7 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
  */
 async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVerifier }) {
   // 1. Verify client credentials
-  const clientData = await verifyClient(clientId, clientSecret);
+  const clientData = await verifyClient(clientId, clientSecret, { allowPublic: true });
 
   // 2. Atomically consume auth code (single-use via GETDEL)
   const codeData = await tokenStore.consumeAuthCode(code);
@@ -392,13 +492,20 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
   }
 
   // 4. Verify redirect_uri matches
-  if (codeData.redirect_uri && clientData.redirect_uri !== codeData.redirect_uri) {
+  if (!redirectUri || redirectUri !== codeData.redirect_uri) {
     throw new OAuthError(401, 'invalid_grant', 'redirect_uri 不匹配');
+  }
+  const registeredUris = await getRedirectUris(clientData);
+  if (!registeredUris.some(entry => redirectUriMatches(redirectUri, entry.redirect_uri))) {
+    throw new OAuthError(401, 'invalid_grant', 'redirect_uri 已不再注册');
   }
 
   // 5. PKCE verification (if the code was issued with a challenge)
+  if (clientData.client_type === 'public' && !codeData.code_challenge) {
+    throw new OAuthError(401, 'invalid_grant', 'Public Client 授权码必须使用 PKCE S256');
+  }
   if (codeData.code_challenge) {
-    if (!codeVerifier) {
+    if (typeof codeVerifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier)) {
       throw new OAuthError(400, 'invalid_request', '该授权码使用了 PKCE，必须提供 code_verifier');
     }
     if (codeData.code_challenge_method !== 'S256') {
@@ -427,6 +534,10 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
   const refreshToken = generateToken();
   const refreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
   const effectiveScope = codeData.scope || 'openid profile email';
+  const approved = new Set(normalizeScopes(clientData.approved_scopes, LEGACY_DEFAULT_SCOPES));
+  if (effectiveScope.split(/\s+/).some(value => !approved.has(value))) {
+    throw new OAuthError(401, 'invalid_grant', '授权码包含未批准的 scope');
+  }
 
   // 8. Store access token in Redis (with per-user/client index)
   await tokenStore.storeAccessToken(accessToken, {
@@ -434,6 +545,8 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
     client_id: clientId,
     scope: effectiveScope,
     token_type: 'Bearer',
+    client_type: clientData.client_type || 'confidential',
+    party_type: clientData.party_type || 'first_party',
   }, ACCESS_TOKEN_TTL_S);
 
   // 9. Store refresh token in MySQL (hashed)
@@ -468,7 +581,7 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
  */
 async function refresh({ refreshToken, clientId, clientSecret }) {
   // 1. Verify client credentials
-  await verifyClient(clientId, clientSecret);
+  const clientData = await verifyClient(clientId, clientSecret, { allowPublic: true });
 
   // 2. Atomically rotate the refresh token via MySQL transaction
   let storedToken;
@@ -491,13 +604,14 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
       }
 
       // Replay attack detection: if already revoked, flag the user/client pair
-      if (row.revoked === 1) {
+      if (row.revoked === 1 || row.revoked === true) {
         console.warn(`Replay attack detected for user ${row.user_id}, client ${clientId}`);
         await conn.execute(
           'UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND client_id = ?',
           [row.user_id, clientId]
         );
-        throw new Error('TOKEN_REVOKED');
+        storedToken = { replay: true };
+        return;
       }
 
       // Check expiry
@@ -541,6 +655,11 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
     throw txErr;
   }
 
+  if (storedToken?.replay) throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
+  if (storedToken?.scope && storedToken.scope.split(/\s+/).some(value => !normalizeScopes(clientData.approved_scopes, LEGACY_DEFAULT_SCOPES).includes(value))) {
+    throw new OAuthError(401, 'invalid_grant', '此客户端的授权 scope 已变更');
+  }
+
   // 3. Store access token in Redis (outside transaction — Redis is not transactional with MySQL)
   const accessToken = generateToken();
   const effectiveScope = storedToken.scope || 'openid profile email';
@@ -550,6 +669,8 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
     client_id: clientId,
     scope: effectiveScope,
     token_type: 'Bearer',
+    client_type: clientData.client_type || 'confidential',
+    party_type: clientData.party_type || 'first_party',
   }, ACCESS_TOKEN_TTL_S);
 
   // 4. Return RFC 6749 compliant response
@@ -575,14 +696,16 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
  */
 async function introspect({ token, clientId, clientSecret }) {
   // 1. Verify client credentials (constant-time, shared with all endpoints)
-  await verifyClient(clientId, clientSecret);
+  const requester = await verifyClient(clientId, clientSecret);
+  const trustedResourceServer = requester.client_type === 'confidential' && requester.party_type === 'first_party';
 
   // 2. Check if it's an access token (Redis). RFC 7662: only reveal tokens
   // that belong to the requesting client — otherwise a client could probe
   // other clients' tokens.
   const tokenData = await tokenStore.getAccessToken(token);
-  if (tokenData && tokenData.client_id === clientId) {
+  if (tokenData && (tokenData.client_id === clientId || trustedResourceServer)) {
     try {
+      await assertClientActive(tokenData.client_id);
       await assertUserNotBanned(tokenData.user_id);
       await assertNativeSessionActive(tokenData.native_session_id);
     } catch (err) {
@@ -596,30 +719,39 @@ async function introspect({ token, clientId, clientSecret }) {
       scope: tokenData.scope,
       client_id: tokenData.client_id,
       sub: String(tokenData.user_id),
+      client_type: tokenData.client_type || 'confidential',
+      party_type: tokenData.party_type || 'first_party',
       exp: Math.floor(Date.now() / 1000) + Math.max(ttl, 0),
     };
   }
 
   // 3. Check if it's a refresh token belonging to this client (MySQL, hashed)
   const [refreshRows] = await pool.execute(
-    'SELECT * FROM refresh_tokens WHERE token = ? AND client_id = ? AND revoked = 0 AND expires_at > ?',
-    [hashRefreshToken(token), clientId, formatMySQLDateTime()]
+    `SELECT * FROM refresh_tokens WHERE token = ? ${trustedResourceServer ? '' : 'AND client_id = ?'}
+      AND revoked = 0 AND expires_at > ?`,
+    trustedResourceServer
+      ? [hashRefreshToken(token), formatMySQLDateTime()]
+      : [hashRefreshToken(token), clientId, formatMySQLDateTime()],
   );
   const refreshToken = refreshRows[0];
-  if (refreshToken) {
+  if (refreshToken && (refreshToken.client_id === clientId || trustedResourceServer)) {
     try {
+      await assertClientActive(refreshToken.client_id);
       await assertUserNotBanned(refreshToken.user_id);
       await assertNativeSessionActive(refreshToken.native_session_id);
     } catch (err) {
       if (err instanceof OAuthError) return { active: false };
       throw err;
     }
+    const resourceClient = await lookupClient(refreshToken.client_id);
     return {
       active: true,
       token_type: 'refresh_token',
       scope: refreshToken.scope || 'openid profile email',
       client_id: refreshToken.client_id,
       sub: String(refreshToken.user_id),
+      client_type: resourceClient.client_type || 'confidential',
+      party_type: resourceClient.party_type || 'first_party',
     };
   }
 
@@ -642,7 +774,7 @@ async function introspect({ token, clientId, clientSecret }) {
  */
 async function revoke({ token, tokenTypeHint, clientId, clientSecret }) {
   // 1. Verify client credentials (constant-time, shared with all endpoints)
-  await verifyClient(clientId, clientSecret);
+  await verifyClient(clientId, clientSecret, { allowPublic: true });
 
   // 2. Try to revoke access token (Redis) — only if it belongs to this client,
   // so a client cannot revoke another client's tokens (RFC 7009 §2.1)
@@ -679,10 +811,11 @@ async function userinfo(accessToken) {
   if (!tokenData) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
+  await assertClientActive(tokenData.client_id);
   await assertUserNotBanned(tokenData.user_id);
   await assertNativeSessionActive(tokenData.native_session_id);
 
-  const scope = tokenData.scope || 'openid profile email';
+  const scope = new Set(String(tokenData.scope || 'openid profile email').split(/\s+/).filter(Boolean));
 
   // 2. Get user info
   const [userRows] = await pool.execute(
@@ -697,7 +830,7 @@ async function userinfo(accessToken) {
   // 3. Build claims based on scope
   const claims = { sub: String(user.id) };
 
-  if (scope.includes('profile')) {
+  if (scope.has('profile')) {
     claims.name = user.username;
     claims.id = user.id;
     claims.username = user.username;
@@ -724,7 +857,7 @@ async function userinfo(accessToken) {
     }
   }
 
-  if (scope.includes('email')) {
+  if (scope.has('email')) {
     claims.email = user.email;
     claims.email_verified = user.email_verified === 1;
   }
@@ -745,6 +878,7 @@ async function userByAccessToken(accessToken) {
   if (!tokenData) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
+  await assertClientActive(tokenData.client_id);
   await assertUserNotBanned(tokenData.user_id);
   await assertNativeSessionActive(tokenData.native_session_id);
 
@@ -779,7 +913,8 @@ async function userByAccessToken(accessToken) {
  */
 async function listAuthorizations(userId) {
   const [authorizations] = await pool.execute(`
-    SELECT a.client_id, a.scope, a.last_used_at, c.name
+    SELECT a.client_id, a.scope, a.last_used_at, a.created_at, c.name, c.name AS client_name,
+           c.client_type, c.party_type
     FROM authorizations a
     JOIN clients c ON a.client_id = c.client_id
     WHERE a.user_id = ?
@@ -1097,6 +1232,7 @@ module.exports = {
   refreshNative,
   revokeNativeSession,
   authorize,
+  denyAuthorization,
   exchangeCode,
   refresh,
   introspect,
@@ -1113,4 +1249,8 @@ module.exports = {
   exchangeDeviceToken,
   // Exposed for cross-route use (e.g. SLO logout endpoint)
   lookupClient,
+  // Pure contract helpers are exported so security boundaries stay unit-testable.
+  _verifyPkce: verifyPkce,
+  _redirectUriMatches: redirectUriMatches,
+  _requestedScopes: requestedScopes,
 };

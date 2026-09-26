@@ -23,19 +23,20 @@ router.get('/', requireAdmin, requireAdminPermission('clients.read'), async (req
 // POST /clients - Create client (rate limited)
 router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCreateLimiter, async (req, res) => {
   try {
-    const { name, redirect_uri, require_pkce } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce } = req.body;
+    const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
-    if (!name || !redirect_uri) {
+    if (!name || !uris.length) {
       return res.status(400).json({ success: false, message: '名称和回调地址必填' });
     }
 
-    const validation = clientRegistry.validateRedirectUri(redirect_uri);
-    if (!validation.valid) {
-      return res.status(400).json({ success: false, message: validation.error });
+    for (const uri of uris) {
+      const validation = clientRegistry.validateRedirectUri(uri);
+      if (!validation.valid) return res.status(400).json({ success: false, message: validation.error });
     }
 
     const result = await clientRegistry.createClient(
-      { name, redirect_uri, require_pkce },
+      { name, redirect_uri: uris[0], redirect_uris: uris, require_pkce },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 
@@ -43,6 +44,17 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
   } catch (err) {
     console.error('Create client error:', err);
     res.status(500).json({ success: false, message: '创建失败' });
+  }
+});
+
+router.patch('/:id/review', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
+  try {
+    await clientRegistry.reviewClient(parseInt(req.params.id, 10),
+      { status: req.body?.status, approvedScopes: req.body?.approved_scopes },
+      { adminId: req.adminUser.id, ipAddress: getClientIp(req) });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(err.message === '客户端不存在' ? 404 : 400).json({ success: false, message: err.message || '审核操作失败' });
   }
 });
 
@@ -88,20 +100,21 @@ router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), asy
 router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, redirect_uri, require_pkce } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce } = req.body;
+    const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
-    if (!name || !redirect_uri) {
+    if (!name || !uris.length) {
       return res.status(400).json({ success: false, message: '名称和回调地址必填' });
     }
 
-    const validation = clientRegistry.validateRedirectUri(redirect_uri);
-    if (!validation.valid) {
-      return res.status(400).json({ success: false, message: validation.error });
+    for (const uri of uris) {
+      const validation = clientRegistry.validateRedirectUri(uri);
+      if (!validation.valid) return res.status(400).json({ success: false, message: validation.error });
     }
 
     await clientRegistry.updateClient(
       parseInt(id),
-      { name, redirect_uri, require_pkce },
+      { name, redirect_uris: uris, require_pkce },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 
