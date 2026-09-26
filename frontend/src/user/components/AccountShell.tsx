@@ -20,7 +20,7 @@ const NAV_GROUPS: AccountNavGroup[] = [
   },
   { label: '应用', items: [{ label: '授权应用', href: '/authorizations' }] },
   { label: '消息', items: [{ label: '通知', href: '/notifications' }] },
-  { label: '开发者', items: [{ label: '开发者', href: '/developer' }] },
+  { label: '开发', items: [{ label: '应用管理', href: '/developer' }] },
 ];
 
 interface AccountShellProps {
@@ -163,8 +163,8 @@ export function AccountShell({ title, description, children }: AccountShellProps
       <div className="account-shell__layout">
         <aside className="account-shell__sidebar" aria-label="账户中心侧栏">
           <div className="account-sidebar__brand">
-            <span>MindAuth</span>
-            <small>Identity Center</small>
+            <span>MDTBBS</span>
+            <small>账户服务</small>
           </div>
           {renderNavigation()}
         </aside>
@@ -198,7 +198,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
         <main className="account-shell__main">
           <div className="account-page-heading">
             <div>
-              <p className="account-page-heading__eyebrow">MindAuth Identity Center</p>
+              <p className="account-page-heading__eyebrow">账户中心</p>
               <h1>{title}</h1>
               <p>{description}</p>
             </div>
