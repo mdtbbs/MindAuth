@@ -88,10 +88,36 @@ export function DeveloperPage() {
   }, [selected, isCreate]);
 
   async function saveApplication() {
-    setSaving(true); setFormError('');
+    setFormError('');
+    const normalizedName = name.trim();
+    const normalizedDescription = description.trim();
+    const normalizedRedirectUris = redirectUris.split('\n').map(item => item.trim()).filter(Boolean);
+
+    if (!selected && user && !user.phone_verified) {
+      setFormError('创建开发者应用前需要先完成手机号验证。');
+      return;
+    }
+    if (!normalizedName) {
+      setFormError('请填写应用名称。');
+      return;
+    }
+    if (!normalizedDescription) {
+      setFormError('请填写应用简介，授权页会向用户展示这段说明。');
+      return;
+    }
+    if (!normalizedRedirectUris.length) {
+      setFormError('请至少填写一个 Redirect URI。');
+      return;
+    }
+    if (!scopes.length) {
+      setFormError('请至少选择一个 API 权限。');
+      return;
+    }
+
+    setSaving(true);
     const body = {
-      name: name.trim(), description: description.trim(), website_url: website.trim() || null,
-      redirect_uris: redirectUris.split('\n').map(item => item.trim()).filter(Boolean), requested_scopes: scopes,
+      name: normalizedName, description: normalizedDescription, website_url: website.trim() || null,
+      redirect_uris: normalizedRedirectUris, requested_scopes: scopes,
     };
     try {
       if (selected) {
@@ -131,8 +157,8 @@ export function DeveloperPage() {
 
       {isCreate ? (
         <AccountSection title="申请 Public Client" description="提交后会进入管理员审核。批准后应用即可使用 Authorization Code + PKCE。Public Client 不会生成 client_secret。">
-          <ApplicationForm name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveLabel="创建应用" />
-          {user && !user.phone_verified ? <p className="section-description">创建应用前需要先在 <Link to="/security">账户安全</Link> 完成手机号验证。</p> : null}
+          {user && !user.phone_verified ? <div className="developer-create-gate" role="alert"><strong>还差一步</strong><p>创建应用需要先完成手机号验证。验证完成后回到这里即可直接提交。</p><Link className="btn btn--secondary" to="/security">前往登录与安全</Link></div> : null}
+          <ApplicationForm name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(user && !user.phone_verified)} saveLabel="创建应用" />
         </AccountSection>
       ) : null}
 
@@ -166,12 +192,12 @@ export function DeveloperPage() {
 
 function ApplicationForm({
   name, setName, description, setDescription, website, setWebsite, redirectUris, setRedirectUris,
-  scopes, setScopes, onSave, onCancel, saving, saveLabel,
+  scopes, setScopes, onSave, onCancel, saving, saveDisabled = false, saveLabel,
 }: {
   name: string; setName: (value: string) => void; description: string; setDescription: (value: string) => void;
   website: string; setWebsite: (value: string) => void; redirectUris: string; setRedirectUris: (value: string) => void;
   scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>>;
-  onSave: () => void; onCancel: () => void; saving: boolean; saveLabel: string;
+  onSave: () => void; onCancel: () => void; saving: boolean; saveDisabled?: boolean; saveLabel: string;
 }) {
   return <div className="stack">
     <TextField label="应用名称" value={name} onChange={event => setName(event.target.value)} maxLength={120} />
@@ -179,6 +205,6 @@ function ApplicationForm({
     <TextField label="项目主页（可选）" value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" />
     <label className="field"><span className="field__label">Redirect URI（至少一个，每行一个）</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={5} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /><span className="field__hint">支持 HTTPS、自定义应用协议，以及 localhost / loopback 随机端口。</span></label>
     <fieldset className="stack developer-scope-options"><legend className="field__label">API 权限</legend>{SCOPE_OPTIONS.map(([scope, label, help]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{label}</strong>{scope === 'message.read' || scope === 'message.write' ? <span className="public-scope-sensitive">敏感权限</span> : null}<small>{scope} · {help}</small></span></label>)}</fieldset>
-    <div className="cluster"><Button type="button" disabled={saving} onClick={onSave}>{saving ? '处理中…' : saveLabel}</Button><Button type="button" variant="secondary" onClick={onCancel}>取消</Button></div>
+    <div className="cluster"><Button type="button" disabled={saving || saveDisabled} onClick={onSave}>{saving ? '处理中…' : saveLabel}</Button><Button type="button" variant="secondary" onClick={onCancel}>取消</Button></div>
   </div>;
 }

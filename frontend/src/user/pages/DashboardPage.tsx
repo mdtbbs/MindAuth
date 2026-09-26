@@ -57,124 +57,152 @@ export function DashboardPage() {
   }
 
   const sessionItems = sessions.data?.sessions ?? [];
+  const authorizationItems = authorizations.data?.authorizations ?? [];
+  const notificationItems = notifications.data?.notifications ?? [];
   const latestLogin = loginLogs.data?.logs[0]?.created_at;
   const securityIssues = user ? Number(!user.email_verified) + Number(!user.phone_verified) : 0;
 
   return (
-    <AccountShell title="账户概览" description="MDT 生态统一身份、安全、设备与授权管理。">
+    <AccountShell title="账户" description="查看身份状态、安全设置、登录设备和第三方授权。">
       {user ? (
-        <div className="account-dashboard" data-testid="account-dashboard">
-          <AccountSection title="身份摘要" description="用于 MDT 生态服务的统一账户。">
-            <div className="identity-summary">
-              <div className="identity-summary__avatar" aria-hidden="true">
-                {user.avatar_url ? <img src={user.avatar_url} alt="" /> : initial(user.username)}
-              </div>
-              <div className="identity-summary__main">
+        <div className="account-dashboard-v2" data-testid="account-dashboard">
+          <section className="account-overview-hero" aria-label="账户身份">
+            <div className="account-overview-hero__avatar" aria-hidden="true">
+              {user.avatar_url ? <img src={user.avatar_url} alt="" /> : initial(user.username)}
+            </div>
+            <div className="account-overview-hero__identity">
+              <div className="account-overview-hero__name-row">
                 <h2>{user.username}</h2>
-                <p>{user.email}</p>
-                <div className="identity-summary__statuses">
-                  <StatusLabel needsAction={!user.email_verified}>{user.email_verified ? '邮箱已验证' : '邮箱待验证'}</StatusLabel>
-                  <StatusLabel needsAction={!user.phone_verified}>{user.phone_verified ? '手机号已绑定' : '未绑定手机号'}</StatusLabel>
-                </div>
+                <StatusLabel needsAction={!user.email_verified}>{user.email_verified ? '邮箱已验证' : '邮箱待验证'}</StatusLabel>
+                <StatusLabel needsAction={!user.phone_verified}>{user.phone_verified ? '手机号已绑定' : '未绑定手机号'}</StatusLabel>
               </div>
-              <Link className="account-text-link identity-summary__action" to="/profile">管理个人资料 <span aria-hidden="true">→</span></Link>
+              <p>{user.email}</p>
+              <span>MindAuth 统一账户</span>
             </div>
-          </AccountSection>
+            <div className="account-overview-hero__actions">
+              <Link className="btn btn--secondary" to="/profile">个人资料</Link>
+              <Link className="btn btn--secondary" to="/security">登录与安全</Link>
+            </div>
+          </section>
 
-          <AccountSection title="账户安全" description="根据当前账户设置显示需要处理的事项。">
-            <div className={`security-overview${securityIssues ? ' security-overview--attention' : ''}`} role="status">
-              <strong>{securityIssues ? `需要完成 ${securityIssues} 项安全设置` : '未发现需要处理的安全问题'}</strong>
-              {securityIssues ? (
-                <ul>
-                  {!user.email_verified ? (
-                    <li>
-                      邮箱尚未验证，可用于账号恢复
-                      <Button type="button" variant="secondary" size="sm" onClick={sendVerificationEmail}>发送验证邮件</Button>
-                    </li>
+          <section className="account-overview-strip" aria-label="账户状态">
+            <Link to="/security" className="account-overview-stat">
+              <span>安全状态</span>
+              <strong className={securityIssues ? 'is-attention' : ''}>{securityIssues ? `${securityIssues} 项待处理` : '正常'}</strong>
+              <small>邮箱与手机号验证</small>
+            </Link>
+            <Link to="/sessions" className="account-overview-stat">
+              <span>登录设备</span>
+              <strong>{sessions.loading ? '…' : sessionItems.length}</strong>
+              <small>当前活跃会话</small>
+            </Link>
+            <Link to="/authorizations" className="account-overview-stat">
+              <span>应用授权</span>
+              <strong>{authorizations.loading ? '…' : authorizationItems.length}</strong>
+              <small>可随时撤销</small>
+            </Link>
+            <Link to="/activity" className="account-overview-stat">
+              <span>最近登录</span>
+              <strong className="account-overview-stat__date">{loginLogs.loading ? '读取中' : latestLogin ? formatAccountDate(latestLogin, true) : '暂无记录'}</strong>
+              <small>查看完整登录记录</small>
+            </Link>
+          </section>
+
+          <div className="account-dashboard-columns">
+            <div className="account-dashboard-column">
+              <AccountSection title="账户安全" description="这里只显示需要你处理的事情。">
+                <div className={`security-overview${securityIssues ? ' security-overview--attention' : ''}`} role="status">
+                  <strong>{securityIssues ? `还有 ${securityIssues} 项没有完成` : '当前没有需要处理的安全项目'}</strong>
+                  {securityIssues ? (
+                    <ul>
+                      {!user.email_verified ? (
+                        <li>
+                          邮箱尚未验证
+                          <Button type="button" variant="secondary" size="sm" onClick={sendVerificationEmail}>发送验证邮件</Button>
+                        </li>
+                      ) : null}
+                      {!user.phone_verified ? (
+                        <li>手机号尚未绑定，<Link to="/security">前往登录与安全</Link> 完成。</li>
+                      ) : null}
+                    </ul>
                   ) : null}
-                  {!user.phone_verified ? (
-                    <li>手机号尚未绑定，可在 <Link to="/security">登录与安全</Link> 中完成。</li>
-                  ) : null}
-                </ul>
-              ) : null}
-            </div>
-            <dl className="account-facts">
-              <div><dt>邮箱</dt><dd>{user.email_verified ? '已验证' : '待验证'}</dd></div>
-              <div><dt>手机号</dt><dd>{user.phone_verified ? (user.phone_masked || '已绑定') : '未绑定'}</dd></div>
-              <div><dt>最近登录</dt><dd>
-                <AccountLoadState loading={loginLogs.loading} error={loginLogs.error} retry={loginLogs.reload}>
-                  {latestLogin ? formatAccountDate(latestLogin, true) : '暂无登录记录'}
+                </div>
+                <Link className="account-text-link account-section__inline-link" to="/security">管理安全设置 <span aria-hidden="true">→</span></Link>
+              </AccountSection>
+
+              <AccountSection
+                title="最近设备"
+                description="近期访问过 MindAuth 的浏览器与客户端。"
+                action={<Link className="account-text-link" to="/sessions">全部设备</Link>}
+              >
+                <AccountLoadState loading={sessions.loading} error={sessions.error} retry={sessions.reload}>
+                  {sessionItems.length ? (
+                    <div className="account-list">
+                      {sessionItems.slice(0, 3).map((session) => (
+                        <div className="account-list__item" key={session.id}>
+                          <div>
+                            <strong>{session.device_info || (session.session_type === 'native' ? 'Native 客户端' : 'Web 浏览器')}</strong>
+                            <p>{session.ip_address || 'IP 未提供'} · 最近活动 {formatAccountDate(session.last_active_at, true)}</p>
+                          </div>
+                          {session.is_current ? <StatusLabel>当前设备</StatusLabel> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : <AccountEmptyState>没有活跃的登录设备。</AccountEmptyState>}
                 </AccountLoadState>
-              </dd></div>
-            </dl>
-            <Link className="account-text-link account-section__inline-link" to="/security">查看登录与安全 <span aria-hidden="true">→</span></Link>
-          </AccountSection>
+              </AccountSection>
+            </div>
 
-          <AccountSection
-            title="最近设备"
-            description="近期访问过 MindAuth 的浏览器与客户端。"
-            action={<Link className="account-text-link" to="/sessions">查看全部 <span aria-hidden="true">→</span></Link>}
-          >
-            <AccountLoadState loading={sessions.loading} error={sessions.error} retry={sessions.reload}>
-              {sessionItems.length ? (
-                <div className="account-list">
-                  {sessionItems.slice(0, 3).map((session) => (
-                    <div className="account-list__item" key={session.id}>
-                      <div>
-                        <strong>{session.device_info || (session.session_type === 'native' ? 'Native 客户端' : 'Web 浏览器')}</strong>
-                        <p>{session.ip_address || 'IP 未提供'} · 最近活动 {formatAccountDate(session.last_active_at, true)}</p>
-                      </div>
-                      {session.is_current ? <StatusLabel>当前设备</StatusLabel> : null}
+            <div className="account-dashboard-column">
+              <AccountSection
+                title="授权应用"
+                description="第三方应用获得的账户权限。"
+                action={<Link className="account-text-link" to="/authorizations">管理授权</Link>}
+              >
+                <AccountLoadState loading={authorizations.loading} error={authorizations.error} retry={authorizations.reload}>
+                  {authorizationItems.length ? (
+                    <div className="account-list">
+                      {authorizationItems.slice(0, 3).map((authorization) => (
+                        <div className="account-list__item" key={authorization.id}>
+                          <div>
+                            <strong>{authorization.client_name}</strong>
+                            <p>{authorization.scope || '未提供权限说明'}</p>
+                          </div>
+                          <span className="account-list__meta">{formatAccountDate(authorization.last_used_at, true)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : <AccountEmptyState>没有已授权的应用。</AccountEmptyState>}
+                </AccountLoadState>
+                <div className="account-dashboard-inline-actions">
+                  <Link className="account-text-link" to="/developer">开发者应用</Link>
+                  <Link className="account-text-link" to="/apps">社区应用</Link>
                 </div>
-              ) : <AccountEmptyState>没有活跃的登录设备。</AccountEmptyState>}
-            </AccountLoadState>
-          </AccountSection>
+              </AccountSection>
 
-          <AccountSection
-            title="已授权应用"
-            description="可以查看应用获得的权限并随时撤销授权。"
-            action={<Link className="account-text-link" to="/authorizations">查看全部 <span aria-hidden="true">→</span></Link>}
-          >
-            <AccountLoadState loading={authorizations.loading} error={authorizations.error} retry={authorizations.reload}>
-              {authorizations.data?.authorizations.length ? (
-                <div className="account-list">
-                  {authorizations.data.authorizations.slice(0, 2).map((authorization) => (
-                    <div className="account-list__item" key={authorization.id}>
-                      <div>
-                        <strong>{authorization.client_name}</strong>
-                        <p>{authorization.client_id} · {authorization.scope || '未提供权限说明'}</p>
-                      </div>
-                      <span className="account-list__meta">最近使用 {formatAccountDate(authorization.last_used_at, true)}</span>
+              <AccountSection
+                title="通知"
+                description="最近的账户和安全消息。"
+                action={<Link className="account-text-link" to="/notifications">通知中心</Link>}
+              >
+                <AccountLoadState loading={notifications.loading} error={notifications.error} retry={notifications.reload}>
+                  {notificationItems.length ? (
+                    <div className="account-list">
+                      {notificationItems.slice(0, 3).map((notification) => (
+                        <article className="account-list__item account-notice" key={notification.id}>
+                          <div>
+                            <strong>{notification.title}</strong>
+                            {notification.content ? <p>{notification.content}</p> : null}
+                          </div>
+                          <span className="account-list__meta">{formatAccountDate(notification.created_at)}</span>
+                        </article>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              ) : <AccountEmptyState>没有已授权的应用。</AccountEmptyState>}
-            </AccountLoadState>
-          </AccountSection>
-
-          <AccountSection
-            title="重要通知"
-            description="显示最近的账户与安全消息。"
-            action={<Link className="account-text-link" to="/notifications">通知中心 <span aria-hidden="true">→</span></Link>}
-          >
-            <AccountLoadState loading={notifications.loading} error={notifications.error} retry={notifications.reload}>
-              {notifications.data?.notifications.length ? (
-                <div className="account-list">
-                  {notifications.data.notifications.slice(0, 3).map((notification) => (
-                    <article className="account-list__item account-notice" key={notification.id}>
-                      <div>
-                        <strong>{notification.title}</strong>
-                        {notification.content ? <p>{notification.content}</p> : null}
-                      </div>
-                      <span className="account-list__meta">{formatAccountDate(notification.created_at)}</span>
-                    </article>
-                  ))}
-                </div>
-              ) : <AccountEmptyState>暂无需要处理的通知。</AccountEmptyState>}
-            </AccountLoadState>
-          </AccountSection>
+                  ) : <AccountEmptyState>暂无需要处理的通知。</AccountEmptyState>}
+                </AccountLoadState>
+              </AccountSection>
+            </div>
+          </div>
         </div>
       ) : null}
     </AccountShell>
