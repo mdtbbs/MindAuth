@@ -16,7 +16,7 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 
 | 方式 | 载体 | 适用端点 |
 |------|------|----------|
-| 用户会话 | `session` Cookie（httpOnly，30 天） | 账户管理、会话/通知/短信、`/me`、`/authorizations` 等（索引表中标"会话"） |
+| 用户会话 | `session` Cookie（httpOnly，30 天） | 账户管理、会话/通知/短信、`/me`、`/authorizations`、开发者应用管理等（索引表中标"会话"） |
 | 管理会话 | `admin_session` Cookie（httpOnly，24 小时） | 全部 `/api/admin/*`（除 `create`/`login`/`logout` 与测试端点） |
 | OAuth Bearer Token | `Authorization: Bearer <access_token>` 头 | `GET /api/userinfo`、`GET /api/user` |
 | 客户端凭证 | 请求体中的 `client_id` + `client_secret` | `/api/token`、`/api/refresh`、`/api/introspect`、`/api/revoke` |
@@ -96,6 +96,10 @@ MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认�
 |------|------|------|-----------|------|
 | GET | `/api/csrf-token` | 无 | — | 获取/刷新 CSRF 令牌 |
 | GET | `/api/public/auth-page-config` | 无 | 60/分钟 | 登录页外观公开配置（见下文） |
+| GET | `/api/public/apps` | 无 | — | 已启用 Public Client 应用目录 |
+| GET | `/api/public/apps/:clientId` | 无 | — | Public Client 公开详情；停用/删除时仅返回不可用状态 |
+
+开发者在 `{issuer}/developer` 创建并管理 Public Client；需已登录并完成手机号验证。应用创建后立即启用，固定为 `client_type=public`、`party_type=third_party`、`client_secret=NULL`、PKCE S256。完整请求体、返回字段和删除语义见 [developer-applications.md](developer-applications.md)。
 
 ### Android 与 Mindustry Native Auth
 
@@ -172,7 +176,16 @@ Native 错误采用共享 API JSON 结构 `{success:false, code, message}`；常
 | DELETE | `/api/authorizations/:client_id` | 会话 + CSRF | — | 撤销对某应用的授权（内部） |
 | GET | `/api/health` | 无 | — | 健康检查（MySQL + Redis） |
 
-当前代码还包含 RFC 8628 设备授权路由 `/api/device/code`、`/api/device/verify`、`/api/device/approve` 和 `/api/device/token`。它们不属于第三方公开契约；旧版 [DEVICE_AUTH.md](../DEVICE_AUTH.md) 所列路径和流程与运行时代码不一致，详情见 [OAuth API 参考](oauth.md)。
+RFC 8628 Device Flow 是受支持的第三方授权流程。客户端使用 `/api/device/code` 创建设备码、通过 `/api/device/token` 轮询；用户在 React 页面 `/device` 登录并确认，页面通过 `/api/device/info` 获取应用与权限说明，再以 `/api/device/approve` 允许或拒绝。`/api/device/verify` 保留为旧链接兼容跳转。详见 [DEVICE_AUTH.md](../DEVICE_AUTH.md)。
+
+### 开发者应用管理 — 详见 [developer-applications.md](developer-applications.md)
+
+| 方法 | 路径 | 认证 | 限流/权限 | 用途 |
+|------|------|------|-----------|------|
+| GET | `/api/developer/clients` | 会话 | — | 列出本人应用及使用情况 |
+| POST | `/api/developer/clients` | 会话 + 已验证手机号 | 10/小时/IP | 立即创建 Public Client |
+| PUT | `/api/developer/clients/:id` | 会话 + 所有权 | — | 修改应用资料、Redirect URI 和 scopes |
+| DELETE | `/api/developer/clients/:id` | 会话 + 所有权 | — | 软删除应用并撤销授权与令牌 |
 
 ### 账户域 — 详见 [account.md](account.md)
 

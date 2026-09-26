@@ -1,15 +1,15 @@
 const SCOPE_DESCRIPTIONS = Object.freeze({
   openid: { name: '账户标识', description: '读取用于识别 MDTBBS 账户的稳定标识。' },
-  profile: { name: '基本资料', description: '读取用户名、头像和公开账户状态。' },
-  email: { name: '电子邮箱', description: '读取邮箱地址和验证状态。' },
-  'forum.read': { name: '读取论坛', description: '浏览帖子、回复和公开论坛资料。' },
-  'forum.write': { name: '写入论坛', description: '代表你创建或修改帖子、回复等内容。' },
-  'resource.read': { name: '读取资源', description: '浏览 MDTBBS 资源和版本信息。' },
-  'resource.download': { name: '下载资源', description: '获取已发布资源的下载地址。' },
-  'resource.upload': { name: '上传资源', description: '申请创建、上传和提交资源；论坛仍会执行审核与权限检查。' },
-  'notification.read': { name: '读取通知', description: '查看你的 MDTBBS 通知并标记已读。' },
-  'message.read': { name: '读取私信', description: '读取你的私信会话和消息。' },
-  'message.write': { name: '发送私信', description: '代表你发送私信；论坛设置和用户规则仍然适用。' },
+  profile: { name: '查看基本资料', description: '允许此应用查看你的用户名、头像等基本账户信息。' },
+  email: { name: '查看电子邮箱', description: '允许此应用读取你的邮箱地址和验证状态。' },
+  'forum.read': { name: '浏览论坛', description: '允许此应用读取你有权限查看的论坛帖子和回复。' },
+  'forum.write': { name: '发布论坛内容', description: '允许此应用以你的身份发布帖子、回复以及执行相关论坛操作。' },
+  'resource.read': { name: '浏览资源', description: '允许此应用读取 MDTBBS 中的地图、蓝图、Mod 等资源信息。' },
+  'resource.download': { name: '下载资源', description: '允许此应用使用你的账户下载 MDTBBS 资源。' },
+  'resource.upload': { name: '上传资源', description: '允许此应用以你的身份提交地图、蓝图、Mod 等资源。' },
+  'notification.read': { name: '读取通知', description: '允许此应用读取你的 MDTBBS 通知。' },
+  'message.read': { name: '读取你的私信', description: '允许此应用读取你在 MDTBBS 中的私信和会话内容。', sensitive: true },
+  'message.write': { name: '发送私信', description: '允许此应用以你的身份向其他用户发送私信。', sensitive: true },
 });
 
 const VALID_SCOPES = Object.freeze(Object.keys(SCOPE_DESCRIPTIONS));

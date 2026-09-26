@@ -86,6 +86,14 @@ test('confidential clients still require their secret; suspended clients cannot 
   await assert.rejects(issuer.exchangeCode(validExchange), (error) => error.error === 'invalid_client');
 });
 
+test('deleted Public Clients cannot exchange new authorization codes', async (t) => {
+  install(t, { client: publicClient({ status: 'deleted' }), code: { ...validCode } });
+  let consumed = 0;
+  tokenStore.consumeAuthCode = async () => { consumed++; return null; };
+  await assert.rejects(issuer.exchangeCode(validExchange), (error) => error.error === 'invalid_client');
+  assert.equal(consumed, 0, 'a deleted client is rejected before consuming authorization codes');
+});
+
 test('authorization code cannot escalate beyond approved scopes', async (t) => {
   install(t, { code: { ...validCode, scope: 'openid message.write' } });
   await assert.rejects(issuer.exchangeCode(validExchange), (error) => error.error === 'invalid_grant');

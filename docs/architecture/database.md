@@ -21,6 +21,11 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | [`005_username_change_tracking.sql`](../../src/db/migrations/005_username_change_tracking.sql) | `users` 增加 `username_changed_at`，用于用户名自助修改的 30 天冷却检查 |
 | [`008_native_auth.sql`](../../src/db/migrations/008_native_auth.sql) | 第一方 Android client、认证事务、短信 challenge、一次性授权码与 Native 审计表 |
 | [`009_native_client_sessions.sql`](../../src/db/migrations/009_native_client_sessions.sql) | Mod device session、OAuth refresh token 的 native session 关联、登录日志设备元数据、`forum` audience 配置和官方 Mindustry Mod client seed |
+| [`010_mindustry_public_native_client.sql`](../../src/db/migrations/010_mindustry_public_native_client.sql) | 官方 Mindustry Native Public Client 与 PKCE 配置 |
+| [`011_public_client_platform.sql`](../../src/db/migrations/011_public_client_platform.sql) | OAuth clients 增加 Public/Confidential 类型、应用归属、scope、状态和多 Redirect URI |
+| [`012_oauth_client_metrics.sql`](../../src/db/migrations/012_oauth_client_metrics.sql) | OAuth 日使用汇总与错误统计 |
+| [`013_seed_official_android_public_client.sql`](../../src/db/migrations/013_seed_official_android_public_client.sql) | 官方 Android Public Client 初始配置 |
+| [`014_public_clients_self_service.sql`](../../src/db/migrations/014_public_clients_self_service.sql) | 增加已删除状态与公开目录索引；仅自动启用 secret 为空、PKCE 开启、scope 有效且登记回调不含公网 HTTP 的 Public Client 草稿/pending；不安全旧配置保留原状态 |
 
 ## MySQL 表
 
@@ -52,7 +57,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
-| `clients` | 第三方 OAuth 应用注册 | `client_id`（UNIQUE）、`client_secret`（明文存储——见 CLAUDE.md 已知遗留项）、`redirect_uri`、`require_pkce`。无外键 |
+| `clients` | OAuth 应用注册 | `client_id`（UNIQUE，软删除后不复用）、`client_secret`（Confidential Client 哈希存储；Public Client 为 NULL）、`client_type`、`party_type`、`status`、`owner_user_id`、`requested_scopes`、`approved_scopes`、`redirect_uri`、`require_pkce`。无 OAuth 资源外键 |
 | `authorizations` | 用户对客户端的授权记录 | `(user_id, client_id)` UNIQUE；`scope`、`last_used_at`。`client_id` 为字符串关联 `clients.client_id`（无外键约束） |
 | `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销；009 增加 nullable `native_session_id` 关联单设备 Native family |
 

@@ -5,6 +5,8 @@ import { ResetRequestPage } from './pages/ResetRequestPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
+import { DeviceAuthorizationPage } from './pages/DeviceAuthorizationPage';
+import { PublicAppsPage } from './pages/PublicAppsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { AccountSettingsPage } from './pages/AccountSettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
@@ -31,6 +33,10 @@ export function UserApp() {
         <Route path="/qq/confirm" element={<QqConfirmPage />} />
         <Route path="/qq-register" element={<QqRegisterPage />} />
         <Route path="/authorize" element={<OAuthAuthorizePage />} />
+        <Route path="/device" element={<DeviceAuthorizationPage />} />
+        <Route path="/oauth/device" element={<DeviceAuthorizationPage />} />
+        <Route path="/apps" element={<PublicAppsPage />} />
+        <Route path="/apps/:clientId" element={<PublicAppsPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/security" element={<SecurityPage />} />
@@ -39,6 +45,8 @@ export function UserApp() {
         <Route path="/authorizations" element={<AuthorizationsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/developer" element={<DeveloperPage />} />
+        <Route path="/developer/new" element={<DeveloperPage />} />
+        <Route path="/developer/:id" element={<DeveloperPage />} />
         <Route path="/account-settings" element={<AccountSettingsPage />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<ErrorPage status={404} />} />

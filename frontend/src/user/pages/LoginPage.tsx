@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
@@ -19,21 +19,20 @@ export function LoginPage() {
   const scope = params.get('scope') || '';
   const codeChallenge = params.get('code_challenge') || '';
   const codeChallengeMethod = params.get('code_challenge_method') || '';
+  const deviceUserCode = params.get('device_user_code') || '';
   const errorParam = params.get('error') || '';
   const messageParam = params.get('message') || '';
 
   const isOAuthFlow = Boolean(redirectUri && clientId);
 
-  function buildAuthorizeParams() {
-    return new URLSearchParams({
+  const authorizeParams = useMemo(() => new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       ...(state && { state }),
       ...(scope && { scope }),
       ...(codeChallenge && { code_challenge: codeChallenge }),
       ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
-    });
-  }
+    }), [clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod]);
 
   function buildAuthFlowParams() {
     return new URLSearchParams({
@@ -59,13 +58,15 @@ export function LoginPage() {
 
   useEffect(() => {
     if (user && !authLoading) {
-      if (isOAuthFlow) {
-        window.location.href = `/api/authorize?${buildAuthorizeParams().toString()}`;
+      if (deviceUserCode) {
+        navigate(`/device?user_code=${encodeURIComponent(deviceUserCode)}`, { replace: true });
+      } else if (isOAuthFlow) {
+        window.location.href = `/api/authorize?${authorizeParams.toString()}`;
       } else {
         navigate('/dashboard', { replace: true });
       }
     }
-  }, [user, authLoading, isOAuthFlow, clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod, navigate]);
+  }, [user, authLoading, isOAuthFlow, authorizeParams, deviceUserCode, navigate]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -81,8 +82,10 @@ export function LoginPage() {
       await login(username.trim(), password);
       toast('success', '登录成功');
 
-      if (isOAuthFlow) {
-        window.location.href = `/api/authorize?${buildAuthorizeParams().toString()}`;
+      if (deviceUserCode) {
+        navigate(`/device?user_code=${encodeURIComponent(deviceUserCode)}`, { replace: true });
+      } else if (isOAuthFlow) {
+        window.location.href = `/api/authorize?${authorizeParams.toString()}`;
       } else {
         navigate('/dashboard', { replace: true });
       }

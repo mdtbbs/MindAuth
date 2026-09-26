@@ -150,6 +150,7 @@ router.get('/authorize/consent-info', requireAuth, async (req, res) => {
       consent_required: result.consentRequired,
       client: result.client,
       scopes: result.requestedScopes.map((name) => ({ name, ...SCOPE_DESCRIPTIONS[name] })),
+      new_scopes: (result.newScopes || []).map((name) => ({ name, ...SCOPE_DESCRIPTIONS[name] })),
       previous_scopes: result.previousScopes || [],
     });
   } catch (err) {
@@ -380,93 +381,33 @@ router.post('/device/code', deviceCodeLimiter, async (req, res) => {
   }
 });
 
-// GET /device/verify - Show device verification page
-router.get('/device/verify', requireAuth, async (req, res) => {
+// Legacy verification links now open the React Identity page.
+router.get('/device/verify', (req, res) => {
+  const userCode = typeof req.query.user_code === 'string' ? req.query.user_code : '';
+  res.redirect(`/device${userCode ? `?user_code=${encodeURIComponent(userCode)}` : ''}`);
+});
+
+router.get('/device/info', requireAuth, async (req, res) => {
   try {
-    const { user_code } = req.query;
-
-    if (!user_code) {
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html lang="zh">
-        <head><meta charset="UTF-8"><title>错误</title></head>
-        <body><h1>缺少用户码</h1><p>请从设备页面获取用户码。</p></body>
-        </html>
-      `);
-    }
-
-    const deviceData = await oauthIssuer.getDeviceCodeByUserCode({ userCode: user_code });
-    if (!deviceData) {
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html lang="zh">
-        <head><meta charset="UTF-8"><title>错误</title></head>
-        <body><h1>无效的用户码</h1><p>用户码无效或已过期。</p></body>
-        </html>
-      `);
-    }
-
-    // Look up client name
-    let clientName = '未知应用';
-    try {
-      const clientData = await oauthIssuer.lookupClient(deviceData.client_id);
-      clientName = clientData.name || clientName;
-    } catch {
-      // Client not found, use default
-    }
-
-    // Show verification page
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="zh">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>设备授权</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-          .card { border: 1px solid #ddd; border-radius: 8px; padding: 24px; background: #f9f9f9; }
-          .user-code { font-size: 32px; font-weight: bold; letter-spacing: 2px; text-align: center; margin: 20px 0; padding: 16px; background: white; border-radius: 4px; font-family: monospace; }
-          .actions { display: flex; gap: 12px; margin-top: 24px; }
-          button { flex: 1; padding: 12px; font-size: 16px; border: none; border-radius: 4px; cursor: pointer; }
-          .approve { background: #4CAF50; color: white; }
-          .deny { background: #f44336; color: white; }
-          .info { margin: 16px 0; }
-          .info dt { font-weight: bold; margin-top: 8px; }
-          .info dd { margin-left: 0; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>设备授权请求</h1>
-          <p>请输入以下用户码到您的设备：</p>
-          <div class="user-code">${user_code}</div>
-          <dl class="info">
-            <dt>应用名称</dt>
-            <dd>${clientName}</dd>
-            <dt>请求的权限</dt>
-            <dd>${deviceData.scope}</dd>
-          </dl>
-          <form method="POST" action="/api/oauth/device/approve">
-            <input type="hidden" name="user_code" value="${user_code}">
-            <div class="actions">
-              <button type="submit" name="action" value="deny" class="deny">拒绝</button>
-              <button type="submit" name="action" value="approve" class="approve">授权</button>
-            </div>
-          </form>
-        </div>
-      </body>
-      </html>
-    `);
+    const userCode = typeof req.query.user_code === 'string' ? req.query.user_code.trim().toUpperCase() : '';
+    if (!userCode) return res.status(400).json({ success: false, message: '请输入设备页面显示的用户码。' });
+    const deviceData = await oauthIssuer.getDeviceCodeByUserCode({ userCode });
+    if (!deviceData) return res.status(404).json({ success: false, message: '用户码无效或已过期，请返回设备重新获取。' });
+    const client = await oauthIssuer.lookupClient(deviceData.client_id);
+    res.json({
+      success: true,
+      user_code: userCode,
+      client: {
+        name: client.name,
+        client_id: client.client_id,
+        client_type: client.client_type,
+        party_type: client.party_type,
+      },
+      scopes: String(deviceData.scope || '').split(/\s+/).filter(Boolean)
+        .map(name => ({ name, ...(SCOPE_DESCRIPTIONS[name] || { name, description: '此权限由应用请求。' }) })),
+    });
   } catch (err) {
-    console.error('Device verify error:', err);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html lang="zh">
-      <head><meta charset="UTF-8"><title>错误</title></head>
-      <body><h1>服务器错误</h1><p>请稍后重试。</p></body>
-      </html>
-    `);
+    handleOAuthError(res, err, 'Device verification preview error');
   }
 });
 
@@ -475,15 +416,7 @@ router.post('/device/approve', requireAuth, deviceApproveLimiter, async (req, re
   try {
     const { user_code, action } = req.body;
 
-    if (!user_code || !action) {
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html lang="zh">
-        <head><meta charset="UTF-8"><title>错误</title></head>
-        <body><h1>缺少参数</h1><p>缺少用户码或操作。</p></body>
-        </html>
-      `);
-    }
+    if (!user_code || !action) return res.status(400).json({ success: false, message: '缺少用户码或操作。' });
 
     let success = false;
     let message = '';
@@ -498,47 +431,14 @@ router.post('/device/approve', requireAuth, deviceApproveLimiter, async (req, re
       success = await oauthIssuer.denyDeviceCode({ userCode: user_code });
       message = success ? '已拒绝授权。' : '操作失败，用户码无效或已过期。';
     } else {
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html lang="zh">
-        <head><meta charset="UTF-8"><title>错误</title></head>
-        <body><h1>无效操作</h1><p>操作必须是 approve 或 deny。</p></body>
-        </html>
-      `);
+      return res.status(400).json({ success: false, message: '操作必须是 approve 或 deny。' });
     }
 
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="zh">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${action === 'approve' ? '授权成功' : '已拒绝'}</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
-          .card { border: 1px solid #ddd; border-radius: 8px; padding: 24px; background: #f9f9f9; }
-          .success { color: #4CAF50; }
-          .error { color: #f44336; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1 class="${success ? 'success' : 'error'}">${action === 'approve' ? '✓ 授权成功' : '✗ 已拒绝'}</h1>
-          <p>${message}</p>
-          <p>您可以关闭此页面。</p>
-        </div>
-      </body>
-      </html>
-    `);
+    if (!success) return res.status(404).json({ success: false, message: '用户码无效或已过期。' });
+    res.json({ success: true, approved: action === 'approve', message });
   } catch (err) {
     console.error('Device approve error:', err);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html lang="zh">
-      <head><meta charset="UTF-8"><title>错误</title></head>
-      <body><h1>服务器错误</h1><p>请稍后重试。</p></body>
-      </html>
-    `);
+    res.status(500).json({ success: false, message: '提交设备授权失败，请稍后重试。' });
   }
 });
 

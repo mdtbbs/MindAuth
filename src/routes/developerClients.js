@@ -1,8 +1,10 @@
 const express = require('express');
 const requireAuth = require('../middleware/requireAuth');
+const { createRateLimiter } = require('../middleware/rateLimit');
 const registry = require('../modules/admin/clientRegistry');
 
 const router = express.Router();
+const createLimiter = createRateLimiter({ maxAttempts: 10, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:developer_client_create' });
 router.use(requireAuth);
 
 router.get('/', async (req, res) => {
@@ -15,12 +17,12 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', createLimiter, async (req, res) => {
   try {
     const application = await registry.createOwnerApplication(req.user.id, req.body || {});
     res.status(201).json({ success: true, application });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message || '创建应用失败' });
+    res.status(error.statusCode || 400).json({ success: false, ...(error.code ? { code: error.code } : {}), message: error.message || '创建应用失败' });
   }
 });
 
@@ -36,9 +38,18 @@ router.put('/:id', async (req, res) => {
 router.post('/:id/submit', async (req, res) => {
   try {
     await registry.submitOwnerApplication(req.user.id, Number(req.params.id));
-    res.json({ success: true, status: 'pending' });
+    res.json({ success: true, status: 'approved' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message || '提交审核失败' });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const result = await registry.deleteOwnerApplication(req.user.id, Number(req.params.id));
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(error.message === '应用不存在' ? 404 : 400).json({ success: false, message: error.message || '删除应用失败' });
   }
 });
 

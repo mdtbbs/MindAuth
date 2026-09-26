@@ -33,6 +33,7 @@ const { generateShortToken, generateToken } = require('../../utils/token');
 const { hashClientSecret, isHashedClientSecret } = require('../../utils/secrets');
 const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../../utils/datetime');
 const { maskPhone } = require('../../utils/phone');
+const { forumProfileUrl } = require('../../utils/forumProfileUrl');
 const sessionManager = require('../sessions/sessionManager');
 const tokenStore = require('./tokenStore');
 const { VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes } = require('./scopes');
@@ -254,7 +255,7 @@ function redirectUriMatches(requested, registered) {
   try {
     const requestedUrl = new URL(requested);
     const registeredUrl = new URL(registered);
-    const loopback = (url) => url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname.toLowerCase());
+    const loopback = (url) => url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname.toLowerCase());
     if (!loopback(requestedUrl) || !loopback(registeredUrl)) return false;
     if (requestedUrl.hostname.toLowerCase() !== registeredUrl.hostname.toLowerCase()) return false;
     if (requestedUrl.pathname !== registeredUrl.pathname || requestedUrl.search !== registeredUrl.search) return false;
@@ -280,8 +281,8 @@ function requestedScopes(scope, client) {
     });
   }
   if (requested.some(value => !approved.includes(value))) {
-    throw new OAuthError(400, 'invalid_scope', '请求的 scope 未经管理员批准', {
-      error: 'invalid_scope', description: '请求的 scope 未经管理员批准',
+    throw new OAuthError(400, 'invalid_scope', '请求的 scope 未包含在此应用的权限配置中', {
+      error: 'invalid_scope', description: '请求的 scope 未包含在此应用的权限配置中',
     });
   }
   return requested;
@@ -391,13 +392,22 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
     [user.id, clientId],
   );
   const previouslyGranted = new Set(String(authorizationRows[0]?.scope || '').split(/\s+/).filter(Boolean));
-  const missingConsent = requested.some(item => !previouslyGranted.has(item));
+  const newScopes = requested.filter(item => !previouslyGranted.has(item));
+  const missingConsent = newScopes.length > 0;
+  let developerName = null;
+  if (clientData.owner_user_id) {
+    const [ownerRows] = await pool.execute('SELECT username FROM users WHERE id = ? LIMIT 1', [clientData.owner_user_id]);
+    developerName = ownerRows[0]?.username || null;
+  }
   if (previewOnly) {
     return {
       consentRequired: missingConsent,
       client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
-        website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type },
+        website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type,
+        developer_name: developerName, owner_user_id: clientData.owner_user_id || null,
+        developer_url: clientData.owner_user_id ? forumProfileUrl(clientData.owner_user_id) : null },
       requestedScopes: requested,
+      newScopes,
       previousScopes: [...previouslyGranted],
     };
   }
@@ -405,8 +415,11 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
     return {
       consentRequired: true,
       client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
-        website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type },
+        website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type,
+        developer_name: developerName, owner_user_id: clientData.owner_user_id || null,
+        developer_url: clientData.owner_user_id ? forumProfileUrl(clientData.owner_user_id) : null },
       requestedScopes: requested,
+      newScopes,
     };
   }
 
@@ -1019,15 +1032,8 @@ async function issueDeviceCode({ clientId, scope }) {
   // 1. Validate client
   const clientData = await lookupClient(clientId);
 
-  // 2. Validate scope
-  if (scope) {
-    const requestedScopes = scope.split(' ').filter(s => s);
-    const invalidScopes = requestedScopes.filter(s => !VALID_SCOPES.includes(s));
-    if (invalidScopes.length > 0) {
-      throw new OAuthError(400, 'invalid_scope', '无效的 scope: ' + invalidScopes.join(', '));
-    }
-  }
-  const effectiveScope = scope || 'openid profile email';
+  // Device Flow obeys the same registered scope ceiling as Authorization Code.
+  const effectiveScope = requestedScopes(scope, clientData).join(' ');
 
   // 3. Generate device code (32 bytes hex)
   const deviceCode = crypto.randomBytes(32).toString('hex');
@@ -1058,8 +1064,8 @@ async function issueDeviceCode({ clientId, scope }) {
   await tokenStore.storeUserCode(userCode, deviceCode, DEVICE_CODE_TTL_S);
 
   // 7. Build response
-  const verificationUri = VERIFICATION_URI;
-  const verificationUriComplete = `${verificationUri}/oauth/device?user_code=${userCode}`;
+  const verificationUri = `${VERIFICATION_URI.replace(/\/+$/, '')}/device`;
+  const verificationUriComplete = `${verificationUri}?user_code=${encodeURIComponent(userCode)}`;
 
   return {
     deviceCode,

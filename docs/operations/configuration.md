@@ -24,6 +24,7 @@
 |------|--------|------|
 | `PORT` | `4001` | 服务监听端口 |
 | **`BASE_URL`** | `http://localhost:4001` | 服务基础 URL（邮件链接使用）；生产不得为 localhost |
+| `MINDFOURM_BASE_URL` | `https://mdtbbs.cn` | MDTBBS 论坛主页；开发者资料链接使用该地址拼接 `/users/{id}` |
 | `CDN_URL` | 空 | CDN 基础 URL，配置后自动加入 CSP |
 | `NODE_ENV` | `development` | `production` 启用严格校验与安全 Cookie |
 | **`ALLOWED_ORIGINS`** | `http://localhost:3000,4000,4001` | CORS 允许来源（逗号分隔），只需列跨域调用方——同源自动放行；生产禁止 `*` |

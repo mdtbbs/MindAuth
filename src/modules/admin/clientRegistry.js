@@ -3,11 +3,12 @@ const net = require('node:net');
 const { pool, transaction } = require('../../db');
 const { generateToken, generateShortToken } = require('../../utils/token');
 const { hashClientSecret } = require('../../utils/secrets');
+const { forumProfileUrl } = require('../../utils/forumProfileUrl');
 const { writeAdminAudit } = require('../audit/auditWriter');
-const { VALID_SCOPES, normalizeScopes } = require('../oauth/scopes');
+const { VALID_SCOPES, SCOPE_DESCRIPTIONS, normalizeScopes } = require('../oauth/scopes');
 const tokenStore = require('../oauth/tokenStore');
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]']);
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost']);
 const RESERVED_SCHEMES = new Set([
   'http', 'https', 'javascript', 'vbscript', 'data', 'file', 'blob', 'about',
   'ftp', 'ftps', 'mailto', 'tel', 'sms', 'intent', 'content', 'market',
@@ -203,9 +204,26 @@ async function rotateSecret(id, actor) {
 }
 
 async function deleteClient(id, actor) {
-  const [result] = await pool.execute('DELETE FROM clients WHERE id = ?', [id]);
+  const client = await getClient(id);
+  if (!client || client.status === 'deleted') return { deleted: false };
+  const users = await revokeClientGrants(client.client_id, 'deleted');
   await writeAdminAudit(actor.adminId, 'client.delete', 'client', Number(id), null, actor.ipAddress);
-  return { deleted: result.affectedRows > 0 };
+  return { deleted: users !== null };
+}
+
+async function revokeClientGrants(clientId, status) {
+  let users = [];
+  await transaction(async (conn) => {
+    const [rows] = await conn.execute('SELECT id FROM clients WHERE client_id = ? FOR UPDATE', [clientId]);
+    if (!rows[0]) return;
+    const [tokenUsers] = await conn.execute('SELECT DISTINCT user_id FROM refresh_tokens WHERE client_id = ?', [clientId]);
+    users = tokenUsers.map(({ user_id }) => Number(user_id));
+    await conn.execute('UPDATE clients SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE client_id = ?', [status, clientId]);
+    await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [clientId]);
+    await conn.execute('DELETE FROM authorizations WHERE client_id = ?', [clientId]);
+  });
+  await Promise.all(users.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, clientId)));
+  return users;
 }
 
 async function listOwnerApplications(ownerUserId) {
@@ -213,7 +231,7 @@ async function listOwnerApplications(ownerUserId) {
     `SELECT id, name, description, website_url, client_id, redirect_uri, require_pkce,
             client_type, party_type, status, requested_scopes, approved_scopes,
             approved_at, created_at, updated_at
-     FROM clients WHERE owner_user_id = ? ORDER BY updated_at DESC`, [ownerUserId],
+     FROM clients WHERE owner_user_id = ? AND status <> 'deleted' ORDER BY updated_at DESC`, [ownerUserId],
   );
   const clients = [];
   for (const row of rows) {
@@ -242,13 +260,15 @@ function validateApplication(data) {
   const name = typeof data.name === 'string' ? data.name.trim() : '';
   if (!name || name.length > 120) throw new Error('应用名称为必填项且不能超过 120 个字符');
   const description = typeof data.description === 'string' ? data.description.trim() : '';
-  if (description.length > 2000) throw new Error('应用说明不能超过 2000 个字符');
+  if (!description || description.length > 2000) throw new Error('应用说明为必填项且不能超过 2000 个字符');
   const websiteUrl = data.website_url ? String(data.website_url).trim() : null;
   if (websiteUrl) {
     let url;
     try { url = new URL(websiteUrl); } catch { throw new Error('应用主页 URL 无效'); }
-    if (url.protocol !== 'https:' || isPrivateOrInternalHost(url.hostname) || url.username || url.password) {
-      throw new Error('应用主页必须是公开 HTTPS 地址');
+    const isLoopbackHttp = url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname.toLowerCase());
+    if ((!isLoopbackHttp && (url.protocol !== 'https:' || isPrivateOrInternalHost(url.hostname)))
+      || url.username || url.password || url.hash || websiteUrl.length > 2048) {
+      throw new Error('应用主页必须是 HTTPS 地址；开发环境可使用 localhost 或 loopback');
     }
   }
   if (!Array.isArray(data.requested_scopes)) throw new Error('requested_scopes 必须是 scope 数组');
@@ -258,6 +278,10 @@ function validateApplication(data) {
   for (const uri of redirectUris) {
     const result = validateRedirectUri(uri);
     if (!result.valid) throw new Error(result.error);
+    const parsed = new URL(uri);
+    if (parsed.protocol === 'http:' && !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+      throw new Error('第三方应用的 HTTP 回调仅允许 localhost 或 loopback 地址');
+    }
   }
   const requestedScopes = parseScopes(data.requested_scopes);
   if (!requestedScopes.length || requestedScopes.length !== new Set(data.requested_scopes || []).size) {
@@ -268,77 +292,163 @@ function validateApplication(data) {
 }
 
 async function createOwnerApplication(ownerUserId, data) {
+  await assertPhoneVerifiedDeveloper(ownerUserId);
   const value = validateApplication(data);
   const clientId = generateShortToken();
   const id = await transaction(async (conn) => {
     const [result] = await conn.execute(
       `INSERT INTO clients (name, description, website_url, client_id, client_secret, redirect_uri,
-         require_pkce, client_type, party_type, status, owner_user_id, requested_scopes, approved_scopes)
-       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', 'draft', ?, ?, JSON_ARRAY())`,
-      [value.name, value.description, value.websiteUrl, clientId, value.redirectUris[0], ownerUserId, JSON.stringify(value.requestedScopes)],
+         require_pkce, client_type, party_type, status, owner_user_id, requested_scopes, approved_scopes, approved_at)
+       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', 'approved', ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [value.name, value.description, value.websiteUrl, clientId, value.redirectUris[0], ownerUserId,
+        JSON.stringify(value.requestedScopes), JSON.stringify(value.requestedScopes)],
     );
     await syncRedirectUris(conn, result.insertId, value.redirectUris);
     return result.insertId;
   });
-  return { id, client_id: clientId, client_type: 'public', status: 'draft', client_secret: null };
+  return { id, client_id: clientId, client_type: 'public', party_type: 'third_party', status: 'approved',
+    approved_scopes: value.requestedScopes, client_secret: null };
+}
+
+async function assertPhoneVerifiedDeveloper(ownerUserId) {
+  const [users] = await pool.execute('SELECT phone_verified FROM users WHERE id = ? LIMIT 1', [ownerUserId]);
+  if (!users[0] || !(users[0].phone_verified === 1 || users[0].phone_verified === true)) {
+    const error = new Error('请先完成手机号验证，再创建开发者应用');
+    error.code = 'PHONE_VERIFICATION_REQUIRED';
+    error.statusCode = 403;
+    throw error;
+  }
 }
 
 async function updateOwnerApplication(ownerUserId, id, data) {
   const value = validateApplication(data);
+  let scopesChanged = false;
+  let clientId;
+  let affectedUsers = [];
   await transaction(async (conn) => {
-    const [rows] = await conn.execute('SELECT id, status FROM clients WHERE id = ? AND owner_user_id = ? FOR UPDATE', [id, ownerUserId]);
+    const [rows] = await conn.execute(`SELECT id, client_id, status, client_type, party_type, requested_scopes
+      FROM clients WHERE id = ? AND owner_user_id = ? FOR UPDATE`, [id, ownerUserId]);
     const client = rows[0];
     if (!client) throw new Error('应用不存在');
-    if (!['draft', 'rejected'].includes(client.status)) throw new Error('审核中的应用暂时不能编辑');
+    if (client.status === 'deleted') throw new Error('应用不存在');
+    if (client.client_type !== 'public' || client.party_type !== 'third_party') throw new Error('只能修改自助创建的 Public Client');
+    clientId = client.client_id;
+    const previousScopes = parseScopes(client.requested_scopes).sort();
+    const nextScopes = [...value.requestedScopes].sort();
+    scopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
     await conn.execute(
-      `UPDATE clients SET name = ?, description = ?, website_url = ?, requested_scopes = ?,
-         status = 'draft', approved_scopes = JSON_ARRAY(), approved_at = NULL, approved_by = NULL
+      `UPDATE clients SET name = ?, description = ?, website_url = ?, requested_scopes = ?, approved_scopes = ?,
+         status = CASE WHEN status IN ('draft', 'pending') THEN 'approved' ELSE status END,
+         approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP), approved_by = NULL
        WHERE id = ?`,
-      [value.name, value.description, value.websiteUrl, JSON.stringify(value.requestedScopes), id],
+      [value.name, value.description, value.websiteUrl, JSON.stringify(value.requestedScopes), JSON.stringify(value.requestedScopes), id],
     );
     await syncRedirectUris(conn, Number(id), value.redirectUris);
+    if (scopesChanged) {
+      const [tokenRows] = await conn.execute('SELECT DISTINCT user_id FROM refresh_tokens WHERE client_id = ?', [clientId]);
+      affectedUsers = tokenRows.map(({ user_id }) => Number(user_id));
+      const [grants] = await conn.execute('SELECT user_id, scope FROM authorizations WHERE client_id = ?', [clientId]);
+      for (const grant of grants) {
+        const remaining = String(grant.scope || '').split(/\s+/).filter(scope => value.requestedScopes.includes(scope));
+        if (remaining.length) {
+          await conn.execute('UPDATE authorizations SET scope = ? WHERE user_id = ? AND client_id = ?',
+            [remaining.join(' '), grant.user_id, clientId]);
+        } else {
+          await conn.execute('DELETE FROM authorizations WHERE user_id = ? AND client_id = ?', [grant.user_id, clientId]);
+        }
+      }
+      await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [clientId]);
+    }
   });
+  if (scopesChanged) {
+    await Promise.all(affectedUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, clientId)));
+  }
   return { updated: true };
 }
 
 async function submitOwnerApplication(ownerUserId, id) {
   const [result] = await pool.execute(
-    `UPDATE clients SET status = 'pending', updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND owner_user_id = ? AND status IN ('draft', 'rejected')`, [id, ownerUserId],
+    `UPDATE clients SET status = 'approved', approved_scopes = requested_scopes,
+       approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP), approved_by = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND owner_user_id = ? AND client_type = 'public' AND party_type = 'third_party'
+       AND status IN ('draft', 'rejected')`, [id, ownerUserId],
   );
-  if (!result.affectedRows) throw new Error('应用不存在或当前状态不能提交审核');
-  return { submitted: true };
+  if (!result.affectedRows) throw new Error('应用不存在或当前状态不能启用');
+  return { submitted: true, status: 'approved' };
 }
 
 async function deactivateOwnerApplication(ownerUserId, id) {
   const [rows] = await pool.execute(
-    `SELECT id, client_id, status FROM clients WHERE id = ? AND owner_user_id = ? LIMIT 1`,
+    `SELECT id, client_id, status, client_type, party_type FROM clients WHERE id = ? AND owner_user_id = ? LIMIT 1`,
     [id, ownerUserId],
   );
   const client = rows[0];
-  if (!client) throw new Error('应用不存在');
+  if (!client || client.client_type !== 'public' || client.party_type !== 'third_party') throw new Error('应用不存在');
   if (client.status !== 'approved') throw new Error('只有已批准的应用可以停用');
 
-  await transaction(async (conn) => {
-    const [locked] = await conn.execute('SELECT status FROM clients WHERE id = ? AND owner_user_id = ? FOR UPDATE', [id, ownerUserId]);
-    if (!locked[0] || locked[0].status !== 'approved') throw new Error('应用状态已变化，请刷新后重试');
-    await conn.execute("UPDATE clients SET status = 'suspended', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
-    await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [client.client_id]);
-    await conn.execute('DELETE FROM authorizations WHERE client_id = ?', [client.client_id]);
-  });
-
-  // Access tokens are indexed by user/client in Redis; invalidate those indexes
-  // after the database revocation commits. Introspection also rejects a suspended
-  // issuing client, so a Redis outage cannot keep the application usable.
-  const [users] = await pool.execute('SELECT DISTINCT user_id FROM refresh_tokens WHERE client_id = ?', [client.client_id]);
-  await Promise.all(users.map(({ user_id }) => tokenStore.revokeAccessTokensForUserClient(user_id, client.client_id)));
+  await revokeClientGrants(client.client_id, 'suspended');
   return { deactivated: true, status: 'suspended' };
+}
+
+async function deleteOwnerApplication(ownerUserId, id) {
+  const [rows] = await pool.execute(
+    'SELECT client_id, status, client_type, party_type FROM clients WHERE id = ? AND owner_user_id = ? LIMIT 1', [id, ownerUserId],
+  );
+  const client = rows[0];
+  if (!client || client.status === 'deleted' || client.client_type !== 'public' || client.party_type !== 'third_party') {
+    throw new Error('应用不存在');
+  }
+  await revokeClientGrants(client.client_id, 'deleted');
+  return { deleted: true };
+}
+
+async function listPublicApplications() {
+  const [rows] = await pool.execute(
+    `SELECT c.client_id, c.name, c.description, c.website_url, c.client_type, c.party_type,
+            c.requested_scopes, c.approved_scopes, c.owner_user_id, u.username AS developer_name,
+            (SELECT COUNT(DISTINCT a.user_id) FROM authorizations a WHERE a.client_id = c.client_id) AS authorization_count
+     FROM clients c LEFT JOIN users u ON u.id = c.owner_user_id
+     WHERE c.status = 'approved' AND c.client_type = 'public'
+     ORDER BY c.party_type = 'first_party' DESC, c.created_at DESC LIMIT 100`,
+  );
+  return rows.map(publicApplicationView);
+}
+
+async function getPublicApplication(clientId) {
+  const [rows] = await pool.execute(
+    `SELECT c.client_id, c.name, c.description, c.website_url, c.client_type, c.party_type, c.status,
+            c.requested_scopes, c.approved_scopes, c.owner_user_id, u.username AS developer_name,
+            (SELECT COUNT(DISTINCT a.user_id) FROM authorizations a WHERE a.client_id = c.client_id) AS authorization_count
+     FROM clients c LEFT JOIN users u ON u.id = c.owner_user_id WHERE c.client_id = ? LIMIT 1`, [clientId],
+  );
+  const row = rows[0];
+  if (!row || row.client_type !== 'public') return null;
+  if (row.status !== 'approved') return { client_id: row.client_id, available: false };
+  return { ...publicApplicationView(row), available: true };
+}
+
+function publicApplicationView(row) {
+  const scopeNames = parseScopes(row.approved_scopes ?? row.requested_scopes);
+  return {
+    client_id: row.client_id,
+    name: row.name,
+    description: row.description || '',
+    website_url: row.website_url || null,
+    client_type: row.client_type,
+    party_type: row.party_type,
+    official: row.party_type === 'first_party',
+    developer_name: row.developer_name || null,
+    developer_url: row.owner_user_id ? forumProfileUrl(row.owner_user_id) : null,
+    authorization_count: Number(row.authorization_count || 0),
+    scopes: scopeNames.map(scope => ({ scope, ...SCOPE_DESCRIPTIONS[scope] })),
+  };
 }
 
 async function reviewClient(id, { status, approvedScopes }, actor) {
   if (!['approved', 'rejected', 'suspended', 'pending'].includes(status)) throw new Error('无效的审核状态');
   const client = await getClient(id);
   if (!client) throw new Error('客户端不存在');
+  if (client.status === 'deleted') throw new Error('已删除的客户端不能恢复');
   const requestedValues = Array.isArray(approvedScopes) ? approvedScopes : [];
   if (requestedValues.some(scope => typeof scope !== 'string' || !VALID_SCOPES.includes(scope))
     || new Set(requestedValues).size !== requestedValues.length) throw new Error('批准的 scopes 包含无效或重复值');
@@ -360,7 +470,7 @@ module.exports = {
   createClient, updateClient, rotateSecret, deleteClient, listClients, getClient,
   listOwnerApplications, createOwnerApplication, updateOwnerApplication,
   submitOwnerApplication, reviewClient, validateRedirectUri, isPrivateOrInternalHost,
-  deactivateOwnerApplication,
-  validateApplication,
+  deactivateOwnerApplication, deleteOwnerApplication, listPublicApplications, getPublicApplication,
+  validateApplication, assertPhoneVerifiedDeveloper,
   _isPrivateOrInternalHost: isPrivateOrInternalHost,
 };

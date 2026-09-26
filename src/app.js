@@ -24,6 +24,7 @@ const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const oauthRoutes = require('./routes/oauth');
 const developerClientRoutes = require('./routes/developerClients');
+const publicAppRoutes = require('./routes/publicApps');
 const { sloLogoutHandler } = require('./routes/sloLogout');
 const passwordRoutes = require('./routes/password');
 const emailVerificationRoutes = require('./routes/email-verification');
@@ -198,6 +199,7 @@ function createApp(deps = {}) {
   app.use('/api', authRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/developer/clients', developerClientRoutes);
+  app.use('/api/public/apps', publicAppRoutes);
   app.use('/api', oauthRoutes);
   app.use('/api/password', passwordRoutes);
   app.use('/api/email-verification', emailVerificationRoutes);

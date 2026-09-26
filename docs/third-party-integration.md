@@ -7,14 +7,14 @@
 ## 接入前先确认
 
 - 服务端网站可使用 Confidential Client + PKCE S256，`client_secret` 只留在后端。
-- 公开二进制或浏览器 bundle 使用开发者中心批准的 Public Client。Public Client 直接以 `client_id` + authorization code + verifier 调 `/api/token`，无 `client_secret`。
+- 公开二进制或浏览器 bundle 使用开发者中心即时启用的 Public Client。手机号已验证的用户可以自助创建；Public Client 直接以 `client_id` + authorization code + verifier 调 `/api/token`，无 `client_secret`。
 - MindAuth 发布 OIDC Discovery 元数据和 UserInfo，但**不签发 ID Token，也不提供 JWKS**。需要验证签名 ID Token 的 OIDC 客户端不能直接使用当前契约；登录后应由后端调用 UserInfo，并以 `issuer + sub` 作为外部用户标识。
 - `/api/native/*` 与 `/api/v1/native/*` 是预先登记的第一方客户端接口，不是第三方 OAuth 接口。其他应用不得收集 MindAuth 密码或调用 Native Password Login。
-- RFC 8628 设备授权端点虽存在于当前服务，但未纳入本次公开契约；仓库中的 [设备授权实现说明](DEVICE_AUTH.md) 是旧版内部参考，暂勿依赖其中示例集成。
+- RFC 8628 Device Flow 保持可用，验证页为 React 路由 `/device`；设备码、授权与轮询接口见 [OAuth API 参考](api/oauth.md)。
 
 ## 1. 注册 OAuth 应用
 
-Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助申请，管理员审核 Redirect URI 和 scopes。Public Client 支持 HTTPS、自定义 scheme 和显式 loopback literal；详见 [PKCE 指南](public-client-pkce.md)。
+Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助创建并即时启用；服务端校验 HTTPS、localhost/loopback、自定义 scheme 和 scope 白名单，不需要管理员逐项审核。详见 [PKCE 指南](public-client-pkce.md)。
 
 取得以下配置后，将密钥放在服务端密钥管理或环境变量中：
 

@@ -1,6 +1,6 @@
 # Device Authorization Flow (RFC 8628) — 内部实现参考
 
-> **暂未纳入第三方公开 API 契约。** 本文保留了历史实现说明和示例，不应作为外部集成依据：运行时路由挂载为 `/api/device/*`，旧文档所写 `/api/oauth/device/*` 不存在；`verification_uri_complete` 也指向未实现的验证页面，审批表单与 CSRF 及 JSON 请求处理不匹配。面向第三方的已支持流程见 [第三方 OAuth API 接入指南](third-party-integration.md)。
+> RFC 8628 Device Flow 保持可用。验证与授权界面由 React `/device` 页面提供，接口路径如下；MindAuth API 请求体使用 JSON。注册应用和可用 scopes 见 [Public Client PKCE 指南](public-client-pkce.md)。
 
 MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受限的设备（如 Mindustry Mod、CLI 工具、智能电视）通过用户在另一个设备上授权来获取访问令牌。
 
@@ -12,7 +12,7 @@ MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受
 │  (Mod/CLI)  │                              │  (User)      │
 └──────┬──────┘                              └──────┬───────┘
        │                                            │
-       │  1. POST /oauth/device/code                │
+       │  1. POST /api/device/code                  │
        │  { client_id, scope }                      │
        │ ─────────────────────────────────────────> │
        │                                            │
@@ -27,7 +27,7 @@ MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受
        │                                            │
        │                          5. 用户登录并授权 │
        │                                            │
-       │  6. POST /oauth/device/token (轮询)        │
+       │  6. POST /api/device/token (轮询)          │
        │  { client_id, device_code, grant_type }    │
        │ ─────────────────────────────────────────> │
        │                                            │
@@ -41,7 +41,7 @@ MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受
 
 ### 1. 请求设备码
 
-**POST** `/api/oauth/device/code`
+**POST** `/api/device/code`
 
 **请求参数** (application/x-www-form-urlencoded 或 JSON):
 - `client_id` (必需) — 客户端标识符
@@ -52,8 +52,8 @@ MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受
 {
   "device_code": "a1b2c3d4e5f6...（64位十六进制）",
   "user_code": "LL-ABCD-1234",
-  "verification_uri": "http://localhost:4001",
-  "verification_uri_complete": "http://localhost:4001/oauth/device?user_code=LL-ABCD-1234",
+  "verification_uri": "https://auth.mdtbbs.cn/device",
+  "verification_uri_complete": "https://auth.mdtbbs.cn/device?user_code=LL-ABCD-1234",
   "expires_in": 900,
   "interval": 5
 }
@@ -71,9 +71,9 @@ MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受
 
 ### 2. 用户验证页面
 
-**GET** `/api/oauth/device/verify?user_code=LL-XXXX-XXXX`
+**GET** `/device?user_code=LL-XXXX-XXXX`
 
-用户访问此页面查看授权请求。需要用户已登录（通过 session cookie）。
+用户访问 React 验证页。未登录时会先进入 MindAuth 登录页，再返回设备授权。
 
 **页面内容**:
 - 显示用户码
@@ -87,19 +87,25 @@ MindAuth 实现了 OAuth 2.0 设备授权流程，允许无浏览器或输入受
 
 ### 3. 用户授权/拒绝
 
-**POST** `/api/oauth/device/approve`
+**GET** `/api/device/info?user_code=LL-XXXX-XXXX`
 
-**请求参数** (application/x-www-form-urlencoded):
+需要已登录 session。返回应用名称、类型和中文 scope 描述，供 React 页面展示。
+
+### 3. 用户授权/拒绝
+
+**POST** `/api/device/approve`
+
+**请求参数** (JSON):
 - `user_code` (必需) — 用户码
 - `action` (必需) — `approve` 或 `deny`
 
-**响应**: HTML 页面显示操作结果
+**响应**: JSON 操作结果
 
 **限流**: 每 IP 30 次/分钟
 
 ### 4. 轮询令牌
 
-**POST** `/api/oauth/device/token`
+**POST** `/api/device/token`
 
 **请求参数** (application/x-www-form-urlencoded 或 JSON):
 - `client_id` (必需) — 客户端标识符
@@ -164,7 +170,7 @@ public class DeviceAuthClient {
 
     public OAuthToken authenticate() throws Exception {
         // 1. 请求设备码
-        HttpResponse<String> response = post(BASE_URL + "/api/oauth/device/code",
+        HttpResponse<String> response = post(BASE_URL + "/api/device/code",
             Map.of("client_id", CLIENT_ID, "scope", "openid profile"));
 
         JsonObject json = Json.parse(response.body()).asObject();
@@ -185,7 +191,7 @@ public class DeviceAuthClient {
 
             try {
                 HttpResponse<String> tokenResponse = post(
-                    BASE_URL + "/api/oauth/device/token",
+                    BASE_URL + "/api/device/token",
                     Map.of(
                         "client_id", CLIENT_ID,
                         "device_code", deviceCode,
@@ -244,7 +250,7 @@ const CLIENT_ID = 'your_client_id';
 
 async function authenticate() {
   // 1. 请求设备码
-  const { data } = await axios.post(`${BASE_URL}/api/oauth/device/code`, {
+  const { data } = await axios.post(`${BASE_URL}/api/device/code`, {
     client_id: CLIENT_ID,
     scope: 'openid profile',
   });
@@ -258,7 +264,7 @@ async function authenticate() {
     await sleep(data.interval * 1000);
 
     try {
-      const tokenRes = await axios.post(`${BASE_URL}/api/oauth/device/token`, {
+      const tokenRes = await axios.post(`${BASE_URL}/api/device/token`, {
         client_id: CLIENT_ID,
         device_code: data.device_code,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
@@ -308,7 +314,7 @@ CLIENT_ID = 'your_client_id'
 
 def authenticate():
     # 1. 请求设备码
-    resp = requests.post(f'{BASE_URL}/api/oauth/device/code', data={
+    resp = requests.post(f'{BASE_URL}/api/device/code', data={
         'client_id': CLIENT_ID,
         'scope': 'openid profile',
     })
@@ -325,7 +331,7 @@ def authenticate():
         time.sleep(interval)
 
         try:
-            token_resp = requests.post(f'{BASE_URL}/api/oauth/device/token', data={
+            token_resp = requests.post(f'{BASE_URL}/api/device/token', data={
                 'client_id': CLIENT_ID,
                 'device_code': data['device_code'],
                 'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
@@ -387,9 +393,9 @@ def authenticate():
 - 用户码到设备码的映射在授权完成或拒绝后删除
 
 ### 限流
-- `/oauth/device/code` — 每 IP 30 次/分钟（防止大量生成）
-- `/oauth/device/token` — 每 IP 60 次/分钟（允许正常轮询）
-- `/oauth/device/approve` — 每 IP 30 次/分钟（防止滥用）
+- `/api/device/code` — 每 IP 30 次/分钟（防止大量生成）
+- `/api/device/token` — 每 IP 60 次/分钟（允许正常轮询）
+- `/api/device/approve` — 每 IP 30 次/分钟（防止滥用）
 
 ### 用户码格式
 - 前缀 `LL-` 便于识别来源

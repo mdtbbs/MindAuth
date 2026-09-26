@@ -8,6 +8,7 @@ const config = {
   server: {
     port: parseInt(process.env.PORT) || 4001,
     baseUrl: process.env.BASE_URL || 'http://localhost:4001',
+    forumBaseUrl: process.env.MINDFOURM_BASE_URL || 'https://mdtbbs.cn',
     cdnUrl: process.env.CDN_URL || '',
     isProduction: process.env.NODE_ENV === 'production',
     allowedOrigins: process.env.ALLOWED_ORIGINS

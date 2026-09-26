@@ -151,7 +151,7 @@ test('verification URIs are correctly formatted', async () => {
   assert.ok(result.verificationUri);
   assert.ok(result.verificationUriComplete);
   assert.ok(result.verificationUriComplete.includes(result.userCode));
-  assert.ok(result.verificationUriComplete.includes('/oauth/device'));
+  assert.ok(result.verificationUriComplete.includes('/device'));
 });
 
 test('expires_in and interval are reasonable values', async () => {

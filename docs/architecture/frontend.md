@@ -49,6 +49,8 @@ frontend/src/
 | `/reset-password` | `ResetPasswordPage.tsx` |
 | `/verify-email` | `VerifyEmailPage.tsx` |
 | `/authorize` | `OAuthAuthorizePage.tsx`（OAuth 授权确认） |
+| `/device`、`/oauth/device` | `DeviceAuthorizationPage.tsx`（RFC 8628 设备授权）|
+| `/apps`、`/apps/:clientId` | `PublicAppsPage.tsx`（公开应用目录与详情）|
 | `/dashboard` | `DashboardPage.tsx` |
 | `/profile` | `ProfilePage.tsx` |
 | `/security` | `SecurityPage.tsx` |
@@ -56,7 +58,7 @@ frontend/src/
 | `/activity` | `ActivityPage.tsx` |
 | `/authorizations` | `AuthorizationsPage.tsx` |
 | `/notifications` | `NotificationsPage.tsx` |
-| `/developer` | `DeveloperPage.tsx` |
+| `/developer`、`/developer/new`、`/developer/:id` | `DeveloperPage.tsx`（自助 Public Client 管理）|
 | `/account-settings` | `AccountSettingsPage.tsx` compatibility redirect to `/profile` or the matching new route |
 | `/` | `Navigate` → `/login` |
 | `*` | `ErrorPage.tsx`（status=404） |
@@ -69,7 +71,8 @@ frontend/src/
 - **ProfilePage** — 头像、横幅、用户名和账户自定义资料。
 - **SecurityPage** — 邮箱验证与更换、手机号绑定、密码、社交账号关联和账户删除。
 - **SessionsPage / ActivityPage / AuthorizationsPage / NotificationsPage** — 分别管理登录设备、登录记录、OAuth 授权和通知；撤销设备/应用授权、删除账户等操作由确认对话框保护。
-- **DeveloperPage** — 提供 OAuth/OIDC 接入文档入口和授权管理入口。
+- **DeveloperPage** — 创建和管理即时可用的 Public Client，包括 Redirect URI、scope、使用汇总和软删除；接入文档仍链接到 MindAuth 与 MindFourm 各自的 API 文档。
+- **OAuthAuthorizePage / DeviceAuthorizationPage / PublicAppsPage** — 分别负责用户同意、React 设备授权和公开应用目录；权限使用中文描述，新 scope 同意时突出显示新增项目。
 - **`AccountPageParts.tsx`** — section、设置行、空状态、加载错误、状态标签、日期和 User-Agent 展示 helpers。
 
 `/account-settings` 保留为兼容入口：旧 `section`/`tab` 参数跳转到对应的新路由，旧 `social=qq_bound` 跳转至安全设置；自定义字段仍使用用户端 `GET/PUT /api/account/fields`，没有改变后端 API。

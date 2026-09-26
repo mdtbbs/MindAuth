@@ -4,7 +4,7 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 
 > **维护提示**：修改 src/routes/oauth.js、src/modules/oauth/* 时需同步更新本文档及 [../third-party-integration.md](../third-party-integration.md)。
 
-> **文档分工**：第三方接入教程见 [../third-party-integration.md](../third-party-integration.md) 和 [Public Client PKCE 指南](../public-client-pkce.md)。桌面、移动和浏览器原生客户端使用无 secret 的 Public Client + Authorization Code + PKCE S256；服务端集成继续使用 Confidential Client。RFC 8628 设备授权端点暂未纳入稳定外部契约。
+> **文档分工**：第三方接入教程见 [../third-party-integration.md](../third-party-integration.md) 和 [Public Client PKCE 指南](../public-client-pkce.md)。桌面、移动、Mod 和浏览器客户端使用无 secret 的 Public Client + Authorization Code + PKCE S256；服务端集成继续使用 Confidential Client。RFC 8628 Device Flow 路径与 React 页面见 [../DEVICE_AUTH.md](../DEVICE_AUTH.md)。开发者应用创建和目录 API 见 [developer-applications.md](developer-applications.md)。
 
 **通用说明**：
 
@@ -12,7 +12,7 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 - 协议端点请求体为 **JSON**（`Content-Type: application/json`），不支持 form-encoded。
 - 对外接入流程和服务端示例见 [第三方 OAuth 接入指南](../third-party-integration.md)。MindAuth 发布 Discovery 和 UserInfo，但不签发 ID Token、也不提供 `jwks_uri`；依赖签名 ID Token 验证的客户端不适用于当前契约。
 - 当前公开契约端点：`GET /api/authorize`、`POST /api/token`、`GET /api/userinfo`、`POST /api/introspect`、`POST /api/revoke` 和 `GET /.well-known/openid-configuration`。`/api/token` 同时接收授权码和 refresh grant。旧 `POST /api/refresh` 暂作兼容。
-- 当前代码还保留 RFC 8628 设备授权实现，但运行时挂载路径是 `/api/device/*`，旧文档使用的 `/api/oauth/device/*` 与实际路由不符；验证链接和审批表单也尚未与 CSRF/请求体处理对齐，因此不应作为已发布接口使用。细节见 [设备授权内部实现参考](../DEVICE_AUTH.md)。
+- RFC 8628 Device Flow 可用：`POST /api/device/code`, `GET /api/device/info`, `POST /api/device/approve`, `POST /api/device/token`; `verification_uri` 指向 React 页面 `/device`.
 - 标准错误格式（RFC 6749）：`{ "error": "<code>", "error_description": "<中文描述>" }`。未捕获异常返回 `500 server_error`。
 - CSRF：`/token` `/refresh` `/introspect` `/revoke` `/verify` 在豁免名单中；`DELETE /authorizations/:client_id` **需要** `X-CSRF-Token`。
 - 速率限制（按 IP）：`/authorize` `/token` `/refresh` `/introspect` `/revoke` 各 60 次/分钟；`/userinfo` `/user` `/verify` 共享 30 次/分钟（`ratelimit:verify_api`）。
@@ -26,9 +26,9 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | 参数（query） | 必填 | 说明 |
 |------|------|------|
 | `client_id` | 是 | 应用标识 |
-| `redirect_uri` | 是 | 必须匹配应用已注册的一个 URI。HTTPS 和自定义 scheme 精确匹配；loopback 只允许 `127.0.0.1` / `[::1]`，注册端口 `0` 时可匹配该 literal 上的随机运行时端口 |
+| `redirect_uri` | 是 | 必须匹配应用已注册的一个 URI。HTTPS 和自定义 scheme 精确匹配；loopback 允许 `localhost`、`127.0.0.1`、`[::1]`，注册端口 `0` 时可匹配该主机上的随机运行时端口 |
 | `state` | Public 必填 | 防 CSRF 随机串，原样附加到回调 |
-| `scope` | 否 | 空格分隔，必须同时属于系统 scope 与该应用批准的 scope；缺省使用应用批准的全部 scope |
+| `scope` | 否 | 空格分隔，必须同时属于系统 scope 与该应用在开发者中心配置的 scope；缺省使用应用配置的全部 scope |
 | `response_type` | 否 | 若提供必须为 `code` |
 | `code_challenge` | Public 必填 | PKCE challenge = Base64URL(SHA256(code_verifier)) |
 | `code_challenge_method` | Public 必填 | 必须是 `S256`；不接受 `plain` |
@@ -46,10 +46,10 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `unsupported_response_type` | response_type 存在且非 `code` |
 | `invalid_client` | client_id 未注册 |
 | `invalid_redirect` | redirect_uri 与注册值不符（非标准码） |
-| `invalid_scope` | scope 不在系统支持列表或不属于该客户端获批范围 |
+| `invalid_scope` | scope 不在系统支持列表或不属于该客户端配置范围 |
 | `server_error` | 未捕获异常 |
 
-**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。首次授权或请求此前未授予的 scope 时会显示同意页；缩小到已有 scope 子集可继续授权。批准后的 scope 写回现有 `authorizations` 记录。
+**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。用户已授予本次全部 scopes 时不重复显示同意页；新增 scope 时只突出显示尚未授予的权限。授权 scope 写回现有 `authorizations` 记录。
 
 ---
 
