@@ -45,7 +45,6 @@ export function UserApp() {
         <Route path="/authorizations" element={<AuthorizationsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/developer" element={<DeveloperPage />} />
-        <Route path="/developer/new" element={<DeveloperPage />} />
         <Route path="/developer/:id" element={<DeveloperPage />} />
         <Route path="/account-settings" element={<AccountSettingsPage />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
