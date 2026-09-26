@@ -1,7 +1,9 @@
 -- Self-service public clients are immediately usable. Keep rejected and
 -- suspended applications unchanged so prior administrative decisions remain.
 ALTER TABLE clients
-  MODIFY COLUMN status ENUM('draft', 'pending', 'approved', 'rejected', 'suspended', 'deleted') NOT NULL DEFAULT 'approved',
+  MODIFY COLUMN status ENUM('draft', 'pending', 'approved', 'rejected', 'suspended', 'deleted') NOT NULL DEFAULT 'approved';
+
+ALTER TABLE clients
   ADD INDEX idx_clients_public_catalog (client_type, party_type, status, created_at);
 
 -- Only auto-activate existing third-party rows that already meet the current
@@ -34,12 +36,18 @@ WHERE client_type = 'public'
   )
   AND JSON_TYPE(requested_scopes) = 'ARRAY'
   AND JSON_LENGTH(requested_scopes) > 0
-  AND NOT EXISTS (
-    SELECT 1
-    FROM JSON_TABLE(requested_scopes, '$[*]' COLUMNS(scope_name VARCHAR(64) PATH '$')) AS requested_scope
-    WHERE requested_scope.scope_name IS NULL OR requested_scope.scope_name NOT IN (
-      'openid', 'profile', 'email', 'forum.read', 'forum.write',
-      'resource.read', 'resource.download', 'resource.upload',
-      'notification.read', 'message.read', 'message.write'
-    )
+  -- Compare array length with the count of distinct allowed scopes. Duplicate
+  -- entries are conservatively left pending for owner/admin review.
+  AND JSON_LENGTH(requested_scopes) = (
+    JSON_CONTAINS(requested_scopes, JSON_QUOTE('openid'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('profile'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('email'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('forum.read'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('forum.write'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('resource.read'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('resource.download'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('resource.upload'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('notification.read'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('message.read'))
+    + JSON_CONTAINS(requested_scopes, JSON_QUOTE('message.write'))
   );

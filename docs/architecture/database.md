@@ -25,7 +25,7 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
 | [`011_public_client_platform.sql`](../../src/db/migrations/011_public_client_platform.sql) | OAuth clients 增加 Public/Confidential 类型、应用归属、scope、状态和多 Redirect URI |
 | [`012_oauth_client_metrics.sql`](../../src/db/migrations/012_oauth_client_metrics.sql) | OAuth 日使用汇总与错误统计 |
 | [`013_seed_official_android_public_client.sql`](../../src/db/migrations/013_seed_official_android_public_client.sql) | 官方 Android Public Client 初始配置 |
-| [`014_public_clients_self_service.sql`](../../src/db/migrations/014_public_clients_self_service.sql) | 增加已删除状态与公开目录索引；仅自动启用 secret 为空、PKCE 开启、scope 有效且登记回调不含公网 HTTP 的 Public Client 草稿/pending；不安全旧配置保留原状态 |
+| [`014_public_clients_self_service.sql`](../../src/db/migrations/014_public_clients_self_service.sql) | 增加已删除状态与公开目录索引；仅自动启用 secret 为空、PKCE 开启、scope 全部位于允许列表且登记回调不含公网 HTTP 的 Public Client 草稿/pending；不安全旧配置保留原状态，scope 检查兼容 MySQL 5.7 |
 
 ## MySQL 表
 
@@ -164,5 +164,5 @@ MindAuth 使用 MySQL（18 张业务表）持久化账号、OAuth 与审计数�
    - 以 `;` 拆分语句；`--` 行注释与 `/* */` 块注释会被剥离；单引号字符串内的分号/注释符受保护。
    - **反引号内不受保护**：解析器不识别反引号引用，标识符里不要包含 `;` 或 `--`。
    - 不支持 `DELIMITER`，因此不能写存储过程/触发器/多语句体。
-4. **失败即部分生效**：DDL 隐式 COMMIT，迁移中途失败不会回滚已执行的 DDL，且版本未记录、下次启动会整文件重跑——尽量让每条语句幂等（`CREATE TABLE IF NOT EXISTS`、`INSERT IGNORE`），或把有风险的 `ALTER` 拆到独立小迁移里。
+4. **失败即部分生效**：DDL 隐式 COMMIT，迁移中途失败不会回滚已执行的 DDL，且版本未记录、下次启动会整文件重跑——尽量让每条语句幂等（`CREATE TABLE IF NOT EXISTS`、`INSERT IGNORE`），或把有风险的 `ALTER` 拆到独立小迁移里。`ADD INDEX` 重试时，迁移器只会在已存在索引的顺序列定义和唯一性完全匹配时跳过；定义不同仍会失败。
 5. 破坏性重置（drop/重建）不属于正常启动路径，必须作为显式运维步骤写进 release notes。

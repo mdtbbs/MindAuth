@@ -117,6 +117,58 @@ function splitStatements(sql) {
   return statements;
 }
 
+function parseAddIndex(statement) {
+  const match = statement.match(/^\s*ALTER\s+TABLE\s+(`?[\w]+`?)\s+ADD\s+(UNIQUE\s+)?(?:INDEX|KEY)\s+(`?[\w]+`?)\s*\(([^)]+)\)\s*$/i);
+  if (!match) return null;
+
+  const columns = match[4].split(',').map(definition => {
+    const column = definition.trim().match(/^(`?[\w]+`?)(?:\s*\(\s*(\d+)\s*\))?$/);
+    if (!column) return null;
+    return {
+      name: column[1].replace(/`/g, '').toLowerCase(),
+      prefixLength: column[2] ? Number(column[2]) : null,
+    };
+  });
+  if (!columns.length || columns.some(column => !column)) return null;
+
+  return {
+    table: match[1].replace(/`/g, ''),
+    name: match[3].replace(/`/g, ''),
+    unique: Boolean(match[2]),
+    columns,
+  };
+}
+
+async function executeMigrationStatement(pool, statement) {
+  const index = parseAddIndex(statement);
+  if (index) {
+    // DDL can survive a later migration failure. Only skip a repeated index
+    // addition when the existing ordered columns and uniqueness match exactly.
+    const [existing] = await pool.execute(
+      `SELECT COLUMN_NAME, NON_UNIQUE, SUB_PART
+       FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+       ORDER BY seq_in_index`,
+      [index.table, index.name]
+    );
+
+    if (existing.length) {
+      const sameColumns = existing.length === index.columns.length && existing.every((row, i) => (
+        String(row.COLUMN_NAME).toLowerCase() === index.columns[i].name
+        && (row.SUB_PART == null ? null : Number(row.SUB_PART)) === index.columns[i].prefixLength
+      ));
+      const sameUniqueness = Number(existing[0].NON_UNIQUE) === (index.unique ? 0 : 1);
+      if (sameColumns && sameUniqueness) return;
+
+      const error = new Error(`Index ${index.name} already exists with a different definition`);
+      error.code = 'ER_DUP_KEYNAME';
+      throw error;
+    }
+  }
+
+  await pool.query(statement);
+}
+
 /**
  * Ensure the schema_version tracking table exists.
  */
@@ -176,7 +228,7 @@ async function runMigrations(pool) {
 
     try {
       for (const stmt of statements) {
-        await pool.query(stmt);
+        await executeMigrationStatement(pool, stmt);
       }
 
       // Record the version only after all statements succeed
