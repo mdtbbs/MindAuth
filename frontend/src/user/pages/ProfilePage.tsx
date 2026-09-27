@@ -221,7 +221,7 @@ export function ProfilePage() {
           <AccountSection id="custom-fields" title={t('profile.custom')} description={t('profile.customDescription')}>
             <AccountLoadState
               loading={fieldsLoading}
-              error={fieldsError ? new Error('加载失败') : null}
+              error={fieldsError ? new Error('load_failed') : null}
               retry={() => void loadFields()}
             >
               {fields.length ? (

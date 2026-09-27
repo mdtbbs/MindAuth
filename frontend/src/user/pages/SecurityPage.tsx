@@ -260,7 +260,7 @@ export function SecurityPage() {
           </AccountSection>
 
           <AccountSection title={t('security.social')} description={t('security.socialDescription')}>
-            <AccountLoadState loading={bindingsLoading} error={bindingsError ? new Error('加载失败') : null} retry={() => void loadBindings()}>
+            <AccountLoadState loading={bindingsLoading} error={bindingsError ? new Error('load_failed') : null} retry={() => void loadBindings()}>
               <div className="settings-row-list">
                 {bindings.map((binding) => (
                   <SettingsRow key={binding.id} title={binding.provider.toUpperCase()} description={binding.nickname || t('security.linkedAccount')}>

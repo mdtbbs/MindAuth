@@ -91,7 +91,7 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
               <p className="auth-promo__description">{t('brand.description')}</p>
               <a className="auth-promo__link" href="https://mdtbbs.cn/">{t('brand.visit')} <span aria-hidden="true">→</span></a>
             </div>
-            <svg className="auth-promo__art" viewBox="0 0 560 300" role="img" aria-label="Mindustry 方块与输送带构成的社区插图">
+            <svg className="auth-promo__art" viewBox="0 0 560 300" role="img" aria-label={t('brand.artAlt')}>
               <path d="M30 236 225 126l301 174-196 0Z" fill="#d6e8ff" />
               <path d="m87 236 138-80 190 110-140 0Z" fill="#9fc7fb" />
               <path d="m144 236 81-47 109 63-82 0Z" fill="#5b9bea" />

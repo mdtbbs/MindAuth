@@ -1,4 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from 'react';
+import { currentText } from '@/i18n/runtimeText';
 
 /**
  * App-level error boundary. Renders a design-system-styled fallback (adapts to
@@ -37,14 +38,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
       >
         <div className="card card--padding-lg" style={{ maxWidth: '32rem', width: '100%' }}>
           <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
-            页面出现了一点问题
+            {currentText('shared.refreshTitle')}
           </h1>
           <p style={{ marginTop: 'var(--space-3)', color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-            很抱歉，加载时发生了错误。请刷新页面重试；如果问题持续，请联系管理员。
+            {currentText('shared.refreshDescription')}
           </p>
           <div style={{ marginTop: 'var(--space-5)' }}>
             <button className="btn btn--primary" type="button" onClick={() => window.location.reload()}>
-              刷新页面
+              {currentText('shared.refreshAction')}
             </button>
           </div>
           {import.meta.env.DEV && (

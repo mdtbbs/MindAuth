@@ -5,6 +5,8 @@ export const SUPPORTED_LOCALES: readonly Locale[] = ['zh-CN', 'en', 'ru', 'ja'];
 import { developerMessages } from './developerCatalogs';
 import { registrationMessages } from './registrationCatalogs';
 import { securityMessages } from './securityCatalogs';
+import { sharedMessages } from './sharedCatalogs';
+import { oauthMessages } from './oauthCatalogs';
 
 const messages: Record<Locale, Record<string, string>> = {
   'zh-CN': {
@@ -39,6 +41,8 @@ const messages: Record<Locale, Record<string, string>> = {
     ...securityMessages['zh-CN'],
     ...developerMessages['zh-CN'],
     ...registrationMessages['zh-CN'],
+    ...sharedMessages['zh-CN'],
+    ...oauthMessages['zh-CN'],
   },
   en: {
     'language.label': 'Language', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -72,6 +76,8 @@ const messages: Record<Locale, Record<string, string>> = {
     ...securityMessages.en,
     ...developerMessages.en,
     ...registrationMessages.en,
+    ...sharedMessages.en,
+    ...oauthMessages.en,
   },
   ru: {
     'language.label': 'Язык', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -105,6 +111,8 @@ const messages: Record<Locale, Record<string, string>> = {
     ...securityMessages.ru,
     ...developerMessages.ru,
     ...registrationMessages.ru,
+    ...sharedMessages.ru,
+    ...oauthMessages.ru,
   },
   ja: {
     'language.label': '言語', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -138,6 +146,8 @@ const messages: Record<Locale, Record<string, string>> = {
     ...securityMessages.ja,
     ...developerMessages.ja,
     ...registrationMessages.ja,
+    ...sharedMessages.ja,
+    ...oauthMessages.ja,
   },
 };
 

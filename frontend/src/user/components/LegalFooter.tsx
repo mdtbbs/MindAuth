@@ -15,7 +15,7 @@ export function LegalFooter({ className = '', ecosystem = 'mdtbbs' }: { classNam
           <a key={href} href={href} target="_blank" rel="noopener noreferrer">{label}</a>
         ))}
       </nav>
-      <p className="site-legal-footer__copyright">© {new Date().getFullYear()} MDTBBS · MindAuth</p>
+      <p className="site-legal-footer__copyright">© {new Date().getFullYear()} {ecosystem === 'mindustry-club' ? 'Mindustry Club' : 'MDTBBS'} · MindAuth</p>
       {ecosystem === 'mindustry-club' ? null : <div className="site-legal-footer__filings">
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
           鄂ICP备2024071060号-5

@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { currentText } from '@/i18n/runtimeText';
 
 interface SkeletonProps {
   width?: string;
@@ -50,7 +51,7 @@ interface SkeletonTableProps {
  */
 export function SkeletonTable({ rows = 5, columns = 4 }: SkeletonTableProps) {
   return (
-    <div role="status" aria-live="polite" aria-label="加载中" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+    <div role="status" aria-live="polite" aria-label={currentText('shared.loading')} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
       {Array.from({ length: rows }, (_, r) => (
         <div key={r} style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 'var(--space-4)' }}>
           {Array.from({ length: columns }, (_, c) => (

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Button } from '@/shared/Button';
 import { SkeletonText } from '@/shared/Skeleton';
 import { useI18n } from '@/i18n/I18nProvider';
+import { currentText } from '@/i18n/runtimeText';
 
 export function AccountSection({
   id,
@@ -102,7 +103,7 @@ export function formatAccountDate(value?: string | null, withTime = false) {
 }
 
 export function parseUserAgent(value?: string | null) {
-  if (!value) return '客户端信息未提供';
+  if (!value) return currentText('shared.clientInfoUnavailable');
   const browser = /Edg\//.test(value) ? 'Edge'
     : /Firefox\//.test(value) ? 'Firefox'
       : /Chrome\//.test(value) && !/Edg\//.test(value) ? 'Chrome'
@@ -115,6 +116,6 @@ export function parseUserAgent(value?: string | null) {
           : /Linux/i.test(value) ? 'Linux'
             : null;
   if (browser && platform) return `${browser} · ${platform}`;
-  if (browser || platform) return browser || platform || '客户端信息未提供';
+  if (browser || platform) return browser || platform || currentText('shared.clientInfoUnavailable');
   return value.length > 96 ? `${value.slice(0, 93)}…` : value;
 }
