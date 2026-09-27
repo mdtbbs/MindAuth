@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Button } from '@/shared/Button';
 import { SkeletonText } from '@/shared/Skeleton';
+import { useI18n } from '@/i18n/I18nProvider';
 
 export function AccountSection({
   id,
@@ -71,14 +72,15 @@ export function AccountLoadState({
   retry: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   if (loading) {
-    return <div className="account-load-state" role="status" aria-label="加载中"><SkeletonText lines={2} /></div>;
+    return <div className="account-load-state" role="status" aria-label={t('shared.loading')}><SkeletonText lines={2} /></div>;
   }
   if (error) {
     return (
       <div className="account-error-state" role="alert">
-        <span>加载失败，请检查连接后重试。</span>
-        <Button type="button" variant="secondary" size="sm" onClick={retry}>重试</Button>
+        <span>{t('shared.loadFailed')}</span>
+        <Button type="button" variant="secondary" size="sm" onClick={retry}>{t('shared.retry')}</Button>
       </div>
     );
   }
@@ -93,9 +95,10 @@ export function formatAccountDate(value?: string | null, withTime = false) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('zh-CN', withTime
+  const locale = typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en';
+  return new Intl.DateTimeFormat(locale, withTime
     ? { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
-    : { year: 'numeric', month: '2-digit', day: '2-digit' });
+    : { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
 
 export function parseUserAgent(value?: string | null) {

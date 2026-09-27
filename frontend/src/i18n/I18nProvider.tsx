@@ -6,7 +6,7 @@ import { normalizeLocale, SUPPORTED_LOCALES, translate, type Locale } from './ca
 interface I18nContextValue {
   locale: Locale;
   setLocale: (value: Locale) => void;
-  t: (key: string, values?: Record<string, string>) => string;
+  t: (key: string, values?: Record<string, string | number>) => string;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
@@ -62,7 +62,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     if (user) void api.put('/api/account/preferences', { preferred_locale: value }).catch(() => {});
   }, [user]);
 
-  const value = useMemo(() => ({ locale, setLocale, t: (key: string, variables?: Record<string, string>) => translate(locale, key, variables) }), [locale, setLocale]);
+  const value = useMemo(() => ({ locale, setLocale, t: (key: string, variables?: Record<string, string | number>) => translate(locale, key, variables) }), [locale, setLocale]);
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
