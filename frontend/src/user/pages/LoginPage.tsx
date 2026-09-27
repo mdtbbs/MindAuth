@@ -6,6 +6,7 @@ import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
 import { useI18n } from '@/i18n/I18nProvider';
+import { SocialProviderButtons } from '@/user/components/SocialProviderButtons';
 
 export function LoginPage() {
   const [params] = useSearchParams();
@@ -26,6 +27,11 @@ export function LoginPage() {
   const deviceUserCode = params.get('device_user_code') || '';
   const errorParam = params.get('error') || '';
   const messageParam = params.get('message') || '';
+  const providerError = errorParam === 'social_login_failed' || errorParam === 'qq_login_failed'
+    ? t('social.loginFailed')
+    : errorParam === 'USER_BANNED' || errorParam === 'ACCOUNT_LOCKED'
+      ? t('social.accountUnavailable')
+      : errorParam;
 
   const isOAuthFlow = Boolean(redirectUri && clientId);
 
@@ -55,13 +61,12 @@ export function LoginPage() {
 
   const authFlowQuery = isOAuthFlow ? buildAuthFlowParams().toString() : '';
   const registerHref = authFlowQuery ? `/register?${authFlowQuery}` : '/register';
-  const qqLoginHref = `/api/auth/qq${authFlowQuery ? `?${authFlowQuery}` : ''}`;
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [loginMethod, setLoginMethod] = useState<'password' | 'qq'>('password');
+  const [loginMethod, setLoginMethod] = useState<'password' | 'social'>('password');
 
   useEffect(() => {
     if (user && !authLoading) {
@@ -97,7 +102,12 @@ export function LoginPage() {
         navigate('/dashboard', { replace: true });
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : t('auth.loginFailed');
+      const errorCode = (err as { code?: string } | null)?.code;
+      const msg = errorCode === 'USER_BANNED' || errorCode === 'ACCOUNT_LOCKED'
+        ? t('social.accountUnavailable')
+        : errorCode === 'RATE_LIMITED'
+          ? t('social.rateLimited')
+          : t('auth.loginFailed');
       setFormError(msg);
       toast('error', msg);
     } finally {
@@ -141,15 +151,15 @@ export function LoginPage() {
               {t('auth.passwordTab')}
             </button>
             <button
-              id="qq-login-tab"
+              id="social-login-tab"
               type="button"
               role="tab"
-              aria-selected={loginMethod === 'qq'}
+              aria-selected={loginMethod === 'social'}
               aria-controls="login-method-panel"
               className="auth-method-tab"
-              onClick={() => setLoginMethod('qq')}
+              onClick={() => setLoginMethod('social')}
             >
-              {t('auth.qq')}
+              {t('social.providers')}
             </button>
           </div>
 
@@ -160,7 +170,7 @@ export function LoginPage() {
             {formError || errorParam || messageParam ? (
               <div className="auth-form__alert" role="alert">
                 <div className="status-badge status-badge--danger">{t('auth.loginError')}</div>
-                <p className="section-description auth-form__alert-text">{formError || messageParam || errorParam}</p>
+                <p className="section-description auth-form__alert-text">{formError || (messageParam && !errorParam.endsWith('_failed') && errorParam !== 'USER_BANNED' && errorParam !== 'ACCOUNT_LOCKED' ? messageParam : '') || providerError}</p>
               </div>
             ) : null}
 
@@ -191,11 +201,8 @@ export function LoginPage() {
                 </Button>
               </div>
             ) : (
-              <div className="auth-method-panel auth-method-panel--qq">
-                <p>{t('auth.qqDescription')}</p>
-                <a className="btn btn--primary btn--lg btn--full" href={qqLoginHref} data-testid="qq-login">
-                  {t('auth.loginWithQQ')}
-                </a>
+              <div className="auth-method-panel">
+                <SocialProviderButtons authorizeQuery={authFlowQuery} />
               </div>
             )}
           </div>

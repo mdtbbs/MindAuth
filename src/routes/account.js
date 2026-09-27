@@ -543,7 +543,7 @@ router.delete('/bindings/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, code: 'INVALID_ID', message: '无效的绑定 ID' });
     }
 
-    await socialLogin.unbindQq(bindingId, req.user.id);
+    await socialLogin.unbindSocial(bindingId, req.user.id);
 
     logAudit({
       user_id: req.user.id,

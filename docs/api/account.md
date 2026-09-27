@@ -6,6 +6,26 @@ MindAuth 账户自服务域 API 参考，覆盖账户安全、会话管理、手
 
 通用约定（响应包裹结构、CSRF、限流说明）见 [README.md](README.md)。本域所有端点均需登录会话（`session` Cookie，经 `requireAuth` 中间件校验）；所有写操作（POST/PUT/PATCH/DELETE）还需携带 `X-CSRF-Token` 请求头。认证失败统一返回 `401`。
 
+## 社交账号绑定（/api/account/bindings）
+
+社交登录 provider 由 MindAuth 管理。当前用户可在安全设置中绑定或解绑已配置的 QQ、GitHub、Discord。MindFourm 仅接收 MindAuth 的统一用户身份，不会接触 provider access token。
+
+### GET /api/account/bindings
+
+返回当前用户已绑定 provider 的资料摘要，不包含 provider access token：
+
+```json
+{ "success": true, "bindings": [{ "id": 1, "provider": "github", "provider_user_id": "123", "nickname": "player", "avatar_url": null }] }
+```
+
+### GET /api/auth/social/providers
+
+公开端点，返回已启用的 provider ID 列表。QQ 仍使用 `/api/auth/qq` 兼容路径；GitHub 和 Discord 通过 `/api/auth/social/:provider` 发起 OAuth。
+
+### DELETE /api/account/bindings/:id
+
+解除当前用户拥有的社交绑定。若该绑定是没有密码用户的最后一种登录方式，返回 `400 CANNOT_UNBIND_LAST_LOGIN`。
+
 ## 账户管理（/api/account · src/routes/account.js）
 
 ### POST /api/account/change-password

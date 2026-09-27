@@ -18,6 +18,8 @@ export function localizeRegistrationError(reason: unknown, t: AuthTranslator, fa
     case 'CHALLENGE_MISMATCH': return t('register.challengeMismatch');
     case 'CHALLENGE_NOT_FOUND': return t('register.challengeNotFound');
     case 'CHALLENGE_FAILED': return t('register.challengeFailed');
+    case 'INVALID_STATE': return t('social.invalidDescription');
+    case 'SOCIAL_REGISTRATION_FAILED': return t('social.submitFailed');
     default: return error?.status === 409 ? t('register.usernameOrEmailTaken') : fallback;
   }
 }

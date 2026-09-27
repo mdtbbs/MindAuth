@@ -7,6 +7,7 @@ import { registrationMessages } from './registrationCatalogs';
 import { securityMessages } from './securityCatalogs';
 import { sharedMessages } from './sharedCatalogs';
 import { oauthMessages } from './oauthCatalogs';
+import { socialMessages } from './socialCatalogs';
 
 const messages: Record<Locale, Record<string, string>> = {
   'zh-CN': {
@@ -43,6 +44,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...registrationMessages['zh-CN'],
     ...sharedMessages['zh-CN'],
     ...oauthMessages['zh-CN'],
+    ...socialMessages['zh-CN'],
   },
   en: {
     'language.label': 'Language', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -78,6 +80,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...registrationMessages.en,
     ...sharedMessages.en,
     ...oauthMessages.en,
+    ...socialMessages.en,
   },
   ru: {
     'language.label': 'Язык', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -113,6 +116,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...registrationMessages.ru,
     ...sharedMessages.ru,
     ...oauthMessages.ru,
+    ...socialMessages.ru,
   },
   ja: {
     'language.label': '言語', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -148,6 +152,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...registrationMessages.ja,
     ...sharedMessages.ja,
     ...oauthMessages.ja,
+    ...socialMessages.ja,
   },
 };
 

@@ -15,6 +15,7 @@ import {
 } from '@/user/components/AccountPageParts';
 import { AccountShell } from '@/user/components/AccountShell';
 import { useI18n } from '@/i18n/I18nProvider';
+import { SocialProviderButtons } from '@/user/components/SocialProviderButtons';
 
 export function SecurityPage() {
   const { t } = useI18n();
@@ -61,7 +62,14 @@ export function SecurityPage() {
   }, [user, loadBindings]);
 
   useEffect(() => {
-    if (searchParams.get('social') === 'qq_bound') toast('success', t('security.qqBoundToast'));
+    const social = searchParams.get('social') || '';
+    const provider = social.match(/^(qq|github|discord)_bound$/)?.[1];
+    if (provider === 'qq') toast('success', t('security.qqBoundToast'));
+    else if (provider) toast('success', t('social.boundToast', { provider: t(`social.${provider}`) }));
+    const error = searchParams.get('error') || '';
+    if (error === 'session_expired') toast('error', t('social.sessionExpired'));
+    const duplicateProvider = error.match(/^(github|discord)_already_bound$/)?.[1];
+    if (duplicateProvider) toast('error', t('social.providerAlreadyLinked', { provider: t(`social.${duplicateProvider}`) }));
   }, [searchParams, toast, t]);
 
   useEffect(() => {
@@ -263,20 +271,16 @@ export function SecurityPage() {
             <AccountLoadState loading={bindingsLoading} error={bindingsError ? new Error('load_failed') : null} retry={() => void loadBindings()}>
               <div className="settings-row-list">
                 {bindings.map((binding) => (
-                  <SettingsRow key={binding.id} title={binding.provider.toUpperCase()} description={binding.nickname || t('security.linkedAccount')}>
+                  <SettingsRow key={binding.id} title={t(`social.${binding.provider}`) === `social.${binding.provider}` ? binding.provider.toUpperCase() : t(`social.${binding.provider}`)} description={binding.nickname || t('security.linkedAccount')}>
                     <div className="account-button-row">
                       <StatusLabel>{t('security.bound')}</StatusLabel>
                       <Button type="button" variant="secondary" size="sm" loading={bindingAction && bindingToRemove?.id === binding.id} onClick={() => setBindingToRemove(binding)}>{t('security.unbind')}</Button>
                     </div>
                   </SettingsRow>
                 ))}
-                {!bindings.some((binding) => binding.provider === 'qq') ? (
-                  <SettingsRow title="QQ" description={t('security.qqDescription')}>
-                    <a className="btn btn--secondary btn--sm" href="/api/auth/qq?intent=bind">{t('security.bindQQ')}</a>
-                  </SettingsRow>
-                ) : null}
               </div>
             </AccountLoadState>
+            <SocialProviderButtons intent="bind" excludeProviders={bindings.map((binding) => binding.provider)} />
           </AccountSection>
 
           <AccountSection id="danger-zone" title={t('security.dangerTitle')} description={t('security.dangerDescription')}>

@@ -9,6 +9,7 @@ import { AuthShell } from '@/user/components/AuthShell';
 import type { SendRegistrationCodeResponse } from '@/api/types';
 import { useI18n } from '@/i18n/I18nProvider';
 import { localizeRegistrationError } from '@/i18n/authErrors';
+import { SocialProviderButtons } from '@/user/components/SocialProviderButtons';
 
 interface ChallengeQuestion {
   challenge_id: string | number;
@@ -69,8 +70,7 @@ export function RegisterPage() {
   const errorParam = params.get('error') || '';
   const messageParam = params.get('message') || '';
   const isOAuthFlow = Boolean(clientId && redirectUri);
-  const qqRegisterParams = new URLSearchParams({
-    intent: 'login',
+  const socialRegisterParams = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     ...(clientName && { client_name: clientName }),
@@ -81,7 +81,6 @@ export function RegisterPage() {
     ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
     ...(uiLocales && { ui_locales: uiLocales }),
   });
-  const qqRegisterHref = `/api/auth/qq?${qqRegisterParams.toString()}`;
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -303,9 +302,7 @@ export function RegisterPage() {
           {isOAuthFlow ? (
             <>
               <span className="text-muted">{t('register.or')}</span>
-              <a className="btn btn--secondary btn--lg btn--full" href={qqRegisterHref} data-testid="qq-register">
-                <span aria-hidden="true" style={{ fontWeight: 700 }}>Q</span> {t('register.qqRegister')}
-              </a>
+              <SocialProviderButtons authorizeQuery={socialRegisterParams.toString()} />
             </>
           ) : null}
         </div>

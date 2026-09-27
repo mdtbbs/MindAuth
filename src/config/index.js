@@ -45,6 +45,23 @@ const config = {
     timeoutMs: parseInt(process.env.QQ_HTTP_TIMEOUT_MS, 10) || 5000,
   },
 
+  social: {
+    github: {
+      enabled: process.env.GITHUB_OAUTH_ENABLED === 'true',
+      clientId: process.env.GITHUB_CLIENT_ID || '',
+      clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
+      redirectUri: process.env.GITHUB_REDIRECT_URI || `${process.env.BASE_URL || 'http://localhost:4001'}/api/auth/social/github/callback`,
+      timeoutMs: parseInt(process.env.GITHUB_HTTP_TIMEOUT_MS, 10) || 5000,
+    },
+    discord: {
+      enabled: process.env.DISCORD_OAUTH_ENABLED === 'true',
+      clientId: process.env.DISCORD_CLIENT_ID || '',
+      clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
+      redirectUri: process.env.DISCORD_REDIRECT_URI || `${process.env.BASE_URL || 'http://localhost:4001'}/api/auth/social/discord/callback`,
+      timeoutMs: parseInt(process.env.DISCORD_HTTP_TIMEOUT_MS, 10) || 5000,
+    },
+  },
+
   smtp: {
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT) || 587,

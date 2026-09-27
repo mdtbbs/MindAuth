@@ -164,6 +164,11 @@ export interface SocialBindingsResponse {
   bindings: SocialBinding[];
 }
 
+export interface SocialProvidersResponse {
+  success: boolean;
+  providers: string[];
+}
+
 export interface SocialUnbindResponse {
   success: boolean;
 }
