@@ -33,7 +33,10 @@ describe('native first-party client sessions', { skip: !enabled }, () => {
     assert.equal(downstreamClients[0].party_type, 'first_party');
     assert.equal(downstreamClients[0].ecosystem, 'mdtbbs');
     assert.equal(downstreamClients[0].status, 'approved');
-    assert.ok(JSON.parse(downstreamClients[0].approved_scopes).includes('forum.write'));
+    const approvedScopes = Array.isArray(downstreamClients[0].approved_scopes)
+      ? downstreamClients[0].approved_scopes
+      : JSON.parse(downstreamClients[0].approved_scopes);
+    assert.ok(approvedScopes.includes('forum.write'));
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`;
     const [user] = await pool.execute(
       'INSERT INTO users (username, email, password_hash, email_verified) VALUES (?, ?, ?, 1)',
