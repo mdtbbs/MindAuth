@@ -1,7 +1,7 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const bcrypt = require('bcrypt');
-const { pool, closePool, runMigrations } = require('../../src/db');
+const { pool, closePool, runMigrations, seedTestFixtures } = require('../../src/db');
 const { client, connectRedis, closeRedis } = require('../../src/redis');
 const { createPasswordLogin } = require('../../src/modules/auth/passwordLogin');
 const { createNativeClientService } = require('../../src/modules/nativeAuth/nativeClientService');
@@ -23,6 +23,17 @@ describe('native first-party client sessions', { skip: !enabled }, () => {
   before(async () => {
     await connectRedis();
     await runMigrations(pool);
+    await seedTestFixtures(pool);
+    const [downstreamClients] = await pool.execute(
+      `SELECT client_type, party_type, ecosystem, status, approved_scopes
+       FROM clients WHERE client_id = 'forum'`
+    );
+    assert.equal(downstreamClients.length, 1, 'test fixtures must seed the downstream forum OAuth client');
+    assert.equal(downstreamClients[0].client_type, 'confidential');
+    assert.equal(downstreamClients[0].party_type, 'first_party');
+    assert.equal(downstreamClients[0].ecosystem, 'mdtbbs');
+    assert.equal(downstreamClients[0].status, 'approved');
+    assert.ok(JSON.parse(downstreamClients[0].approved_scopes).includes('forum.write'));
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`;
     const [user] = await pool.execute(
       'INSERT INTO users (username, email, password_hash, email_verified) VALUES (?, ?, ?, 1)',
