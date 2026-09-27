@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import api from '@/api/client';
+import api, { ApiError } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { AccountLoadState, AccountSection } from '@/user/components/AccountPageParts';
 import { AccountShell } from '@/user/components/AccountShell';
@@ -9,23 +9,25 @@ import { TextField } from '@/shared/TextField';
 import { useI18n } from '@/i18n/I18nProvider';
 
 const SCOPE_OPTIONS = [
-  ['profile', '查看基本资料', '允许应用查看你的用户名、头像等基本账户信息。'],
-  ['forum.read', '浏览论坛', '读取你有权限查看的帖子和回复。'],
-  ['forum.write', '发布论坛内容', '以你的身份发布帖子、回复以及执行相关论坛操作。'],
-  ['resource.read', '浏览资源', '读取地图、蓝图、Mod 等资源信息。'],
-  ['resource.download', '下载资源', '使用你的账户下载 MDTBBS 资源。'],
-  ['resource.upload', '上传资源', '以你的身份提交地图、蓝图、Mod 等资源。'],
-  ['notification.read', '读取通知', '读取你的 MDTBBS 通知。'],
-  ['message.read', '读取私信', '读取你的私信和会话内容。'],
-  ['message.write', '发送私信', '以你的身份向其他用户发送私信。'],
-  ['openid', '账户标识（兼容）', '读取用于识别 MDTBBS 账户的稳定标识。'],
-  ['email', '电子邮箱（兼容）', '读取邮箱地址和验证状态。'],
+  ['profile', 'developer.scope.profile', 'developer.scope.profileHelp'],
+  ['forum.read', 'developer.scope.forumRead', 'developer.scope.forumReadHelp'],
+  ['forum.write', 'developer.scope.forumWrite', 'developer.scope.forumWriteHelp'],
+  ['resource.read', 'developer.scope.resourceRead', 'developer.scope.resourceReadHelp'],
+  ['resource.download', 'developer.scope.resourceDownload', 'developer.scope.resourceDownloadHelp'],
+  ['resource.upload', 'developer.scope.resourceUpload', 'developer.scope.resourceUploadHelp'],
+  ['notification.read', 'developer.scope.notificationRead', 'developer.scope.notificationReadHelp'],
+  ['message.read', 'developer.scope.messageRead', 'developer.scope.messageReadHelp'],
+  ['message.write', 'developer.scope.messageWrite', 'developer.scope.messageWriteHelp'],
+  ['openid', 'developer.scope.openid', 'developer.scope.openidHelp'],
+  ['email', 'developer.scope.email', 'developer.scope.emailHelp'],
 ] as const;
 
 type AppStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'suspended' | 'deleted';
+type Ecosystem = 'mdtbbs' | 'mindustry-club' | 'global';
+type Translate = (key: string, values?: Record<string, string | number>) => string;
 type DeveloperApplication = {
   id: number; client_id: string; name: string; description: string | null; website_url: string | null;
-  status: AppStatus; client_type: string; party_type: string; ecosystem: 'mdtbbs' | 'mindustry-club' | 'global';
+  status: AppStatus; client_type: string; party_type: string; ecosystem: Ecosystem;
   requested_scopes: string[]; approved_scopes: string[]; redirect_uris: { redirect_uri: string }[];
   usage?: { authorization_count: number; last_used_at: string | null; requests_30d?: number;
     recent_errors?: { metric_date: string; error_count: number; last_error_at: string; last_error_code: string }[] };
@@ -37,18 +39,34 @@ function AppAvatar({ name }: { name: string }) {
   return <div className="public-app-avatar" aria-hidden="true">{(Array.from(name.trim())[0] || 'A').toUpperCase()}</div>;
 }
 
-function appLabel(application: DeveloperApplication) {
-  return application.party_type === 'first_party' ? 'MDTBBS 官方应用' : '第三方应用';
+function appLabel(application: DeveloperApplication, t: Translate) {
+  return application.party_type === 'first_party' ? t('developer.official') : t('developer.thirdParty');
 }
 
-function statusLabel(status: AppStatus) {
-  const labels: Record<AppStatus, string> = { pending: '待审核', approved: '已批准', rejected: '已拒绝', suspended: '已停用', draft: '草稿', deleted: '已删除' };
-  return labels[status] || status;
+function statusLabel(status: AppStatus, t: Translate) {
+  return t(`developer.status.${status}`);
+}
+
+function localizedError(reason: unknown, t: Translate, fallback: string) {
+  if (reason instanceof ApiError) {
+    if (reason.code === 'EMAIL_VERIFICATION_REQUIRED') return t('developer.emailRequired');
+    if (reason.code === 'PHONE_VERIFICATION_REQUIRED') return t('developer.phoneRequired');
+  }
+  return fallback;
+}
+
+function formatDate(value: string | null | undefined, locale: string, withTime = false) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(locale, withTime
+    ? { dateStyle: 'medium', timeStyle: 'short' }
+    : { dateStyle: 'medium' }).format(date);
 }
 
 export function DeveloperPage() {
   const { user } = useAuth();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const navigate = useNavigate();
   const { id: routeId } = useParams();
   const [applications, setApplications] = useState<DeveloperApplication[]>([]);
@@ -62,25 +80,25 @@ export function DeveloperPage() {
   const [website, setWebsite] = useState('');
   const [redirectUris, setRedirectUris] = useState('');
   const [scopes, setScopes] = useState<string[]>(['profile', 'forum.read']);
-  const [ecosystem, setEcosystem] = useState<'mdtbbs' | 'mindustry-club' | 'global'>('mdtbbs');
+  const [ecosystem, setEcosystem] = useState<Ecosystem>('mdtbbs');
   const phoneRequired = ecosystem === 'mdtbbs';
-  const eligibilityError = !user?.email_verified ? t('error.emailVerification') : phoneRequired && !user.phone_verified ? t('error.phoneVerification') : '';
+  const eligibilityError = !user?.email_verified ? t('developer.emailRequired') : phoneRequired && !user.phone_verified ? t('developer.phoneRequired') : '';
 
   const selected = useMemo(() => applications.find(application => String(application.id) === routeId) || null, [applications, routeId]);
   const isCreate = routeId === 'new';
   const appPageUrl = selected ? `/apps/${encodeURIComponent(selected.client_id)}` : '';
 
-  async function loadApplications() {
+  const loadApplications = useCallback(async () => {
     setLoading(true);
     try {
       const response = await api.get<ApplicationsResponse>('/api/developer/clients');
       setApplications(response.applications || []);
     } catch (reason: unknown) {
-      setFormError(reason instanceof Error ? reason.message : '获取应用失败');
+      setFormError(localizedError(reason, t, t('developer.loadFailed')));
     } finally { setLoading(false); }
-  }
+  }, [t]);
 
-  useEffect(() => { if (user) void loadApplications(); }, [user]);
+  useEffect(() => { if (user) void loadApplications(); }, [user, loadApplications]);
   useEffect(() => {
     if (selected) {
       setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || '');
@@ -99,26 +117,11 @@ export function DeveloperPage() {
     const normalizedDescription = description.trim();
     const normalizedRedirectUris = redirectUris.split('\n').map(item => item.trim()).filter(Boolean);
 
-    if (eligibilityError) {
-      setFormError(eligibilityError);
-      return;
-    }
-    if (!normalizedName) {
-      setFormError('请填写应用名称。');
-      return;
-    }
-    if (!normalizedDescription) {
-      setFormError('请填写应用简介，授权页会向用户展示这段说明。');
-      return;
-    }
-    if (!normalizedRedirectUris.length) {
-      setFormError('请至少填写一个 Redirect URI。');
-      return;
-    }
-    if (!scopes.length) {
-      setFormError('请至少选择一个 API 权限。');
-      return;
-    }
+    if (eligibilityError) { setFormError(eligibilityError); return; }
+    if (!normalizedName) { setFormError(t('developer.nameRequired')); return; }
+    if (!normalizedDescription) { setFormError(t('developer.descriptionRequired')); return; }
+    if (!normalizedRedirectUris.length) { setFormError(t('developer.redirectRequiredError')); return; }
+    if (!scopes.length) { setFormError(t('developer.scopeRequired')); return; }
 
     setSaving(true);
     const body = {
@@ -136,87 +139,98 @@ export function DeveloperPage() {
         if (newId) navigate(`/developer/${newId}`, { replace: true });
       }
     } catch (reason: unknown) {
-      setFormError(reason instanceof Error ? reason.message : '保存应用失败');
+      setFormError(localizedError(reason, t, t('developer.saveFailed')));
     } finally { setSaving(false); }
   }
 
   async function deleteApplication() {
     if (!selected) return;
-    const confirmed = window.confirm(`删除“${selected.name}”后，所有用户授权和令牌立即失效，公开页不可访问，Client ID 永不复用。此操作无法恢复。确定删除吗？`);
+    const confirmed = window.confirm(t('developer.deleteConfirm', { name: selected.name }));
     if (!confirmed) return;
     setSaving(true); setFormError('');
     try {
       await api.del(`/api/developer/clients/${selected.id}`);
       await loadApplications(); navigate('/developer', { replace: true });
     } catch (reason: unknown) {
-      setFormError(reason instanceof Error ? reason.message : '删除应用失败');
+      setFormError(localizedError(reason, t, t('developer.deleteFailed')));
     } finally { setSaving(false); }
   }
 
-  const tabs: [Tab, string][] = [['overview', '概览'], ['oauth', 'OAuth'], ['scopes', '权限'], ['usage', '使用情况']];
+  const tabs: [Tab, string][] = [
+    ['overview', t('developer.tab.overview')], ['oauth', t('developer.tab.oauth')],
+    ['scopes', t('developer.tab.scopes')], ['usage', t('developer.tab.usage')],
+  ];
+  const pageTitle = isCreate || !routeId ? t('developer.title') : t('developer.manageTitle');
+  const pageDescription = isCreate ? t('developer.createDescription') : t('developer.listDescription');
 
   return (
-    <AccountShell title={isCreate || !routeId ? '开发者应用' : '应用管理'} description={isCreate ? '创建应用，让第三方工具通过 MDTBBS 账号安全登录并调用社区 API。' : '管理应用配置、权限和使用情况。'}>
+    <AccountShell title={pageTitle} description={pageDescription}>
       {formError ? <p className="status-badge status-badge--danger" role="alert">{formError}</p> : null}
-      {isCreate ? <div className="cluster developer-page-actions"><Button type="button" variant="secondary" onClick={() => navigate('/developer')}>返回应用列表</Button></div> : null}
-      {!isCreate && !selected && !loading ? <AccountSection title="应用不存在" description="应用已删除，或你没有管理权限。"><Link className="btn btn--secondary" to="/developer">返回开发者应用</Link></AccountSection> : null}
+      {isCreate ? <div className="cluster developer-page-actions"><Button type="button" variant="secondary" onClick={() => navigate('/developer')}>{t('developer.backToList')}</Button></div> : null}
+      {!isCreate && !selected && !loading ? <AccountSection title={t('developer.appMissing')} description={t('developer.appMissingDescription')}><Link className="btn btn--secondary" to="/developer">{t('developer.backToApps')}</Link></AccountSection> : null}
 
       {isCreate ? (
-        <AccountSection title="申请 Public Client" description="提交后会进入管理员审核。批准后应用即可使用 Authorization Code + PKCE。Public Client 不会生成 client_secret。">
-          {eligibilityError ? <div className="developer-create-gate" role="alert"><strong>{ecosystem === 'mdtbbs' ? 'MDTBBS ecosystem' : 'Developer eligibility'}</strong><p>{eligibilityError}</p>{ecosystem === 'mdtbbs' && !user?.phone_verified ? <Link className="btn btn--secondary" to="/security">前往登录与安全</Link> : null}</div> : null}
-          <ApplicationForm ecosystem={ecosystem} setEcosystem={setEcosystem} name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(eligibilityError)} saveLabel="创建应用" />
+        <AccountSection title={t('developer.createTitle')} description={t('developer.createDescription')}>
+          {eligibilityError ? <div className="developer-create-gate" role="alert"><strong>{ecosystem === 'mdtbbs' ? t('developer.eligibilityMdtbbs') : t('developer.eligibilityGlobal')}</strong><p>{eligibilityError}</p>{ecosystem === 'mdtbbs' && !user?.phone_verified ? <Link className="btn btn--secondary" to="/security">{t('developer.openSecurity')}</Link> : null}</div> : null}
+          <ApplicationForm ecosystem={ecosystem} setEcosystem={setEcosystem} name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(eligibilityError)} saveLabel={t('developer.create')} />
         </AccountSection>
       ) : null}
 
       {!isCreate && selected ? <>
-        <header className="developer-app-header"><AppAvatar name={selected.name} /><div><h2>{selected.name}</h2><p><span className={`public-app-label ${selected.party_type === 'first_party' ? 'public-app-label--official' : ''}`}>{appLabel(selected)}</span> <span className={`status-badge ${selected.status === 'approved' ? 'status-badge--success' : selected.status === 'rejected' ? 'status-badge--danger' : 'status-badge--warning'}`}>{statusLabel(selected.status)}</span></p></div><Link className="btn btn--secondary" to="/developer">返回列表</Link></header>
-        <nav className="developer-tabs" aria-label="应用管理分区">{tabs.map(([value, label]) => <button type="button" key={value} aria-current={tab === value ? 'page' : undefined} onClick={() => setTab(value)}>{label}</button>)}</nav>
-        {tab !== 'usage' ? <AccountSection title={tab === 'overview' ? '应用概览' : tab === 'oauth' ? 'OAuth 配置' : 'API 权限'} description={tab === 'oauth' ? 'Public Client 必须使用 Authorization Code + PKCE S256。' : undefined}>
-          {tab === 'overview' ? <>
-            <div className="stack"><p><strong>Client ID：</strong><code>{selected.client_id}</code></p><p><strong>类型：</strong>{appLabel(selected)} · Public Client</p><p><strong>公开应用页：</strong><Link to={appPageUrl}>{window.location.origin}{appPageUrl}</Link></p>
-              {editing ? <><EcosystemField value={ecosystem} onChange={setEcosystem} /><TextField label="应用名称" value={name} onChange={event => setName(event.target.value)} maxLength={120} /><label className="field"><span className="field__label">应用简介</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label><TextField label="项目主页（HTTPS；本地开发可用 localhost）" value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" /></> : <><p>{selected.description || '暂无应用简介。'}</p><p><strong>所属生态：</strong>{selected.ecosystem}</p><p><strong>项目主页：</strong>{selected.website_url || '未设置'}</p></>}
-              <div className="cluster">{editing ? <><Button type="button" disabled={saving || Boolean(eligibilityError)} onClick={() => void saveApplication()}>{saving ? '保存中…' : '保存修改'}</Button><Button type="button" variant="secondary" onClick={() => { setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || ''); setEcosystem(selected.ecosystem); setEditing(false); }}>取消</Button></> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>编辑信息</Button>}</div>
-              <div className="developer-danger-zone"><h3>删除应用</h3><p>删除会立即撤销全部授权和令牌，Client ID 无法恢复或复用。</p><Button type="button" variant="danger" disabled={saving} onClick={() => void deleteApplication()}>删除应用</Button></div>
-            </div>
-          </> : null}
-          {tab === 'oauth' ? <div className="stack"><p className="section-description">回调地址必须精确匹配。支持 HTTPS、自定义 URI Scheme 和 loopback 随机端口。</p>{editing ? <label className="field"><span className="field__label">Redirect URI（每行一个）</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={6} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /></label> : <ul className="developer-redirect-list">{selected.redirect_uris.map(item => <li key={item.redirect_uri}><code>{item.redirect_uri}</code></li>)}</ul>}<p><strong>PKCE：</strong>必需；只接受 S256</p><div className="cluster">{editing ? <Button type="button" disabled={saving} onClick={() => void saveApplication()}>{saving ? '保存中…' : '保存 OAuth 配置'}</Button> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>编辑回调地址</Button>}</div></div> : null}
-          {tab === 'scopes' ? <><fieldset className="stack developer-scope-options"><legend className="field__label">允许应用请求的权限</legend>{SCOPE_OPTIONS.map(([scope, label, help]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{label}</strong>{scope === 'message.read' || scope === 'message.write' ? <span className="public-scope-sensitive">敏感权限</span> : null}<small>{scope} · {help}</small></span></label>)}</fieldset><div className="cluster"><Button type="button" disabled={saving} onClick={() => void saveApplication()}>{saving ? '保存中…' : '保存权限'}</Button></div></> : null}
+        <header className="developer-app-header"><AppAvatar name={selected.name} /><div><h2>{selected.name}</h2><p><span className={`public-app-label ${selected.party_type === 'first_party' ? 'public-app-label--official' : ''}`}>{appLabel(selected, t)}</span> <span className={`status-badge ${selected.status === 'approved' ? 'status-badge--success' : selected.status === 'rejected' ? 'status-badge--danger' : 'status-badge--warning'}`}>{statusLabel(selected.status, t)}</span></p></div><Link className="btn btn--secondary" to="/developer">{t('developer.backToListShort')}</Link></header>
+        <nav className="developer-tabs" aria-label={t('developer.manageTitle')}>{tabs.map(([value, label]) => <button type="button" key={value} aria-current={tab === value ? 'page' : undefined} onClick={() => setTab(value)}>{label}</button>)}</nav>
+        {tab !== 'usage' ? <AccountSection title={tab === 'overview' ? t('developer.section.overview') : tab === 'oauth' ? t('developer.section.oauth') : t('developer.section.scopes')} description={tab === 'oauth' ? t('developer.pkceDescription') : undefined}>
+          {tab === 'overview' ? <div className="stack">
+            <p><strong>Client ID:</strong> <code>{selected.client_id}</code></p><p><strong>{t('developer.clientType')}:</strong> {appLabel(selected, t)} · {t('developer.publicClient')}</p><p><strong>{t('developer.officialPage')}:</strong> <Link to={appPageUrl}>{window.location.origin}{appPageUrl}</Link></p>
+            {editing ? <><EcosystemField value={ecosystem} onChange={setEcosystem} /><TextField label={t('developer.name')} value={name} onChange={event => setName(event.target.value)} maxLength={120} /><label className="field"><span className="field__label">{t('developer.description')}</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label><TextField label={t('developer.websiteHttps')} value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" /></> : <><p>{selected.description || t('developer.noDescription')}</p><p><strong>{t('developer.ecosystem')}:</strong> {selected.ecosystem}</p><p><strong>{t('developer.projectHome')}:</strong> {selected.website_url || t('developer.notSet')}</p></>}
+            <div className="cluster">{editing ? <><Button type="button" disabled={saving || Boolean(eligibilityError)} onClick={() => void saveApplication()}>{saving ? t('developer.saving') : t('developer.saveChanges')}</Button><Button type="button" variant="secondary" onClick={() => { setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || ''); setEcosystem(selected.ecosystem); setEditing(false); }}>{t('developer.cancel')}</Button></> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>{t('developer.edit')}</Button>}</div>
+            <div className="developer-danger-zone"><h3>{t('developer.delete')}</h3><p>{t('developer.deleteWarning')}</p><Button type="button" variant="danger" disabled={saving} onClick={() => void deleteApplication()}>{t('developer.delete')}</Button></div>
+          </div> : null}
+          {tab === 'oauth' ? <div className="stack"><p className="section-description">{t('developer.redirectDescription')}</p>{editing ? <label className="field"><span className="field__label">{t('developer.redirectLabel')}</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={6} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /></label> : <ul className="developer-redirect-list">{selected.redirect_uris.map(item => <li key={item.redirect_uri}><code>{item.redirect_uri}</code></li>)}</ul>}<p>{t('developer.pkce')}</p><div className="cluster">{editing ? <Button type="button" disabled={saving} onClick={() => void saveApplication()}>{saving ? t('developer.saving') : t('developer.saveOAuth')}</Button> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>{t('developer.editRedirects')}</Button>}</div></div> : null}
+          {tab === 'scopes' ? <><ScopeOptions scopes={scopes} setScopes={setScopes} /><div className="cluster"><Button type="button" disabled={saving} onClick={() => void saveApplication()}>{saving ? t('developer.saving') : t('developer.saveScopes')}</Button></div></> : null}
         </AccountSection> : null}
-        {tab === 'usage' ? <AccountSection title="应用使用情况" description="基础 OAuth 汇总数据，不包含令牌或授权码。"><AccountLoadState loading={loading} error={null} retry={loadApplications}><dl className="public-app-meta"><div><dt>已授权用户</dt><dd>{selected.usage?.authorization_count ?? 0}</dd></div><div><dt>过去 30 天 OAuth 请求</dt><dd>{selected.usage?.requests_30d ?? 0}</dd></div><div><dt>最近使用</dt><dd>{selected.usage?.last_used_at ? new Date(selected.usage.last_used_at).toLocaleString() : '暂无记录'}</dd></div></dl>{selected.usage?.recent_errors?.length ? <><h3>最近错误</h3><ul>{selected.usage.recent_errors.map(item => <li key={item.metric_date}>{item.metric_date} · {item.last_error_code} · {item.error_count} 次</li>)}</ul></> : <p>暂无错误记录。</p>}</AccountLoadState></AccountSection> : null}
+        {tab === 'usage' ? <AccountSection title={t('developer.usageTitle')} description={t('developer.usageDescription')}><AccountLoadState loading={loading} error={null} retry={loadApplications}><dl className="public-app-meta"><div><dt>{t('developer.authorizedUsers')}</dt><dd>{new Intl.NumberFormat(locale).format(selected.usage?.authorization_count ?? 0)}</dd></div><div><dt>{t('developer.requests30d')}</dt><dd>{new Intl.NumberFormat(locale).format(selected.usage?.requests_30d ?? 0)}</dd></div><div><dt>{t('developer.lastUsed')}</dt><dd>{formatDate(selected.usage?.last_used_at, locale, true) || t('developer.noRecords')}</dd></div></dl>{selected.usage?.recent_errors?.length ? <><h3>{t('developer.recentErrors')}</h3><ul>{selected.usage.recent_errors.map(item => <li key={item.metric_date}>{item.metric_date} · {item.last_error_code} · {t('developer.errorCount', { count: new Intl.NumberFormat(locale).format(item.error_count) })}</li>)}</ul></> : <p>{t('developer.noErrors')}</p>}</AccountLoadState></AccountSection> : null}
       </> : null}
 
-      {isCreate ? null : !routeId ? <AccountSection title="我的应用" description="每个应用都会单独生成 Public Client ID；目前不限制应用总数。">
+      {isCreate ? null : !routeId ? <AccountSection title={t('developer.listTitle')} description={t('developer.listDescription')}>
         <AccountLoadState loading={loading} error={null} retry={loadApplications}>
-          {applications.length ? <div className="developer-app-list">{applications.map(application => <Link className="developer-app-row" to={`/developer/${application.id}`} key={application.id}><AppAvatar name={application.name} /><div className="developer-app-row__main"><h3>{application.name}</h3><p><code>{application.client_id}</code></p><small>{appLabel(application)} · 权限 {application.requested_scopes.length} 项</small></div><div className="developer-app-row__usage"><span>授权用户 {application.usage?.authorization_count ?? 0}</span><small>最近使用：{application.usage?.last_used_at ? new Date(application.usage.last_used_at).toLocaleDateString() : '暂无'}</small></div><span aria-hidden="true">›</span></Link>)}</div> : <p>还没有应用。创建一个 Public Client，即可通过系统浏览器和 PKCE 登录。</p>}
+          {applications.length ? <div className="developer-app-list">{applications.map(application => <Link className="developer-app-row" to={`/developer/${application.id}`} key={application.id}><AppAvatar name={application.name} /><div className="developer-app-row__main"><h3>{application.name}</h3><p><code>{application.client_id}</code></p><small>{appLabel(application, t)} · {t('developer.scopeCount', { count: new Intl.NumberFormat(locale).format(application.requested_scopes.length) })}</small></div><div className="developer-app-row__usage"><span>{t('developer.authorizedUsers')} {new Intl.NumberFormat(locale).format(application.usage?.authorization_count ?? 0)}</span><small>{t('developer.lastUsed')}: {formatDate(application.usage?.last_used_at, locale) || t('developer.noRecords')}</small></div><span aria-hidden="true">›</span></Link>)}</div> : <p>{t('developer.empty')}</p>}
         </AccountLoadState>
-        <div className="cluster developer-page-actions"><Button type="button" onClick={() => navigate('/developer/new')}>创建应用</Button><Link className="btn btn--secondary" to="/apps">浏览社区应用</Link><Link className="account-text-link" to="/authorizations">管理已授权的应用</Link></div>
-        <p className="section-description">第三方工具使用系统浏览器登录 MDTBBS，不需要也不应要求你交出账号密码。论坛 API 说明由 MDTBBS API Docs 提供。</p>
+        <div className="cluster developer-page-actions"><Button type="button" onClick={() => navigate('/developer/new')}>{t('developer.createPublic')}</Button><Link className="btn btn--secondary" to="/apps">{t('developer.browseApps')}</Link><Link className="account-text-link" to="/authorizations">{t('developer.manageAuthorizations')}</Link></div>
+        <p className="section-description">{t('developer.thirdPartyDescription')}</p>
       </AccountSection> : null}
     </AccountShell>
   );
+}
+
+function ScopeOptions({ scopes, setScopes }: { scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>> }) {
+  const { t } = useI18n();
+  return <fieldset className="stack developer-scope-options"><legend className="field__label">{t('developer.allowedScopes')}</legend>{SCOPE_OPTIONS.map(([scope, labelKey, helpKey]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{t(labelKey)}</strong>{scope === 'message.read' || scope === 'message.write' ? <span className="public-scope-sensitive">{t('developer.sensitive')}</span> : null}<small>{scope} · {t(helpKey)}</small></span></label>)}</fieldset>;
 }
 
 function ApplicationForm({
   ecosystem, setEcosystem, name, setName, description, setDescription, website, setWebsite, redirectUris, setRedirectUris,
   scopes, setScopes, onSave, onCancel, saving, saveDisabled = false, saveLabel,
 }: {
-  ecosystem: 'mdtbbs' | 'mindustry-club' | 'global'; setEcosystem: (value: 'mdtbbs' | 'mindustry-club' | 'global') => void;
+  ecosystem: Ecosystem; setEcosystem: (value: Ecosystem) => void;
   name: string; setName: (value: string) => void; description: string; setDescription: (value: string) => void;
   website: string; setWebsite: (value: string) => void; redirectUris: string; setRedirectUris: (value: string) => void;
   scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>>;
   onSave: () => void; onCancel: () => void; saving: boolean; saveDisabled?: boolean; saveLabel: string;
 }) {
+  const { t } = useI18n();
   return <div className="stack">
     <EcosystemField value={ecosystem} onChange={setEcosystem} />
-    <TextField label="应用名称" value={name} onChange={event => setName(event.target.value)} maxLength={120} />
-    <label className="field"><span className="field__label">应用简介</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} placeholder="说明应用的用途，用户会在授权页看到。" /></label>
-    <TextField label="项目主页（可选）" value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" />
-    <label className="field"><span className="field__label">Redirect URI（至少一个，每行一个）</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={5} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /><span className="field__hint">支持 HTTPS、自定义应用协议，以及 localhost / loopback 随机端口。</span></label>
-    <fieldset className="stack developer-scope-options"><legend className="field__label">API 权限</legend>{SCOPE_OPTIONS.map(([scope, label, help]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{label}</strong>{scope === 'message.read' || scope === 'message.write' ? <span className="public-scope-sensitive">敏感权限</span> : null}<small>{scope} · {help}</small></span></label>)}</fieldset>
-    <div className="cluster"><Button type="button" disabled={saving || saveDisabled} onClick={onSave}>{saving ? '处理中…' : saveLabel}</Button><Button type="button" variant="secondary" onClick={onCancel}>取消</Button></div>
+    <TextField label={t('developer.name')} value={name} onChange={event => setName(event.target.value)} maxLength={120} />
+    <label className="field"><span className="field__label">{t('developer.description')}</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} placeholder={t('developer.descriptionHint')} /></label>
+    <TextField label={t('developer.website')} value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" />
+    <label className="field"><span className="field__label">{t('developer.redirectRequired')}</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={5} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /><span className="field__hint">{t('developer.redirectHelp')}</span></label>
+    <ScopeOptions scopes={scopes} setScopes={setScopes} />
+    <div className="cluster"><Button type="button" disabled={saving || saveDisabled} onClick={onSave}>{saving ? t('developer.processing') : saveLabel}</Button><Button type="button" variant="secondary" onClick={onCancel}>{t('developer.cancel')}</Button></div>
   </div>;
 }
 
-function EcosystemField({ value, onChange }: { value: 'mdtbbs' | 'mindustry-club' | 'global'; onChange: (value: 'mdtbbs' | 'mindustry-club' | 'global') => void }) {
-  return <label className="field"><span className="field__label">所属生态</span><select className="field__input" value={value} onChange={event => onChange(event.target.value as typeof value)}><option value="mdtbbs">MDTBBS · email + phone</option><option value="mindustry-club">Mindustry Club · email</option><option value="global">Global · email</option></select><span className="field__hint">生态决定开发者资格审核规则，不会按 IP 自动判断。</span></label>;
+function EcosystemField({ value, onChange }: { value: Ecosystem; onChange: (value: Ecosystem) => void }) {
+  const { t } = useI18n();
+  return <label className="field"><span className="field__label">{t('developer.ecosystem')}</span><select className="field__input" value={value} onChange={event => onChange(event.target.value as Ecosystem)}><option value="mdtbbs">{t('developer.ecosystemMdtbbs')}</option><option value="mindustry-club">{t('developer.ecosystemClub')}</option><option value="global">{t('developer.ecosystemGlobal')}</option></select><span className="field__hint">{t('developer.ecosystemHelp')}</span></label>;
 }
