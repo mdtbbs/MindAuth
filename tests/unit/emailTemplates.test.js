@@ -5,6 +5,8 @@ const {
   buildPasswordResetEmail,
   buildVerificationEmail,
   buildRegistrationCodeEmail,
+  localizeNotification,
+  buildNotificationEmail,
 } = require('../../src/utils/emailTemplates');
 
 test('email locale uses the account preference before Accept-Language', () => {
@@ -30,4 +32,30 @@ test('email templates escape values placed in HTML', () => {
   assert.match(verification.html, /x=&quot;&lt;&amp;/);
   assert.doesNotMatch(code.html, /<script>/);
   assert.match(code.html, /&lt;script&gt;/);
+});
+
+test('security notifications follow the account locale and translate the message', () => {
+  const mail = buildNotificationEmail('ru-RU', {
+    type: 'login_new_device',
+    emailData: { deviceName: 'Pixel', ipAddress: '203.0.113.4' },
+  });
+
+  assert.equal(mail.subject, '[MindAuth] Вход с нового устройства');
+  assert.match(mail.html, /Устройство: Pixel/);
+  assert.match(mail.html, /IP: 203\.0\.113\.4/);
+  assert.match(mail.html, /Это автоматическое письмо MindAuth/);
+  assert.doesNotMatch(mail.html, /新设备登录/);
+});
+
+test('notification templates localize account changes and escape dynamic names', () => {
+  const localized = localizeNotification('ja', 'username_changed', {
+    oldUsername: 'old-user', newUsername: '<img src=x>',
+  });
+  const mail = buildNotificationEmail('ja', {
+    type: 'username_changed', emailData: { oldUsername: 'old-user', newUsername: '<img src=x>' },
+  });
+
+  assert.match(localized.title, /ユーザー名を変更しました/);
+  assert.match(mail.html, /&lt;img src=x&gt;/);
+  assert.doesNotMatch(mail.html, /<img src=x>/);
 });

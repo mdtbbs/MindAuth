@@ -606,6 +606,7 @@ router.post('/:id/ban', requireAdmin, requireAdminPermission('users.ban'), async
     await createNotification({
       user_id: parseInt(id), type: 'account_banned', title: '账号已被封禁',
       content: `原因：${reason.trim().slice(0, 500)}`,
+      emailData: { reason: reason.trim().slice(0, 500) },
       sendEmail: true,
     });
     await auditWriter.writeAdminAudit(req.adminUser.id, 'user.ban', 'user', parseInt(id), { reason: reason.trim().slice(0, 500), duration, expires_at }, getClientIp(req));

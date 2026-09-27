@@ -79,9 +79,9 @@ frontend/src/
 
 `main.tsx` 在用户 SPA 提供 `I18nProvider`。当前支持 `zh-CN`、`en`、`ru`、`ja`，locale 目录由 `i18n/catalogs.ts` 与按页面拆分的 `i18n/*Catalogs.ts` 维护。解析顺序为 OAuth `ui_locales` / 显式 `?lang=`、已登录用户 `preferred_locale`、`mindauth_locale` Cookie、`Accept-Language`，最后按 Client ecosystem 回退（MDTBBS 为简体中文，其他为英语）；用户切换语言会写 Cookie，并尝试保存账户偏好。页面同步设置 `<html lang>`。
 
-登录、注册、OAuth、设备授权、账户概览、资料、安全、会话、活动、通知、授权应用、公开应用目录、开发者应用管理和主要错误状态已接入四语文案。应用使用日期和数量按当前 locale 格式化。验证码、邮箱验证和密码重置邮件优先使用账户语言，其次使用请求的 `Accept-Language`，最后回退简体中文；模板会对链接和验证码进行 HTML 转义。手机号绑定仍可用于安全增强和 MDTBBS 开发者资格，不是 Mindustry Club 的通用账号前置条件。
+登录、注册、OAuth、设备授权、账户概览、资料、安全、会话、活动、通知、授权应用、公开应用目录、开发者应用管理和主要错误状态已接入四语文案。应用使用日期和数量按当前 locale 格式化。验证码、邮箱验证和密码重置邮件优先使用账户语言，其次使用请求的 `Accept-Language`，最后回退简体中文；密码、用户名、登录设备、登录锁定和封禁通知会按账户语言生成站内文案与邮件，其余自定义通知仍保留调用方提供的内容。邮件模板会对链接、验证码和动态通知内容进行 HTML 转义。手机号绑定仍可用于安全增强和 MDTBBS 开发者资格，不是 Mindustry Club 的通用账号前置条件。
 
-语言覆盖仍在完善：部分服务端错误消息、账户通知和管理 SPA 尚未全部本地化。`frontend/admin.html` 管理 SPA 当前仍以简体中文为主，尚无完整的英文切换；不能据此视为 Club 管理后台双语验收通过。
+语言覆盖仍在完善：部分服务端错误消息、未纳入模板的账户通知和管理 SPA 尚未全部本地化。`frontend/admin.html` 管理 SPA 当前仍以简体中文为主，尚无完整的英文切换；不能据此视为 Club 管理后台双语验收通过。
 
 `/account-settings` 保留为兼容入口：旧 `section`/`tab` 参数跳转到对应的新路由，旧 `social=qq_bound` 跳转至安全设置；自定义字段仍使用用户端 `GET/PUT /api/account/fields`，没有改变后端 API。
 

@@ -167,6 +167,7 @@ router.post('/change-username', requireAuth, async (req, res) => {
       type: 'username_changed',
       title: '用户名已修改',
       content: `您的用户名已从 "${oldUsername}" 更改为 "${trimmedUsername}"，请重新登录。`,
+      emailData: { oldUsername, newUsername: trimmedUsername },
       ip_address: getClientIp(req),
       user_agent: req.headers['user-agent'],
       sendEmail: true,

@@ -421,6 +421,8 @@ MindAuth 账户自服务域 API 参考，覆盖账户安全、会话管理、手
 
 数据操作集中在 `src/modules/notifications/notificationCenter.js`，通知存于 `user_notifications` 表。
 
+`password_changed`、`username_changed`、`account_locked`、`login_new_device`、`account_banned` 与 `account_unbanned` 会按账户 `preferred_locale` 写入站内通知，并使用同一语言发送邮件（支持 `zh-CN`、`en`、`ru`、`ja`）。其他通知保留调用方提供的标题和内容；动态用户名、设备、IP 与封禁原因在邮件 HTML 中转义。
+
 ### GET /api/notifications
 
 分页列出当前用户的通知（按 `created_at` 倒序）。

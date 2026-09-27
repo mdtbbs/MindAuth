@@ -23,6 +23,45 @@ const COPY = {
   },
 };
 
+const NOTIFICATION_COPY = {
+  'zh-CN': {
+    passwordTitle: '密码已修改', passwordBody: '您的登录密码已修改。若这不是您本人的操作，请立即联系管理员。',
+    usernameTitle: '用户名已修改', usernameBody: (data) => `用户名已从“${data.oldUsername || '未知'}”改为“${data.newUsername || '未知'}”。`,
+    lockedTitle: '账号暂时锁定', lockedBody: (data) => `由于多次登录失败，账号已锁定 ${data.durationMinutes || 0} 分钟。`,
+    loginTitle: '检测到新设备登录', loginBody: (data) => `设备：${data.deviceName || '未知设备'}\nIP：${data.ipAddress || '未知'}`,
+    bannedTitle: '账号已被封禁', bannedBody: (data) => data.reason ? `原因：${data.reason}` : '管理员已限制此账号。',
+    unbannedTitle: '账号已解封', unbannedBody: '账号访问权限已恢复。',
+    genericTitle: '账号安全通知', genericBody: '您的账号有一项安全相关更新。', footer: '此邮件由 MindAuth 自动发送，请勿回复。',
+  },
+  en: {
+    passwordTitle: 'Password changed', passwordBody: 'Your sign-in password was changed. If you did not make this change, contact the site administrators.',
+    usernameTitle: 'Username changed', usernameBody: (data) => `Your username changed from “${data.oldUsername || 'unknown'}” to “${data.newUsername || 'unknown'}”.`,
+    lockedTitle: 'Account temporarily locked', lockedBody: (data) => `Your account was locked for ${data.durationMinutes || 0} minutes after repeated unsuccessful sign-in attempts.`,
+    loginTitle: 'New device sign-in', loginBody: (data) => `Device: ${data.deviceName || 'Unknown device'}\nIP: ${data.ipAddress || 'Unknown'}`,
+    bannedTitle: 'Account restricted', bannedBody: (data) => data.reason ? `Reason: ${data.reason}` : 'An administrator has restricted this account.',
+    unbannedTitle: 'Account restriction lifted', unbannedBody: 'Access to your account has been restored.',
+    genericTitle: 'Account security notice', genericBody: 'There is a security-related update for your account.', footer: 'This email was sent automatically by MindAuth. Please do not reply.',
+  },
+  ru: {
+    passwordTitle: 'Пароль изменён', passwordBody: 'Пароль для входа в аккаунт изменён. Если это сделали не вы, свяжитесь с администраторами сайта.',
+    usernameTitle: 'Имя пользователя изменено', usernameBody: (data) => `Имя пользователя изменено с «${data.oldUsername || 'неизвестно'}» на «${data.newUsername || 'неизвестно'}».`,
+    lockedTitle: 'Временная блокировка аккаунта', lockedBody: (data) => `Аккаунт заблокирован на ${data.durationMinutes || 0} мин. из-за нескольких неудачных попыток входа.`,
+    loginTitle: 'Вход с нового устройства', loginBody: (data) => `Устройство: ${data.deviceName || 'неизвестное устройство'}\nIP: ${data.ipAddress || 'неизвестно'}`,
+    bannedTitle: 'Доступ к аккаунту ограничен', bannedBody: (data) => data.reason ? `Причина: ${data.reason}` : 'Администратор ограничил доступ к аккаунту.',
+    unbannedTitle: 'Ограничение снято', unbannedBody: 'Доступ к аккаунту восстановлен.',
+    genericTitle: 'Уведомление безопасности аккаунта', genericBody: 'Для вашего аккаунта есть обновление, связанное с безопасностью.', footer: 'Это автоматическое письмо MindAuth. Не отвечайте на него.',
+  },
+  ja: {
+    passwordTitle: 'パスワードを変更しました', passwordBody: 'ログインパスワードが変更されました。心当たりがない場合は、サイト管理者にご連絡ください。',
+    usernameTitle: 'ユーザー名を変更しました', usernameBody: (data) => `ユーザー名を「${data.oldUsername || '不明'}」から「${data.newUsername || '不明'}」に変更しました。`,
+    lockedTitle: 'アカウントを一時的にロックしました', lockedBody: (data) => `ログインに複数回失敗したため、アカウントを ${data.durationMinutes || 0} 分間ロックしました。`,
+    loginTitle: '新しい端末からのログイン', loginBody: (data) => `端末：${data.deviceName || '不明な端末'}\nIP：${data.ipAddress || '不明'}`,
+    bannedTitle: 'アカウントの利用が制限されています', bannedBody: (data) => data.reason ? `理由：${data.reason}` : '管理者がアカウントの利用を制限しました。',
+    unbannedTitle: 'アカウントの制限を解除しました', unbannedBody: 'アカウントを再び利用できます。',
+    genericTitle: 'アカウントのセキュリティ通知', genericBody: 'アカウントのセキュリティに関する更新があります。', footer: 'このメールは MindAuth から自動送信されています。返信しないでください。',
+  },
+};
+
 function resolveMailLocale(preferredLocale, acceptLanguage) {
   return normalizeLocale(preferredLocale)
     || String(acceptLanguage || '').split(',').map(item => normalizeLocale(item.split(';')[0])).find(Boolean)
@@ -62,4 +101,39 @@ function buildRegistrationCodeEmail(locale, code) {
   };
 }
 
-module.exports = { resolveMailLocale, buildPasswordResetEmail, buildVerificationEmail, buildRegistrationCodeEmail };
+function localizeNotification(locale, type, data = {}) {
+  const copy = NOTIFICATION_COPY[resolveMailLocale(locale)];
+  const entries = {
+    password_changed: ['passwordTitle', 'passwordBody'],
+    username_changed: ['usernameTitle', 'usernameBody'],
+    account_locked: ['lockedTitle', 'lockedBody'],
+    login_new_device: ['loginTitle', 'loginBody'],
+    account_banned: ['bannedTitle', 'bannedBody'],
+    account_unbanned: ['unbannedTitle', 'unbannedBody'],
+  };
+  const keys = entries[type];
+  if (!keys) return null;
+  const [titleKey, bodyKey] = keys;
+  return { title: copy[titleKey], content: copy[bodyKey](data) };
+}
+
+function buildNotificationEmail(locale, input = {}) {
+  const copy = NOTIFICATION_COPY[resolveMailLocale(locale)];
+  const localized = localizeNotification(locale, input.type, input.emailData || {});
+  const title = localized?.title || input.title || copy.genericTitle;
+  const content = localized?.content || input.content || copy.genericBody;
+  const htmlContent = escapeHtml(content).replace(/\r?\n/g, '<br>');
+  return {
+    subject: `[MindAuth] ${title}`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#ff6b35">${escapeHtml(title)}</h2><p>${htmlContent}</p>${input.ip_address && input.type !== 'login_new_device' ? `<p style="color:#666;font-size:12px">IP: ${escapeHtml(input.ip_address)}</p>` : ''}<hr style="border:0;border-top:1px solid #eee;margin:20px 0"><p style="color:#999;font-size:12px">${escapeHtml(copy.footer)}</p></div>`,
+  };
+}
+
+module.exports = {
+  resolveMailLocale,
+  buildPasswordResetEmail,
+  buildVerificationEmail,
+  buildRegistrationCodeEmail,
+  localizeNotification,
+  buildNotificationEmail,
+};

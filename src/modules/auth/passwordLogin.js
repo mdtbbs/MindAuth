@@ -46,7 +46,7 @@ function createPasswordLogin({ pool = defaultPool, redis = defaultRedis, notify 
         await pool.execute('UPDATE users SET lock_level = ?, locked_until = ? WHERE id = ?', [newLevel, lockedUntil, user.id]);
         await redis.del(failKey);
         const duration = lockMinutes >= 60 ? `锁定${lockMinutes / 60}小时` : `锁定${lockMinutes}分钟`;
-        await notify.create({ user_id: user.id, type: 'account_locked', title: '账号已被锁定', content: `连续登录失败次数过多，账号已被${duration}`, sendEmail: true });
+        await notify.create({ user_id: user.id, type: 'account_locked', title: '账号已被锁定', content: `连续登录失败次数过多，账号已被${duration}`, emailData: { durationMinutes: lockMinutes }, sendEmail: true });
         await audit({ user_id: user.id, action: 'account_locked', ip_address: ipAddress, user_agent: userAgent, details: { lock_level: newLevel, duration } });
       }
       return { ok: false, reason: 'credentials', user };

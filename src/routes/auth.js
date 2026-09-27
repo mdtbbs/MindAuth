@@ -311,7 +311,8 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       if (prevLog.length > 0 && prevLog[0].ip !== ip) {
         await notificationCenter.create({
           user_id: user.id, type: 'login_new_device', title: '新设备登录',
-          content: `检测到新设备登录，IP: ${ip}`, ip_address: ip, user_agent: userAgent, sendEmail: true,
+          content: `检测到新设备登录，IP: ${ip}`, emailData: { deviceName: userAgent.slice(0, 160), ipAddress: ip },
+          ip_address: ip, user_agent: userAgent, sendEmail: true,
         });
       }
     } catch (notifyErr) {
