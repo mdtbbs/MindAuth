@@ -59,3 +59,18 @@ test('notification templates localize account changes and escape dynamic names',
   assert.match(mail.html, /&lt;img src=x&gt;/);
   assert.doesNotMatch(mail.html, /<img src=x>/);
 });
+
+test('notification templates support both static and data-driven message bodies', () => {
+  assert.deepEqual(localizeNotification('en', 'password_changed'), {
+    title: 'Password changed',
+    content: 'Your sign-in password was changed. If you did not make this change, contact the site administrators.',
+  });
+  assert.deepEqual(localizeNotification('en', 'account_unbanned'), {
+    title: 'Account restriction lifted',
+    content: 'Access to your account has been restored.',
+  });
+  assert.deepEqual(localizeNotification('en', 'account_banned', { reason: 'Policy violation' }), {
+    title: 'Account restricted',
+    content: 'Reason: Policy violation',
+  });
+});

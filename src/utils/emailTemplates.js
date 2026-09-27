@@ -114,7 +114,8 @@ function localizeNotification(locale, type, data = {}) {
   const keys = entries[type];
   if (!keys) return null;
   const [titleKey, bodyKey] = keys;
-  return { title: copy[titleKey], content: copy[bodyKey](data) };
+  const body = copy[bodyKey];
+  return { title: copy[titleKey], content: typeof body === 'function' ? body(data) : body };
 }
 
 function buildNotificationEmail(locale, input = {}) {
