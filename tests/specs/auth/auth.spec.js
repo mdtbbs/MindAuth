@@ -381,7 +381,7 @@ test.describe('Dashboard日志和授权', () => {
     const menu = page.getByRole('button', { name: '打开导航' });
     await expect(menu).toBeVisible();
     await menu.click();
-    const navigation = page.getByRole('navigation', { name: '账户导航' }).last();
+    const navigation = page.getByRole('dialog', { name: '账户中心导航' });
     await expect(navigation.getByRole('link', { name: '登录设备' })).toBeVisible();
     await navigation.getByRole('link', { name: '登录设备' }).click();
     await expect(page).toHaveURL(/\/sessions$/);
