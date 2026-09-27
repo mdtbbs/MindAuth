@@ -129,9 +129,11 @@ export function AccountShell({ title, description, children }: AccountShellProps
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">{mobileNavOpen ? <path d="m6 6 12 12M18 6 6 18" /> : <path d="M4 6h16M4 12h16M4 18h16" />}</svg>
           </button>
-          <Link to="/dashboard" className="account-brand" aria-label="MindAuth 概览">
-            <span className="brand-mark__logo" aria-hidden="true">M</span>
-            <span className="account-brand__name">MindAuth</span>
+          <Link to="/dashboard" className="account-brand" aria-label="MDTBBS 用户中心概览">
+            <img className="brand-mark__image" src="/account-logo.svg" alt="" aria-hidden="true" />
+            <span className="account-brand__name">MDTBBS</span>
+            <span className="account-brand__divider" aria-hidden="true" />
+            <span className="account-brand__section">用户中心</span>
           </Link>
           <div className="account-header-actions">
             <a className="account-help-link" href="/docs.html">帮助</a>
@@ -164,7 +166,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
         <aside className="account-shell__sidebar" aria-label="账户中心侧栏">
           <div className="account-sidebar__brand">
             <span>MDTBBS</span>
-            <small>账户服务</small>
+            <small>用户中心</small>
           </div>
           {renderNavigation()}
         </aside>

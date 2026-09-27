@@ -124,7 +124,7 @@ export function OAuthAuthorizePage() {
               {consent.client.developer_name ? <div><dt>开发者</dt><dd>{consent.client.developer_name}</dd></div> : null}
             </dl>
           </details>
-          <p className="section-description">你可以随时在 MindAuth 的已授权应用中撤销访问。论坛的账号状态、内容审核和站点规则仍然适用。</p>
+          <p className="section-description">你可以随时在 MDTBBS 用户中心的已授权应用中撤销访问。论坛的账号状态、内容审核和站点规则仍然适用。</p>
           <div className="oauth-consent__actions">
             <Button type="button" variant="secondary" disabled={busy} onClick={() => void decide('deny')}>取消</Button>
             <Button type="button" disabled={busy} onClick={() => void decide('approve')}>{busy ? '提交中…' : '允许'}</Button>

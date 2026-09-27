@@ -117,12 +117,11 @@
   .oauth-consent__actions .btn { width: 100%; }
 }
 
-.account-shell .brand-mark__logo {
+.account-shell .brand-mark__image {
   width: 2rem;
   height: 2rem;
-  border-radius: 4px;
-  background: var(--color-primary);
-  box-shadow: none;
+  flex: 0 0 2rem;
+  object-fit: contain;
 }
 
 .account-shell__header {
@@ -153,7 +152,18 @@
   letter-spacing: 0.01em;
 }
 
-.account-brand__name { font-size: 0.95rem; }
+.account-brand__name { font-size: 0.95rem; font-weight: 700; }
+.account-brand__divider {
+  width: 1px;
+  height: 1.15rem;
+  margin-inline: 0.1rem;
+  background: var(--color-border-strong);
+}
+.account-brand__section {
+  color: var(--color-text-secondary);
+  font-size: 0.86rem;
+  font-weight: 500;
+}
 .account-menu-toggle { display: none; }
 
 .account-header-actions {

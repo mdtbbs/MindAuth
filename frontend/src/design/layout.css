@@ -200,13 +200,11 @@
   text-decoration: none;
 }
 
-.auth-brand .brand-mark__logo {
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 3px;
-  background: #2f80ed;
-  box-shadow: none;
-  font-size: 0.8rem;
+.auth-brand .brand-mark__image {
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  object-fit: contain;
 }
 
 .auth-brand__name {
