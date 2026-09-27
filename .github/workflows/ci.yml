@@ -82,6 +82,11 @@ jobs:
           npm run test:integration 2>&1 | tee "$RUNNER_TEMP/integration-tests.log"
           result=${PIPESTATUS[0]}
           if [[ "$result" -ne 0 ]]; then
+            excerpt="$(tail -n 50 "$RUNNER_TEMP/integration-tests.log")"
+            excerpt="${excerpt//'%'/'%25'}"
+            excerpt="${excerpt//$'\r'/'%0D'}"
+            excerpt="${excerpt//$'\n'/'%0A'}"
+            printf '::notice file=.github/workflows/ci.yml,line=1::%s\n' "$excerpt"
             {
               echo "### Integration test failure output"
               tail -n 120 "$RUNNER_TEMP/integration-tests.log"
