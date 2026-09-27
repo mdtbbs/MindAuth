@@ -82,7 +82,10 @@ jobs:
           npm run test:integration 2>&1 | tee "$RUNNER_TEMP/integration-tests.log"
           result=${PIPESTATUS[0]}
           if [[ "$result" -ne 0 ]]; then
-            excerpt="$(tail -n 50 "$RUNNER_TEMP/integration-tests.log")"
+            excerpt="$(grep -n -B 6 -A 18 -E 'not ok|failureType|error:|AssertionError|Error:|ERR_' "$RUNNER_TEMP/integration-tests.log" | tail -n 100)"
+            if [[ -z "$excerpt" ]]; then
+              excerpt="$(tail -n 50 "$RUNNER_TEMP/integration-tests.log")"
+            fi
             excerpt="${excerpt//'%'/'%25'}"
             excerpt="${excerpt//$'\r'/'%0D'}"
             excerpt="${excerpt//$'\n'/'%0A'}"
