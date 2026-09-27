@@ -76,7 +76,18 @@ jobs:
           NODE_ENV: development
 
       - name: Integration tests
-        run: npm run test:integration
+        shell: bash
+        run: |
+          set +e
+          npm run test:integration 2>&1 | tee "$RUNNER_TEMP/integration-tests.log"
+          result=${PIPESTATUS[0]}
+          if [[ "$result" -ne 0 ]]; then
+            {
+              echo "### Integration test failure output"
+              tail -n 120 "$RUNNER_TEMP/integration-tests.log"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$result"
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
