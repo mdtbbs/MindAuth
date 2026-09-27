@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 interface ErrorPageProps {
   status?: number;
@@ -9,24 +10,25 @@ interface ErrorPageProps {
 }
 
 export function ErrorPage({ status = 404, title, message }: ErrorPageProps) {
-  const defaultTitle = status === 404 ? '页面未找到' : '页面发生错误';
+  const { t } = useI18n();
+  const defaultTitle = status === 404 ? t('error.notFoundTitle') : t('error.pageTitle');
   const defaultMessage =
     status === 404
-      ? '您访问的页面不存在，可能已被移动或删除。'
-      : '系统暂时无法完成当前操作，请稍后再试。';
+      ? t('error.notFoundMessage')
+      : t('error.genericMessage');
 
   return (
     <AuthShell
       title={title ?? defaultTitle}
-      description="您仍然可以返回登录页或继续访问账户中心的主要入口。"
+      description={t('error.description')}
       footer={
         <>
           <Link to="/login" className="inline-link">
-            返回登录
+            {t('error.login')}
           </Link>
           <span className="text-muted">/</span>
           <Link to="/dashboard" className="inline-link">
-            前往 Dashboard
+            {t('error.dashboard')}
           </Link>
         </>
       }
@@ -38,10 +40,10 @@ export function ErrorPage({ status = 404, title, message }: ErrorPageProps) {
         <p className="section-description">{message ?? defaultMessage}</p>
         <div className="cluster">
           <Link to="/login">
-            <Button variant="primary">前往登录</Button>
+            <Button variant="primary">{t('error.login')}</Button>
           </Link>
           <Link to="/dashboard">
-            <Button variant="secondary">打开 Dashboard</Button>
+            <Button variant="secondary">{t('error.dashboard')}</Button>
           </Link>
         </div>
       </div>
