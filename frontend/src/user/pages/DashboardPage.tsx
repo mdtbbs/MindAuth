@@ -77,7 +77,7 @@ export function DashboardPage() {
                 <StatusLabel needsAction={!user.phone_verified}>{user.phone_verified ? '手机号已绑定' : '未绑定手机号'}</StatusLabel>
               </div>
               <p>{user.email}</p>
-              <span>MindAuth 统一账户</span>
+              <span>MDTBBS 统一账户</span>
             </div>
             <div className="account-overview-hero__actions">
               <Link className="btn btn--secondary" to="/profile">个人资料</Link>
@@ -132,7 +132,7 @@ export function DashboardPage() {
 
               <AccountSection
                 title="最近设备"
-                description="近期访问过 MindAuth 的浏览器与客户端。"
+                description="近期访问过 MDTBBS 用户中心的浏览器与客户端。"
                 action={<Link className="account-text-link" to="/sessions">全部设备</Link>}
               >
                 <AccountLoadState loading={sessions.loading} error={sessions.error} retry={sessions.reload}>
