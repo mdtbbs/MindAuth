@@ -4,6 +4,7 @@ const { pool, transaction } = require('../db');
 const { client } = require('../redis');
 const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
+const { resolveMailLocale } = require('../utils/emailTemplates');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
@@ -65,7 +66,7 @@ router.post('/send', requireAuth, sendRateLimiter, async (req, res) => {
 
     // Send verification email
     const verifyLink = `${BASE_URL}/#/verify-email?token=${token}`;
-    await sendVerificationEmail(user.email, verifyLink);
+    await sendVerificationEmail(user.email, verifyLink, resolveMailLocale(user.preferred_locale, req.get('accept-language')));
 
     res.json({ success: true, message: '验证邮件已发送' });
   } catch (err) {

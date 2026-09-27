@@ -27,6 +27,7 @@ const { client } = require('../redis');
 const { hashToken } = require('../utils/token');
 const { isValidEmail } = require('../utils/validation');
 const { sendRegistrationCodeEmail } = require('../utils/email');
+const { resolveMailLocale } = require('../utils/emailTemplates');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const config = require('../config');
 const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
@@ -114,6 +115,7 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
       return res.status(429).json({
         success: false,
         code: 'EMAIL_COOLDOWN',
+        retry_after_seconds: waitSec,
         message: `发送过于频繁，请${waitSec}秒后重试`,
       });
     }
@@ -135,7 +137,7 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
     // 4. Send the email. If SMTP is unavailable, surface 503 and clean up
     //    the Redis/MySQL rows so a retry isn't blocked by a stale entry.
     try {
-      await sendRegistrationCodeEmail(emailLower, code);
+      await sendRegistrationCodeEmail(emailLower, code, resolveMailLocale(null, req.get('accept-language')));
     } catch (sendErr) {
       await client.del(`register_email_code:${eHash}`).catch(() => {});
       try {

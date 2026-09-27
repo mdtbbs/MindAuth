@@ -6,6 +6,7 @@
 const nodemailer = require('nodemailer');
 const { pool } = require('../db');
 const { decryptSecret } = require('./secrets');
+const { buildPasswordResetEmail, buildVerificationEmail, buildRegistrationCodeEmail } = require('./emailTemplates');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -123,37 +124,13 @@ async function sendEmail(to, subject, htmlContent) {
   }
 }
 
-async function sendPasswordResetEmail(email, resetLink) {
-  const subject = '密码重置请求';
-  const html = `
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #3b82f6;">密码重置</h2>
-      <p>您收到此邮件是因为有人请求重置您的密码。</p>
-      <p style="margin: 20px 0;">
-        <a href="${resetLink}" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 4px;">
-          重置密码
-        </a>
-      </p>
-      <p style="color: #666; font-size: 12px;">此链接将在1小时后失效。如果您没有请求重置密码，请忽略此邮件。</p>
-    </div>
-  `;
+async function sendPasswordResetEmail(email, resetLink, locale) {
+  const { subject, html } = buildPasswordResetEmail(locale, resetLink);
   return sendEmail(email, subject, html);
 }
 
-async function sendVerificationEmail(email, verifyLink) {
-  const subject = '邮箱验证';
-  const html = `
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #3b82f6;">验证您的邮箱</h2>
-      <p>感谢您注册！请点击下方链接验证您的邮箱地址：</p>
-      <p style="margin: 20px 0;">
-        <a href="${verifyLink}" style="display: inline-block; padding: 12px 24px; background: #22c55e; color: white; text-decoration: none; border-radius: 4px;">
-          验证邮箱
-        </a>
-      </p>
-      <p style="color: #666; font-size: 12px;">此链接将在1小时后失效。</p>
-    </div>
-  `;
+async function sendVerificationEmail(email, verifyLink, locale) {
+  const { subject, html } = buildVerificationEmail(locale, verifyLink);
   return sendEmail(email, subject, html);
 }
 
@@ -164,18 +141,8 @@ async function sendVerificationEmail(email, verifyLink) {
  * @param {string} code - 6-digit numeric code (plaintext, valid 5 min)
  * @returns {Promise<object>} send result
  */
-async function sendRegistrationCodeEmail(email, code) {
-  const subject = '注册邮箱验证码';
-  const html = `
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #3b82f6;">邮箱验证码</h2>
-      <p>您正在注册 MindAuth 账户，请使用以下验证码完成注册：</p>
-      <p style="margin: 20px 0; font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; color: #3b82f6;">
-        ${code}
-      </p>
-      <p style="color: #666; font-size: 12px;">验证码将在 5 分钟后失效。如果您未请求注册，请忽略此邮件。</p>
-    </div>
-  `;
+async function sendRegistrationCodeEmail(email, code, locale) {
+  const { subject, html } = buildRegistrationCodeEmail(locale, code);
   return sendEmail(email, subject, html);
 }
 

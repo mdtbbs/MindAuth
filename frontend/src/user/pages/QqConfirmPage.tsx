@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 /**
  * QQ 登录状态页面
@@ -13,14 +14,15 @@ import { AuthShell } from '@/user/components/AuthShell';
  * 这个页面保留为备用错误页，不处理旧的 ticket/action 协议。
  */
 export function QqConfirmPage() {
+  const { t } = useI18n();
   return (
     <AuthShell
-      title="QQ 登录"
-      description="请通过 QQ 授权页面完成登录。"
-      footer={<Link className="inline-link" to="/login">返回登录</Link>}
+      title={t('qq.title')}
+      description={t('qq.description')}
+      footer={<Link className="inline-link" to="/login">{t('qq.backToLogin')}</Link>}
     >
-      <p>如果您看到此页面，可能是授权流程出现异常。</p>
-      <p>请重新点击登录页面的"使用 QQ 登录"按钮。</p>
+      <p>{t('qq.problem')}</p>
+      <p>{t('qq.restart')}</p>
     </AuthShell>
   );
 }

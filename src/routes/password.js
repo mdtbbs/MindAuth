@@ -6,6 +6,7 @@ const { client } = require('../redis');
 const { generateToken, hashToken } = require('../utils/token');
 const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/email');
+const { resolveMailLocale } = require('../utils/emailTemplates');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const { logUserAudit } = require('../utils/userAudit');
 const { getClientIp } = require('../utils/request');
@@ -26,7 +27,7 @@ router.post('/reset-request', resetRateLimiter, async (req, res) => {
   }
 
   try {
-    const [userRows] = await pool.execute('SELECT id, email, email_verified FROM users WHERE email = ?', [email]);
+    const [userRows] = await pool.execute('SELECT id, email, email_verified, preferred_locale FROM users WHERE email = ?', [email]);
     const user = userRows[0];
 
     // Don't reveal whether user exists (security)
@@ -45,7 +46,7 @@ router.post('/reset-request', resetRateLimiter, async (req, res) => {
 
     // Send email
     const resetLink = `${BASE_URL}/#/reset-password?token=${token}`;
-    await sendPasswordResetEmail(user.email, resetLink);
+    await sendPasswordResetEmail(user.email, resetLink, resolveMailLocale(user.preferred_locale, req.get('accept-language')));
 
     res.json({ success: true, message: '如果邮箱存在，重置链接已发送' });
   } catch (err) {

@@ -16,6 +16,7 @@ const emailPolicy = require('../../modules/emailPolicy/emailPolicyService');
 const { generateToken, hashToken } = require('../../utils/token');
 const { client } = require('../../redis');
 const { sendVerificationEmail } = require('../../utils/email');
+const { resolveMailLocale } = require('../../utils/emailTemplates');
 const { getEmailDomain } = emailPolicy;
 const emailBaseUrl = process.env.BASE_URL || 'http://localhost:4001';
 const emailVerificationTtl = 3600;
@@ -308,7 +309,7 @@ router.delete('/:id/authorizations', requireAdmin, requireAdminPermission('autho
   }
 });
 
-async function issueVerificationEmail(userId, email) {
+async function issueVerificationEmail(userId, email, preferredLocale) {
   const previous = await client.sMembers(`verify_by_user:${userId}`).catch(() => []);
   if (previous.length) await Promise.all(previous.map(tokenHash => client.del(`verify:${tokenHash}`).catch(() => {})));
   await client.del(`verify_by_user:${userId}`).catch(() => {});
@@ -319,7 +320,7 @@ async function issueVerificationEmail(userId, email) {
   await client.setEx(`verify:${tokenHash}`, emailVerificationTtl, JSON.stringify({ user_id: userId, email }));
   await client.sAdd(`verify_by_user:${userId}`, tokenHash);
   await pool.execute('INSERT INTO email_verification_tokens (token, user_id, email, expires_at) VALUES (?, ?, ?, ?)', [tokenHash, userId, email, expiresAt]);
-  try { await sendVerificationEmail(email, `${emailBaseUrl}/#/verify-email?token=${token}`); }
+  try { await sendVerificationEmail(email, `${emailBaseUrl}/#/verify-email?token=${token}`, resolveMailLocale(preferredLocale)); }
   catch (err) {
     await client.del(`verify:${tokenHash}`).catch(() => {});
     await client.sRem(`verify_by_user:${userId}`, tokenHash).catch(() => {});
@@ -331,12 +332,12 @@ async function issueVerificationEmail(userId, email) {
 router.post('/:id/email-verification/send', requireAdmin, requireAdminPermission('users.write'), sensitiveUserMutationLimiter, async (req, res) => {
   const userId = Number(req.params.id);
   try {
-    const [rows] = await pool.execute('SELECT email, email_verified FROM users WHERE id = ? LIMIT 1', [userId]);
+    const [rows] = await pool.execute('SELECT email, email_verified, preferred_locale FROM users WHERE id = ? LIMIT 1', [userId]);
     if (!rows[0]) return res.status(404).json({ success: false, message: '用户不存在' });
     if (rows[0].email_verified) return res.status(400).json({ success: false, message: '邮箱已验证' });
     const decision = await emailPolicy.checkEmail(rows[0].email, { purpose: 'verification', userId, ipAddress: getClientIp(req) });
     if (!decision.allowed) return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
-    await issueVerificationEmail(userId, rows[0].email);
+    await issueVerificationEmail(userId, rows[0].email, rows[0].preferred_locale);
     await auditWriter.writeAdminAudit(req.adminUser.id, 'user.email_verification_resend', 'user', userId, null, getClientIp(req));
     res.json({ success: true, message: '验证邮件已发送' });
   } catch (err) {
@@ -358,7 +359,8 @@ router.put('/:id/email', requireAdmin, requireAdminPermission('users.write'), se
     if (!decision.allowed) return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
     const [duplicates] = await pool.execute('SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1', [email, userId]);
     if (duplicates.length) return res.status(409).json({ success: false, message: '该邮箱已被其他用户使用' });
-    await issueVerificationEmail(userId, email);
+    const [targetRows] = await pool.execute('SELECT preferred_locale FROM users WHERE id = ? LIMIT 1', [userId]);
+    await issueVerificationEmail(userId, email, targetRows[0]?.preferred_locale);
     await auditWriter.writeAdminAudit(req.adminUser.id, 'user.email_change_requested', 'user', userId,
       { email_domain: getEmailDomain(email), override_policy: override }, getClientIp(req));
     res.json({ success: true, message: '验证邮件已发送；用户完成验证后邮箱才会更新' });

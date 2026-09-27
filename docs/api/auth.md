@@ -29,7 +29,7 @@
 |--------|------|----------|
 | 400 | `INVALID_EMAIL` | 邮箱格式不合规 |
 | 409 | `EMAIL_ALREADY_REGISTERED` | 该邮箱已在 `users` 表中注册；本端点**故意**暴露此信息以便用户区分"已注册"与"待注册"，代价是邮箱枚举风险 |
-| 429 | `EMAIL_COOLDOWN` | 同一邮箱 1 分钟内重复请求 |
+| 429 | `EMAIL_COOLDOWN` | 同一邮箱 1 分钟内重复请求；响应附 `retry_after_seconds` 剩余等待秒数 |
 | 429 | `ratelimit:register_send_code` | 同一 IP 10 分钟内超过 3 次 |
 | 503 | `SMTP_UNAVAILABLE` | 邮件服务未配置（`email_config` 无 host/密码） |
 | 503 | `SMTP_SEND_FAILED` | SMTP 发信失败（已清理本次生成的 code 与 cooldown，允许立即重试） |

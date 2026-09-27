@@ -6,6 +6,7 @@ const { client } = require('../redis');
 const { isValidPassword, isValidEmail, getPasswordValidationError, getUsernameValidationError } = require('../utils/validation');
 const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
+const { resolveMailLocale } = require('../utils/emailTemplates');
 const requireAuth = require('../middleware/requireAuth');
 const { avatarUpload, bannerUpload } = require('../middleware/upload');
 const notificationCenter = require('../modules/notifications/notificationCenter');
@@ -246,7 +247,7 @@ router.post('/change-email', requireAuth, async (req, res) => {
 
     // Send verification email to new address
     const verifyLink = `${BASE_URL}/#/verify-email?token=${token}`;
-    await sendVerificationEmail(new_email, verifyLink);
+    await sendVerificationEmail(new_email, verifyLink, resolveMailLocale(user.preferred_locale, req.get('accept-language')));
 
     res.json({ success: true, message: '验证邮件已发送到新邮箱，请点击链接完成更换' });
   } catch (err) {
