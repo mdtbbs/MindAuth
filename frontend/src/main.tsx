@@ -4,6 +4,7 @@ import { ToastProvider } from '@/shared/ToastProvider';
 import { ErrorBoundary } from '@/shared/ErrorBoundary';
 import { normalizeLegacyHashRoutes } from '@/routes/legacyHashRoutes';
 import { UserApp } from '@/user/UserApp';
+import { I18nProvider } from '@/i18n/I18nProvider';
 
 // Design system styles
 import '@/design/tokens.css';
@@ -19,7 +20,7 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <ToastProvider>
-          <UserApp />
+          <I18nProvider><UserApp /></I18nProvider>
         </ToastProvider>
       </AuthProvider>
     </ErrorBoundary>

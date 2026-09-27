@@ -23,7 +23,7 @@ router.get('/', requireAdmin, requireAdminPermission('clients.read'), async (req
 // POST /clients - Create client (rate limited)
 router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCreateLimiter, async (req, res) => {
   try {
-    const { name, redirect_uri, redirect_uris, require_pkce } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce, ecosystem } = req.body;
     const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
     if (!name || !uris.length) {
@@ -36,7 +36,7 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
     }
 
     const result = await clientRegistry.createClient(
-      { name, redirect_uri: uris[0], redirect_uris: uris, require_pkce },
+      { name, redirect_uri: uris[0], redirect_uris: uris, require_pkce, ecosystem },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 
@@ -111,7 +111,7 @@ router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), asy
 router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, redirect_uri, redirect_uris, require_pkce, scopes } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce, scopes, ecosystem } = req.body;
     const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
     if (!name || !uris.length) {
@@ -127,7 +127,7 @@ router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async 
 
     await clientRegistry.updateClient(
       parseInt(id),
-      { name, redirect_uris: uris, require_pkce, scopes },
+      { name, redirect_uris: uris, require_pkce, scopes, ecosystem },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 

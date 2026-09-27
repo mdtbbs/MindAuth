@@ -348,13 +348,14 @@ router.get('/login-logs', requireAuth, async (req, res) => {
 
 // Get current user
 router.get('/me', requireAuth, (req, res) => {
-  const { id, username, email, email_verified, role, avatar_url, banner_url, phone, phone_verified, phone_verified_at, created_at } = req.user;
+  const { id, username, email, email_verified, preferred_locale, role, avatar_url, banner_url, phone, phone_verified, phone_verified_at, created_at } = req.user;
   res.json({
     success: true,
     id,
     username,
     email,
     email_verified: email_verified === 1 || email_verified === true,
+    preferred_locale: preferred_locale || null,
     role,
     avatar_url,
     banner_url,

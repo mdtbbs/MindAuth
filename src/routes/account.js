@@ -19,6 +19,24 @@ const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
 
 const { safePublicPath, tryRemovePublicFile } = require('../utils/publicFiles');
 
+const SUPPORTED_LOCALES = new Set(['zh-CN', 'en', 'ru', 'ja']);
+
+router.put('/preferences', requireAuth, async (req, res) => {
+  const preferredLocale = typeof req.body?.preferred_locale === 'string' ? req.body.preferred_locale : '';
+  if (!SUPPORTED_LOCALES.has(preferredLocale)) {
+    return res.status(400).json({ success: false, code: 'INVALID_LOCALE', message: 'Choose a supported language.' });
+  }
+  try {
+    await pool.execute('UPDATE users SET preferred_locale = ? WHERE id = ?', [preferredLocale, req.user.id]);
+    req.user.preferred_locale = preferredLocale;
+    await sessionManager.invalidateUserSessionCache(req.cookies.session);
+    res.json({ success: true, preferred_locale: preferredLocale });
+  } catch (error) {
+    console.error('Update account preferences failed:', error.message);
+    res.status(500).json({ success: false, code: 'PREFERENCE_UPDATE_FAILED', message: 'Could not save your language preference.' });
+  }
+});
+
 // POST /change-password - Change password
 router.post('/change-password', requireAuth, async (req, res) => {
   try {

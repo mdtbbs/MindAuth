@@ -18,6 +18,7 @@ const oauthIssuer = require('../modules/oauth/oauthIssuer');
 const oauthMetrics = require('../modules/oauth/oauthMetrics');
 const tokenStore = require('../modules/oauth/tokenStore');
 const { SCOPE_DESCRIPTIONS } = require('../modules/oauth/scopes');
+const { normalizeUiLocales, appendUiLocales } = require('../utils/locale');
 
 // Rate limiter for token verification / userinfo / user endpoints.
 // These endpoints are CSRF-exempt and accept bearer tokens, so a loose
@@ -86,8 +87,9 @@ router.get('/authorize', authorizeLimiter, async (req, res) => {
   try {
     const {
       redirect_uri, client_id, state, scope, response_type,
-      code_challenge, code_challenge_method
+      code_challenge, code_challenge_method, ui_locales
     } = req.query;
+    const uiLocales = normalizeUiLocales(ui_locales);
 
     const sessionToken = req.cookies.session || null;
     const ipAddress = getClientIp(req);
@@ -111,6 +113,8 @@ router.get('/authorize', authorizeLimiter, async (req, res) => {
       if (code_challenge) loginParams.set('code_challenge', code_challenge);
       if (code_challenge_method) loginParams.set('code_challenge_method', code_challenge_method);
       loginParams.set('client_name', result.client.name);
+      appendUiLocales(loginParams, uiLocales);
+      loginParams.set('ecosystem', result.client.ecosystem || 'mdtbbs');
       return res.redirect(`/login?${loginParams.toString()}`);
     }
 
@@ -120,6 +124,8 @@ router.get('/authorize', authorizeLimiter, async (req, res) => {
       if (scope) consentParams.set('scope', scope);
       if (code_challenge) consentParams.set('code_challenge', code_challenge);
       if (code_challenge_method) consentParams.set('code_challenge_method', code_challenge_method);
+      appendUiLocales(consentParams, uiLocales);
+      consentParams.set('ecosystem', result.client.ecosystem || 'mdtbbs');
       return res.redirect(`/authorize?${consentParams.toString()}`);
     }
 

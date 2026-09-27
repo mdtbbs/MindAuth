@@ -7,6 +7,7 @@ const { forumProfileUrl } = require('../../utils/forumProfileUrl');
 const { writeAdminAudit } = require('../audit/auditWriter');
 const { VALID_SCOPES, SCOPE_DESCRIPTIONS, normalizeScopes } = require('../oauth/scopes');
 const tokenStore = require('../oauth/tokenStore');
+const { normalizeEcosystem, isSupportedEcosystem, assertDeveloperEligibility } = require('../developer/DeveloperPolicy');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost']);
 const RESERVED_SCHEMES = new Set([
@@ -114,7 +115,7 @@ async function syncRedirectUris(executor, clientNumericId, uris) {
 async function listClients() {
   const [clients] = await pool.execute(
     `SELECT c.id, c.name, c.description, c.website_url, c.client_id, c.client_secret, c.redirect_uri,
-            c.require_pkce, c.client_type, c.party_type, c.status, c.owner_user_id,
+            c.require_pkce, c.client_type, c.party_type, c.ecosystem, c.status, c.owner_user_id,
             c.requested_scopes, c.approved_scopes, c.approved_at, c.approved_by, c.admin_review_note, c.created_at, c.updated_at,
             u.username AS owner_username,
             (SELECT COUNT(DISTINCT a.user_id) FROM authorizations a WHERE a.client_id = c.client_id) AS authorization_count,
@@ -143,7 +144,7 @@ async function listClients() {
 async function getClient(id) {
   const [rows] = await pool.execute(
     `SELECT id, name, description, website_url, client_id, client_secret, redirect_uri,
-            require_pkce, client_type, party_type, status, owner_user_id,
+            require_pkce, client_type, party_type, ecosystem, status, owner_user_id,
             requested_scopes, approved_scopes, approved_at, approved_by, admin_review_note, created_at, updated_at
      FROM clients WHERE id = ?`, [id],
   );
@@ -162,6 +163,8 @@ async function getClient(id) {
 
 async function createClient(data, actor) {
   const { name, require_pkce } = data;
+  const ecosystem = data.ecosystem === undefined ? 'mdtbbs' : data.ecosystem;
+  if (!isSupportedEcosystem(ecosystem)) throw new Error('无效的应用生态');
   const redirectUris = data.redirect_uris || [data.redirect_uri];
   for (const uri of redirectUris) {
     const validation = validateManagedRedirectUri(uri);
@@ -175,10 +178,10 @@ async function createClient(data, actor) {
   const clientNumericId = await transaction(async (conn) => {
     const [result] = await conn.execute(
       `INSERT INTO clients (name, client_id, client_secret, redirect_uri, require_pkce,
-        client_type, party_type, status, requested_scopes, approved_scopes)
-       VALUES (?, ?, ?, ?, ?, 'confidential', 'first_party', 'approved', ?, ?)`,
+        client_type, party_type, ecosystem, status, requested_scopes, approved_scopes)
+       VALUES (?, ?, ?, ?, ?, 'confidential', 'first_party', ?, 'approved', ?, ?)`,
       [name, clientId, hashClientSecret(clientSecret), redirectUri, require_pkce ? 1 : 0,
-        JSON.stringify(defaultScopes), JSON.stringify(defaultScopes)],
+        ecosystem, JSON.stringify(defaultScopes), JSON.stringify(defaultScopes)],
     );
     await syncRedirectUris(conn, result.insertId, redirectUris);
     return result.insertId;
@@ -190,6 +193,8 @@ async function createClient(data, actor) {
 
 async function updateClient(id, data, actor) {
   const { name, redirect_uri, redirect_uris, require_pkce } = data;
+  const ecosystem = data.ecosystem === undefined ? undefined : data.ecosystem;
+  if (ecosystem !== undefined && !isSupportedEcosystem(ecosystem)) throw new Error('无效的应用生态');
   const requestedScopes = data.scopes;
   if (requestedScopes !== undefined && (!Array.isArray(requestedScopes) || requestedScopes.length === 0
     || requestedScopes.some(scope => typeof scope !== 'string' || !VALID_SCOPES.includes(scope))
@@ -229,6 +234,7 @@ async function updateClient(id, data, actor) {
     const updates = [];
     const params = [];
     if (name !== undefined) { updates.push('name = ?'); params.push(name); }
+    if (ecosystem !== undefined) { updates.push('ecosystem = ?'); params.push(ecosystem); }
     if (require_pkce !== undefined) { updates.push('require_pkce = ?'); params.push(require_pkce ? 1 : 0); }
     if (requestedScopes !== undefined) {
       updates.push('requested_scopes = ?'); params.push(JSON.stringify(requestedScopes));
@@ -239,7 +245,7 @@ async function updateClient(id, data, actor) {
   });
   if (revokeUsers.length) await Promise.all(revokeUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, clientId)));
   await writeAdminAudit(actor.adminId, 'client.update', 'client', Number(id),
-    { name, redirect_uris: uris, require_pkce, scopes: requestedScopes, scopes_changed: scopesChanged, revoked_users: revokeUsers.length }, actor.ipAddress);
+    { name, redirect_uris: uris, require_pkce, ecosystem, scopes: requestedScopes, scopes_changed: scopesChanged, revoked_users: revokeUsers.length }, actor.ipAddress);
   return { updated: true, scopes_changed: scopesChanged, revoked_users: revokeUsers.length };
 }
 
@@ -304,7 +310,7 @@ async function revokeClientGrants(clientId, status) {
 async function listOwnerApplications(ownerUserId) {
   const [rows] = await pool.execute(
     `SELECT id, name, description, website_url, client_id, redirect_uri, require_pkce,
-            client_type, party_type, status, requested_scopes, approved_scopes,
+            client_type, party_type, ecosystem, status, requested_scopes, approved_scopes,
             approved_at, created_at, updated_at
      FROM clients WHERE owner_user_id = ? AND status <> 'deleted' ORDER BY updated_at DESC`, [ownerUserId],
   );
@@ -363,36 +369,32 @@ function validateApplication(data) {
     throw new Error('至少申请一个有效且不重复的 scope');
   }
   if (requestedScopes.some(scope => !VALID_SCOPES.includes(scope))) throw new Error('申请了无效的 scope');
-  return { name, description: description || null, websiteUrl, redirectUris: [...new Set(redirectUris)], requestedScopes };
+  const ecosystem = data.ecosystem === undefined ? 'mdtbbs' : data.ecosystem;
+  if (!isSupportedEcosystem(ecosystem)) throw new Error('Choose a supported developer ecosystem.');
+  return { name, description: description || null, websiteUrl, redirectUris: [...new Set(redirectUris)], requestedScopes, ecosystem };
 }
 
 async function createOwnerApplication(ownerUserId, data) {
-  await assertPhoneVerifiedDeveloper(ownerUserId);
   const value = validateApplication(data);
+  await assertDeveloperEligibility(ownerUserId, value.ecosystem);
   const clientId = generateShortToken();
   const id = await transaction(async (conn) => {
     const [result] = await conn.execute(
       `INSERT INTO clients (name, description, website_url, client_id, client_secret, redirect_uri,
-         require_pkce, client_type, party_type, status, owner_user_id, requested_scopes, approved_scopes, approved_at)
-       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', 'pending', ?, ?, '[]', NULL)`,
-      [value.name, value.description, value.websiteUrl, clientId, value.redirectUris[0], ownerUserId,
+         require_pkce, client_type, party_type, ecosystem, status, owner_user_id, requested_scopes, approved_scopes, approved_at)
+       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', ?, 'pending', ?, ?, '[]', NULL)`,
+      [value.name, value.description, value.websiteUrl, clientId, value.redirectUris[0], value.ecosystem, ownerUserId,
         JSON.stringify(value.requestedScopes)],
     );
     await syncRedirectUris(conn, result.insertId, value.redirectUris);
     return result.insertId;
   });
-  return { id, client_id: clientId, client_type: 'public', party_type: 'third_party', status: 'pending',
+  return { id, client_id: clientId, client_type: 'public', party_type: 'third_party', ecosystem: value.ecosystem, status: 'pending',
     approved_scopes: [], client_secret: null };
 }
 
 async function assertPhoneVerifiedDeveloper(ownerUserId) {
-  const [users] = await pool.execute('SELECT phone_verified FROM users WHERE id = ? LIMIT 1', [ownerUserId]);
-  if (!users[0] || !(users[0].phone_verified === 1 || users[0].phone_verified === true)) {
-    const error = new Error('请先完成手机号验证，再创建开发者应用');
-    error.code = 'PHONE_VERIFICATION_REQUIRED';
-    error.statusCode = 403;
-    throw error;
-  }
+  return assertDeveloperEligibility(ownerUserId, 'mdtbbs');
 }
 
 async function updateOwnerApplication(ownerUserId, id, data) {
@@ -402,22 +404,24 @@ async function updateOwnerApplication(ownerUserId, id, data) {
   let affectedUsers = [];
   let wasApproved = false;
   await transaction(async (conn) => {
-    const [rows] = await conn.execute(`SELECT id, client_id, status, client_type, party_type, requested_scopes
+    const [rows] = await conn.execute(`SELECT id, client_id, status, client_type, party_type, ecosystem, requested_scopes
       FROM clients WHERE id = ? AND owner_user_id = ? FOR UPDATE`, [id, ownerUserId]);
     const client = rows[0];
     if (!client) throw new Error('应用不存在');
     if (client.status === 'deleted') throw new Error('应用不存在');
     if (client.client_type !== 'public' || client.party_type !== 'third_party') throw new Error('只能修改自助创建的 Public Client');
+    const ecosystem = data.ecosystem === undefined ? normalizeEcosystem(client.ecosystem) : value.ecosystem;
+    await assertDeveloperEligibility(ownerUserId, ecosystem, conn);
     clientId = client.client_id;
     wasApproved = client.status === 'approved';
     const previousScopes = parseScopes(client.requested_scopes).sort();
     const nextScopes = [...value.requestedScopes].sort();
     scopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
     await conn.execute(
-      `UPDATE clients SET name = ?, description = ?, website_url = ?, requested_scopes = ?, approved_scopes = '[]',
+      `UPDATE clients SET name = ?, description = ?, website_url = ?, ecosystem = ?, requested_scopes = ?, approved_scopes = '[]',
          status = 'pending', approved_at = NULL, approved_by = NULL
        WHERE id = ?`,
-      [value.name, value.description, value.websiteUrl, JSON.stringify(value.requestedScopes), id],
+      [value.name, value.description, value.websiteUrl, ecosystem, JSON.stringify(value.requestedScopes), id],
     );
     await syncRedirectUris(conn, Number(id), value.redirectUris);
     if (wasApproved) {
@@ -438,6 +442,12 @@ async function updateOwnerApplication(ownerUserId, id, data) {
 }
 
 async function submitOwnerApplication(ownerUserId, id) {
+  const [rows] = await pool.execute(
+    `SELECT ecosystem FROM clients WHERE id = ? AND owner_user_id = ? AND client_type = 'public' AND party_type = 'third_party' LIMIT 1`,
+    [id, ownerUserId],
+  );
+  if (!rows[0]) throw new Error('应用不存在');
+  await assertDeveloperEligibility(ownerUserId, normalizeEcosystem(rows[0].ecosystem));
   const [result] = await pool.execute(
     `UPDATE clients SET status = 'pending', approved_scopes = '[]',
        approved_at = NULL, approved_by = NULL, updated_at = CURRENT_TIMESTAMP
@@ -507,6 +517,7 @@ function publicApplicationView(row) {
     website_url: row.website_url || null,
     client_type: row.client_type,
     party_type: row.party_type,
+    ecosystem: normalizeEcosystem(row.ecosystem),
     official: row.party_type === 'first_party',
     developer_name: row.developer_name || null,
     developer_url: row.owner_user_id ? forumProfileUrl(row.owner_user_id) : null,

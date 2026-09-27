@@ -4,6 +4,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import api, { ApiError } from '@/api/client';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 type ScopeInfo = { name: string; description: string; sensitive?: boolean };
 type ConsentInfo = {
@@ -26,6 +27,7 @@ const SCOPE_ICONS: Record<string, string> = {
 };
 
 export function OAuthAuthorizePage() {
+  const { t } = useI18n();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -37,6 +39,7 @@ export function OAuthAuthorizePage() {
     response_type: params.get('response_type') || 'code',
     code_challenge: params.get('code_challenge') || '',
     code_challenge_method: params.get('code_challenge_method') || '',
+    ui_locales: params.get('ui_locales') || '',
   }), [params]);
   const query = useMemo(() => {
     const value = new URLSearchParams();
@@ -93,7 +96,7 @@ export function OAuthAuthorizePage() {
   const initials = Array.from(consent?.client.name?.trim() || 'A')[0].toUpperCase();
 
   return (
-    <AuthShell title="确认应用授权" description="请确认应用的身份和它申请的权限。">
+    <AuthShell title={t('oauth.title')} description={t('oauth.description')}>
       {error ? <div className="status-badge status-badge--danger" role="alert">{error}</div> : null}
       {!consent ? <p className="section-description">正在验证授权请求…</p> : (
         <div className="stack oauth-consent">

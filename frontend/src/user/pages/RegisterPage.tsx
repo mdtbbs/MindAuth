@@ -7,6 +7,7 @@ import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
 import type { SendRegistrationCodeResponse } from '@/api/types';
+import { useI18n } from '@/i18n/I18nProvider';
 
 interface ChallengeQuestion {
   challenge_id: string | number;
@@ -51,6 +52,7 @@ const STRENGTH_LABELS = ['太弱', '较弱', '一般', '较强', '很强'];
 const SEND_COOLDOWN_SECONDS = 60;
 
 export function RegisterPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { user, login } = useAuth();
@@ -59,10 +61,12 @@ export function RegisterPage() {
   const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
+  const ecosystem = params.get('ecosystem') || '';
   const stateParam = params.get('state') || '';
   const scope = params.get('scope') || '';
   const codeChallenge = params.get('code_challenge') || '';
   const codeChallengeMethod = params.get('code_challenge_method') || '';
+  const uiLocales = params.get('ui_locales') || '';
   const errorParam = params.get('error') || '';
   const messageParam = params.get('message') || '';
   const isOAuthFlow = Boolean(clientId && redirectUri);
@@ -71,10 +75,12 @@ export function RegisterPage() {
     client_id: clientId,
     redirect_uri: redirectUri,
     ...(clientName && { client_name: clientName }),
+    ...(ecosystem && { ecosystem }),
     ...(stateParam && { state: stateParam }),
     ...(scope && { scope }),
     ...(codeChallenge && { code_challenge: codeChallenge }),
     ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+    ...(uiLocales && { ui_locales: uiLocales }),
   });
   const qqRegisterHref = `/api/auth/qq?${qqRegisterParams.toString()}`;
 
@@ -252,6 +258,7 @@ export function RegisterPage() {
               ...(scope && { scope }),
               ...(codeChallenge && { code_challenge: codeChallenge }),
               ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+              ...(uiLocales && { ui_locales: uiLocales }),
             });
             window.location.href = `/api/authorize?${oauthParams.toString()}`;
           } else {
@@ -284,14 +291,14 @@ export function RegisterPage() {
 
   return (
     <AuthShell
-      title={clientId && clientName ? `注册 ${clientName}` : '创建 MindAuth 账户'}
+      title={t('auth.register')}
       description={clientId && clientName
-        ? `创建账户后将继续跳转到 ${clientName} 完成授权。`
-        : '注册后即可统一管理账户资料、会话状态和授权应用。'}
+        ? t('auth.continue', { client: clientName })
+        : t('auth.directDescription')}
       footer={
         <div className="stack" style={{ alignItems: 'center', gap: 'var(--space-2)' }}>
           <Link to="/login" className="inline-link">
-            已有账号？登录
+            {t('auth.haveAccount')} {t('auth.login')}
           </Link>
           {isOAuthFlow ? (
             <>

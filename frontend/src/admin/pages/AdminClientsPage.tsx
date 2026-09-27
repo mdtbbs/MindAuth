@@ -37,6 +37,7 @@ export function AdminClientsPage() {
   const [name, setName] = useState('');
   const [redirectUri, setRedirectUri] = useState('');
   const [requirePkce, setRequirePkce] = useState(false);
+  const [ecosystem, setEcosystem] = useState<'mdtbbs' | 'mindustry-club' | 'global'>('mdtbbs');
   const [scopes, setScopes] = useState<string[]>([]);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
@@ -87,6 +88,7 @@ export function AdminClientsPage() {
     setName('');
     setRedirectUri('');
     setRequirePkce(false);
+    setEcosystem('mdtbbs');
     setFormError('');
   }
 
@@ -109,6 +111,7 @@ export function AdminClientsPage() {
         redirect_uri: redirectUriValues()[0],
         redirect_uris: redirectUriValues(),
         require_pkce: requirePkce,
+        ecosystem,
       });
       setSecretDialogTitle('客户端创建成功');
       setCreatedSecret(res);
@@ -144,6 +147,7 @@ export function AdminClientsPage() {
         redirect_uris: redirectUriValues(),
         require_pkce: requirePkce,
         scopes,
+        ecosystem,
       });
       setEditClient(null);
       resetForm();
@@ -219,6 +223,7 @@ export function AdminClientsPage() {
     setName(client.name);
     setRedirectUri((client.redirect_uris || [{ redirect_uri: client.redirect_uri }]).map(item => item.redirect_uri).join('\n'));
     setRequirePkce(client.require_pkce ?? false);
+    setEcosystem(client.ecosystem || 'mdtbbs');
     setScopes([...(client.status === 'approved' ? client.approved_scopes : client.requested_scopes)]);
     setFormError('');
   }
@@ -268,9 +273,9 @@ export function AdminClientsPage() {
                 ),
               },
               {
-                header: '应用类型 / 状态',
+                header: '生态 / 应用类型 / 状态',
                 accessor: 'client_type',
-                render: (c) => <span>{c.client_type === 'public' ? 'Public Client' : 'Confidential Client'} · {c.party_type === 'first_party' ? '第一方' : '第三方'} · {({ pending: '待审核', approved: '已启用', suspended: '已停用', rejected: '已拒绝', draft: '草稿' } as Record<string, string>)[c.status] || c.status}</span>,
+                render: (c) => <span>{({ mdtbbs: 'MDTBBS', 'mindustry-club': 'Mindustry Club', global: 'Global' } as Record<string, string>)[c.ecosystem] || 'MDTBBS'} · {c.client_type === 'public' ? 'Public Client' : 'Confidential Client'} · {c.party_type === 'first_party' ? '第一方' : '第三方'} · {({ pending: '待审核', approved: '已启用', suspended: '已停用', rejected: '已拒绝', draft: '草稿' } as Record<string, string>)[c.status] || c.status}</span>,
               },
               {
                 header: 'Scope',
@@ -337,6 +342,7 @@ export function AdminClientsPage() {
         }
       >
         <div className="stack">
+          <label className="field"><span className="field__label">所属生态</span><select className="field__input" value={ecosystem} onChange={event => setEcosystem(event.target.value as typeof ecosystem)}><option value="mdtbbs">MDTBBS</option><option value="mindustry-club">Mindustry Club</option><option value="global">Global</option></select></label>
           <TextField
             label="客户端名称"
             value={name}
@@ -380,6 +386,7 @@ export function AdminClientsPage() {
         }
       >
         <div className="stack">
+          <label className="field"><span className="field__label">所属生态</span><select className="field__input" value={ecosystem} onChange={event => setEcosystem(event.target.value as typeof ecosystem)}><option value="mdtbbs">MDTBBS</option><option value="mindustry-club">Mindustry Club</option><option value="global">Global</option></select></label>
           <TextField
             label="客户端名称"
             value={name}

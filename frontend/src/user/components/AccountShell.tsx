@@ -3,24 +3,25 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { LoadingState } from '@/shared/LoadingState';
+import { LocaleSwitcher, useI18n } from '@/i18n/I18nProvider';
 
-type AccountNavItem = { label: string; href: string };
-type AccountNavGroup = { label?: string; items: AccountNavItem[] };
+type AccountNavItem = { key: string; href: string };
+type AccountNavGroup = { labelKey?: string; items: AccountNavItem[] };
 
 const NAV_GROUPS: AccountNavGroup[] = [
-  { items: [{ label: '概览', href: '/dashboard' }] },
-  { label: '账户', items: [{ label: '个人资料', href: '/profile' }] },
+  { items: [{ key: 'nav.dashboard', href: '/dashboard' }] },
+  { labelKey: 'nav.account', items: [{ key: 'nav.profile', href: '/profile' }] },
   {
-    label: '安全',
+    labelKey: 'nav.securityGroup',
     items: [
-      { label: '登录与安全', href: '/security' },
-      { label: '登录设备', href: '/sessions' },
-      { label: '登录记录', href: '/activity' },
+      { key: 'nav.security', href: '/security' },
+      { key: 'nav.sessions', href: '/sessions' },
+      { key: 'nav.activity', href: '/activity' },
     ],
   },
-  { label: '应用', items: [{ label: '授权应用', href: '/authorizations' }] },
-  { label: '消息', items: [{ label: '通知', href: '/notifications' }] },
-  { label: '开发', items: [{ label: '应用管理', href: '/developer' }] },
+  { labelKey: 'nav.apps', items: [{ key: 'nav.authorizations', href: '/authorizations' }] },
+  { labelKey: 'nav.messagesGroup', items: [{ key: 'nav.notifications', href: '/notifications' }] },
+  { labelKey: 'nav.developer', items: [{ key: 'nav.developerApps', href: '/developer' }] },
 ];
 
 interface AccountShellProps {
@@ -34,6 +35,7 @@ function getInitial(name: string) {
 }
 
 export function AccountShell({ title, description, children }: AccountShellProps) {
+  const { t } = useI18n();
   const { user, loading, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -93,10 +95,10 @@ export function AccountShell({ title, description, children }: AccountShellProps
 
   function renderNavigation(onNavigate?: () => void) {
     return (
-      <nav className="account-nav" aria-label="账户导航">
+      <nav className="account-nav" aria-label={t('nav.account')}>
         {NAV_GROUPS.map((group, groupIndex) => (
-          <div className="account-nav__group" key={group.label ?? `group-${groupIndex}`}>
-            {group.label ? <div className="account-nav__heading">{group.label}</div> : null}
+          <div className="account-nav__group" key={group.labelKey ?? `group-${groupIndex}`}>
+            {group.labelKey ? <div className="account-nav__heading">{t(group.labelKey)}</div> : null}
             {group.items.map((item) => (
               <Link
                 key={item.href}
@@ -105,7 +107,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
                 aria-current={pathname === item.href ? 'page' : undefined}
                 onClick={onNavigate}
               >
-                {item.label}
+                {t(item.key)}
               </Link>
             ))}
           </div>
@@ -136,6 +138,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
             <span className="account-brand__section">用户中心</span>
           </Link>
           <div className="account-header-actions">
+            <LocaleSwitcher />
             <a className="account-help-link" href="/docs.html">帮助</a>
             {user ? (
               <details className="account-user-menu">

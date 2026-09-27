@@ -7,6 +7,8 @@ OAuth 2.0 SSO 认证服务，为 Mindustry 社区应用提供统一登录。
 - 用户注册/登录（邮箱 + 密码）、注册强制邮箱验证码、邮箱验证、密码重置
 - 手机短信验证（阿里云 SMS）、挑战问题验证
 - OAuth 2.0 授权码模式（支持 PKCE S256）+ OIDC Discovery（`/.well-known/openid-configuration`）
+- OAuth client developer ecosystem policy (`mdtbbs`, `mindustry-club`, `global`) and `ui_locales` continuity through sign-in and consent
+- User language preference (`zh-CN`, `en`, `ru`, `ja`) with browser locale fallback
 - MDTBBS 官方 Mindustry Mod 原生登录（标准 Bearer access token、设备会话与 refresh rotation）
 - 社区账号管理后台（用户详情、管理员、会话与授权、风控、邮箱策略、IP 规则、开发者应用审核、日志与配置）
 - 统一邮箱域名策略（exact/suffix、deny/allow、白名单模式），覆盖 Web、Native、邮箱变更与验证流程
@@ -73,6 +75,10 @@ Public Client 桌面/移动接入见 [Public Client PKCE 指南](docs/public-cli
 | [CLAUDE.md](CLAUDE.md) | AI 编码助手上下文（英文） |
 
 生产部署（反向代理与可信代理配置是最易错点）见 [docs/operations/deployment.md](docs/operations/deployment.md)；环境变量全表见 [docs/operations/configuration.md](docs/operations/configuration.md)。
+
+### Mindustry Club OAuth client
+
+Create a separate OAuth Client for `mindustry.club`, register `https://mindustry.club/api/auth/callback`, and set its ecosystem to `mindustry-club` in the admin client editor. Keep the existing MDTBBS Client assigned to `mdtbbs`. Public developer applications choose an ecosystem when created; all require a verified email, while only `mdtbbs` requires a verified phone. Migration `018_international_locales_and_ecosystems.sql` adds user language preferences and client ecosystem values, defaulting existing clients to `mdtbbs`.
 
 ## 技术栈
 

@@ -83,9 +83,9 @@ test('validates a self-service public application and rejects scope/redirect esc
 test('requires a verified phone number before a user can create an application', async () => {
   const originalExecute = pool.execute;
   try {
-    pool.execute = async () => [[{ phone_verified: 0 }]];
+    pool.execute = async () => [[{ email_verified: 1, phone_verified: 0 }]];
     await assert.rejects(assertPhoneVerifiedDeveloper(42), { code: 'PHONE_VERIFICATION_REQUIRED', statusCode: 403 });
-    pool.execute = async () => [[{ phone_verified: 1 }]];
+    pool.execute = async () => [[{ email_verified: 1, phone_verified: 1 }]];
     await assert.doesNotReject(assertPhoneVerifiedDeveloper(42));
   } finally {
     pool.execute = originalExecute;
@@ -108,7 +108,7 @@ test('creates verified users Public Clients as pending, secretless PKCE applicat
     },
   };
   try {
-    pool.execute = async () => [[{ phone_verified: 1 }]];
+    pool.execute = async () => [[{ email_verified: 1, phone_verified: 1 }]];
     pool.getConnection = async () => connection;
     const body = {
       name: 'MDT Launcher', description: 'Community launcher', website_url: null,
@@ -119,7 +119,7 @@ test('creates verified users Public Clients as pending, secretless PKCE applicat
     const second = await createOwnerApplication(9, body);
 
     assert.equal(inserts.length, 2, 'the self-service flow does not impose an application count cap');
-    assert.match(inserts[0].sql, /client_secret, redirect_uri[\s\S]*VALUES \(\?, \?, \?, \?, NULL, \?, 1, 'public', 'third_party', 'pending'/);
+    assert.match(inserts[0].sql, /client_secret, redirect_uri[\s\S]*VALUES \(\?, \?, \?, \?, NULL, \?, 1, 'public', 'third_party', \?, 'pending'/);
     assert.deepEqual(inserts[0].params.slice(-2), [9, '["profile","forum.read"]']);
     for (const application of [first, second]) {
       assert.equal(application.status, 'pending');
@@ -130,6 +130,21 @@ test('creates verified users Public Clients as pending, secretless PKCE applicat
   } finally {
     pool.execute = originalExecute;
     pool.getConnection = originalGetConnection;
+  }
+});
+
+test('international developer policy requires verified email but allows no phone', async () => {
+  const { assertDeveloperEligibility } = require('../../src/modules/developer/DeveloperPolicy');
+  const originalExecute = pool.execute;
+  try {
+    pool.execute = async () => [[{ email_verified: 1, phone_verified: 0 }]];
+    await assert.doesNotReject(assertDeveloperEligibility(42, 'mindustry-club'));
+    await assert.doesNotReject(assertDeveloperEligibility(42, 'global'));
+    await assert.rejects(assertDeveloperEligibility(42, 'mdtbbs'), { code: 'PHONE_VERIFICATION_REQUIRED', statusCode: 403 });
+    pool.execute = async () => [[{ email_verified: 0, phone_verified: 0 }]];
+    await assert.rejects(assertDeveloperEligibility(42, 'mindustry-club'), { code: 'EMAIL_VERIFICATION_REQUIRED', statusCode: 403 });
+  } finally {
+    pool.execute = originalExecute;
   }
 });
 
@@ -183,6 +198,7 @@ test('updates app details, redirects, and scopes immediately, then revokes token
     beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}, release: () => {},
     execute: async (sql, params = []) => {
       mutations.push({ sql, params });
+      if (sql.includes('SELECT email_verified, phone_verified FROM users')) return [[{ email_verified: 1, phone_verified: 1 }]];
       if (sql.includes('FROM clients WHERE id = ? AND owner_user_id = ? FOR UPDATE')) {
         return [[{ id: 15, client_id: 'stable-client-id', status: 'approved', client_type: 'public',
           party_type: 'third_party', requested_scopes: '["profile","forum.read"]' }]];
@@ -202,8 +218,8 @@ test('updates app details, redirects, and scopes immediately, then revokes token
     }), { updated: true, status: 'pending', re_review_required: true, scopes_changed: true });
 
     assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?')
-      && params[0] === 'New Launcher' && params[3] === '["profile","forum.write"]'));
-    assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?') && sql.includes("status = 'pending'") && params[3] === '["profile","forum.write"]'));
+      && params[0] === 'New Launcher' && params[4] === '["profile","forum.write"]'));
+    assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?') && sql.includes("status = 'pending'") && params[4] === '["profile","forum.write"]'));
     assert.ok(mutations.some(({ sql, params }) => sql.startsWith('INSERT INTO oauth_client_redirect_uris')
       && params[1] === 'http://localhost:0/oauth/callback'));
     assert.ok(mutations.some(({ sql }) => sql.startsWith('UPDATE refresh_tokens SET revoked = 1')));

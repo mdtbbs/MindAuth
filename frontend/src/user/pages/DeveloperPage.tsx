@@ -6,6 +6,7 @@ import { AccountLoadState, AccountSection } from '@/user/components/AccountPageP
 import { AccountShell } from '@/user/components/AccountShell';
 import { Button } from '@/shared/Button';
 import { TextField } from '@/shared/TextField';
+import { useI18n } from '@/i18n/I18nProvider';
 
 const SCOPE_OPTIONS = [
   ['profile', '查看基本资料', '允许应用查看你的用户名、头像等基本账户信息。'],
@@ -24,7 +25,7 @@ const SCOPE_OPTIONS = [
 type AppStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'suspended' | 'deleted';
 type DeveloperApplication = {
   id: number; client_id: string; name: string; description: string | null; website_url: string | null;
-  status: AppStatus; client_type: string; party_type: string;
+  status: AppStatus; client_type: string; party_type: string; ecosystem: 'mdtbbs' | 'mindustry-club' | 'global';
   requested_scopes: string[]; approved_scopes: string[]; redirect_uris: { redirect_uri: string }[];
   usage?: { authorization_count: number; last_used_at: string | null; requests_30d?: number;
     recent_errors?: { metric_date: string; error_count: number; last_error_at: string; last_error_code: string }[] };
@@ -47,6 +48,7 @@ function statusLabel(status: AppStatus) {
 
 export function DeveloperPage() {
   const { user } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { id: routeId } = useParams();
   const [applications, setApplications] = useState<DeveloperApplication[]>([]);
@@ -60,6 +62,9 @@ export function DeveloperPage() {
   const [website, setWebsite] = useState('');
   const [redirectUris, setRedirectUris] = useState('');
   const [scopes, setScopes] = useState<string[]>(['profile', 'forum.read']);
+  const [ecosystem, setEcosystem] = useState<'mdtbbs' | 'mindustry-club' | 'global'>('mdtbbs');
+  const phoneRequired = ecosystem === 'mdtbbs';
+  const eligibilityError = !user?.email_verified ? t('error.emailVerification') : phoneRequired && !user.phone_verified ? t('error.phoneVerification') : '';
 
   const selected = useMemo(() => applications.find(application => String(application.id) === routeId) || null, [applications, routeId]);
   const isCreate = routeId === 'new';
@@ -80,9 +85,10 @@ export function DeveloperPage() {
     if (selected) {
       setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || '');
       setRedirectUris(selected.redirect_uris.map(item => item.redirect_uri).join('\n'));
-      setScopes(selected.requested_scopes); setEditing(false); setTab('overview'); setFormError('');
+      setScopes(selected.requested_scopes); setEcosystem(selected.ecosystem || 'mdtbbs'); setEditing(false); setTab('overview'); setFormError('');
     } else if (isCreate) {
       setName(''); setDescription(''); setWebsite(''); setRedirectUris(''); setScopes(['profile', 'forum.read']);
+      setEcosystem('mdtbbs');
       setEditing(true); setTab('overview');
     }
   }, [selected, isCreate]);
@@ -93,8 +99,8 @@ export function DeveloperPage() {
     const normalizedDescription = description.trim();
     const normalizedRedirectUris = redirectUris.split('\n').map(item => item.trim()).filter(Boolean);
 
-    if (!selected && user && !user.phone_verified) {
-      setFormError('创建开发者应用前需要先完成手机号验证。');
+    if (eligibilityError) {
+      setFormError(eligibilityError);
       return;
     }
     if (!normalizedName) {
@@ -117,7 +123,7 @@ export function DeveloperPage() {
     setSaving(true);
     const body = {
       name: normalizedName, description: normalizedDescription, website_url: website.trim() || null,
-      redirect_uris: normalizedRedirectUris, requested_scopes: scopes,
+      redirect_uris: normalizedRedirectUris, requested_scopes: scopes, ecosystem,
     };
     try {
       if (selected) {
@@ -157,8 +163,8 @@ export function DeveloperPage() {
 
       {isCreate ? (
         <AccountSection title="申请 Public Client" description="提交后会进入管理员审核。批准后应用即可使用 Authorization Code + PKCE。Public Client 不会生成 client_secret。">
-          {user && !user.phone_verified ? <div className="developer-create-gate" role="alert"><strong>还差一步</strong><p>创建应用需要先完成手机号验证。验证完成后回到这里即可直接提交。</p><Link className="btn btn--secondary" to="/security">前往登录与安全</Link></div> : null}
-          <ApplicationForm name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(user && !user.phone_verified)} saveLabel="创建应用" />
+          {eligibilityError ? <div className="developer-create-gate" role="alert"><strong>{ecosystem === 'mdtbbs' ? 'MDTBBS ecosystem' : 'Developer eligibility'}</strong><p>{eligibilityError}</p>{ecosystem === 'mdtbbs' && !user?.phone_verified ? <Link className="btn btn--secondary" to="/security">前往登录与安全</Link> : null}</div> : null}
+          <ApplicationForm ecosystem={ecosystem} setEcosystem={setEcosystem} name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(eligibilityError)} saveLabel="创建应用" />
         </AccountSection>
       ) : null}
 
@@ -168,8 +174,8 @@ export function DeveloperPage() {
         {tab !== 'usage' ? <AccountSection title={tab === 'overview' ? '应用概览' : tab === 'oauth' ? 'OAuth 配置' : 'API 权限'} description={tab === 'oauth' ? 'Public Client 必须使用 Authorization Code + PKCE S256。' : undefined}>
           {tab === 'overview' ? <>
             <div className="stack"><p><strong>Client ID：</strong><code>{selected.client_id}</code></p><p><strong>类型：</strong>{appLabel(selected)} · Public Client</p><p><strong>公开应用页：</strong><Link to={appPageUrl}>{window.location.origin}{appPageUrl}</Link></p>
-              {editing ? <><TextField label="应用名称" value={name} onChange={event => setName(event.target.value)} maxLength={120} /><label className="field"><span className="field__label">应用简介</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label><TextField label="项目主页（HTTPS；本地开发可用 localhost）" value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" /></> : <><p>{selected.description || '暂无应用简介。'}</p><p><strong>项目主页：</strong>{selected.website_url || '未设置'}</p></>}
-              <div className="cluster">{editing ? <><Button type="button" disabled={saving} onClick={() => void saveApplication()}>{saving ? '保存中…' : '保存修改'}</Button><Button type="button" variant="secondary" onClick={() => { setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || ''); setEditing(false); }}>取消</Button></> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>编辑信息</Button>}</div>
+              {editing ? <><EcosystemField value={ecosystem} onChange={setEcosystem} /><TextField label="应用名称" value={name} onChange={event => setName(event.target.value)} maxLength={120} /><label className="field"><span className="field__label">应用简介</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label><TextField label="项目主页（HTTPS；本地开发可用 localhost）" value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" /></> : <><p>{selected.description || '暂无应用简介。'}</p><p><strong>所属生态：</strong>{selected.ecosystem}</p><p><strong>项目主页：</strong>{selected.website_url || '未设置'}</p></>}
+              <div className="cluster">{editing ? <><Button type="button" disabled={saving || Boolean(eligibilityError)} onClick={() => void saveApplication()}>{saving ? '保存中…' : '保存修改'}</Button><Button type="button" variant="secondary" onClick={() => { setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || ''); setEcosystem(selected.ecosystem); setEditing(false); }}>取消</Button></> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>编辑信息</Button>}</div>
               <div className="developer-danger-zone"><h3>删除应用</h3><p>删除会立即撤销全部授权和令牌，Client ID 无法恢复或复用。</p><Button type="button" variant="danger" disabled={saving} onClick={() => void deleteApplication()}>删除应用</Button></div>
             </div>
           </> : null}
@@ -191,15 +197,17 @@ export function DeveloperPage() {
 }
 
 function ApplicationForm({
-  name, setName, description, setDescription, website, setWebsite, redirectUris, setRedirectUris,
+  ecosystem, setEcosystem, name, setName, description, setDescription, website, setWebsite, redirectUris, setRedirectUris,
   scopes, setScopes, onSave, onCancel, saving, saveDisabled = false, saveLabel,
 }: {
+  ecosystem: 'mdtbbs' | 'mindustry-club' | 'global'; setEcosystem: (value: 'mdtbbs' | 'mindustry-club' | 'global') => void;
   name: string; setName: (value: string) => void; description: string; setDescription: (value: string) => void;
   website: string; setWebsite: (value: string) => void; redirectUris: string; setRedirectUris: (value: string) => void;
   scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>>;
   onSave: () => void; onCancel: () => void; saving: boolean; saveDisabled?: boolean; saveLabel: string;
 }) {
   return <div className="stack">
+    <EcosystemField value={ecosystem} onChange={setEcosystem} />
     <TextField label="应用名称" value={name} onChange={event => setName(event.target.value)} maxLength={120} />
     <label className="field"><span className="field__label">应用简介</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} placeholder="说明应用的用途，用户会在授权页看到。" /></label>
     <TextField label="项目主页（可选）" value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" />
@@ -207,4 +215,8 @@ function ApplicationForm({
     <fieldset className="stack developer-scope-options"><legend className="field__label">API 权限</legend>{SCOPE_OPTIONS.map(([scope, label, help]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{label}</strong>{scope === 'message.read' || scope === 'message.write' ? <span className="public-scope-sensitive">敏感权限</span> : null}<small>{scope} · {help}</small></span></label>)}</fieldset>
     <div className="cluster"><Button type="button" disabled={saving || saveDisabled} onClick={onSave}>{saving ? '处理中…' : saveLabel}</Button><Button type="button" variant="secondary" onClick={onCancel}>取消</Button></div>
   </div>;
+}
+
+function EcosystemField({ value, onChange }: { value: 'mdtbbs' | 'mindustry-club' | 'global'; onChange: (value: 'mdtbbs' | 'mindustry-club' | 'global') => void }) {
+  return <label className="field"><span className="field__label">所属生态</span><select className="field__input" value={value} onChange={event => onChange(event.target.value as typeof value)}><option value="mdtbbs">MDTBBS · email + phone</option><option value="mindustry-club">Mindustry Club · email</option><option value="global">Global · email</option></select><span className="field__hint">生态决定开发者资格审核规则，不会按 IP 自动判断。</span></label>;
 }
