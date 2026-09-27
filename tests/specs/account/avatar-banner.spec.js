@@ -157,7 +157,14 @@ test.describe.serial('头像功能', () => {
       buffer: Buffer.from('This is not an image')
     });
 
-    await expect(toastWith(page, '只支持 JPEG、PNG、GIF、WebP 格式的图片')).toBeVisible({ timeout: 5000 });
+    // The UI maps server validation details to its localized fallback message.
+    await expect(toastWith(page, '上传失败')).toBeVisible({ timeout: 5000 });
+    const result = await apiUpload(page, '/api/account/avatar', {
+      name: 'invalid.txt', mimeType: 'text/plain', buffer: Buffer.from('This is not an image'),
+    });
+    expect(result.status).toBe(400);
+    expect(result.body.success).toBe(false);
+    expect(result.body.message).toContain('只支持 JPEG、PNG、GIF、WebP 格式的图片');
   });
 
   test('头像删除成功', async ({ page }) => {
@@ -249,7 +256,13 @@ test.describe.serial('横幅功能', () => {
       buffer: Buffer.from('This is not an image')
     });
 
-    await expect(toastWith(page, '只支持 JPEG、PNG、GIF、WebP 格式的图片')).toBeVisible({ timeout: 5000 });
+    await expect(toastWith(page, '上传失败')).toBeVisible({ timeout: 5000 });
+    const result = await apiUpload(page, '/api/account/banner', {
+      name: 'invalid.txt', mimeType: 'text/plain', buffer: Buffer.from('This is not an image'),
+    });
+    expect(result.status).toBe(400);
+    expect(result.body.success).toBe(false);
+    expect(result.body.message).toContain('只支持 JPEG、PNG、GIF、WebP 格式的图片');
   });
 
   test('横幅删除成功', async ({ page }) => {

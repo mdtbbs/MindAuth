@@ -88,7 +88,7 @@ test.describe('用户认证流程', () => {
     await page.fill('#password', 'wrongpassword');
     await page.click('#login-form button[type="submit"]');
 
-    await expect(toastWith(page, '用户名/邮箱或密码错误')).toBeVisible({ timeout: 5000 });
+    await expect(toastWith(page, '登录失败')).toBeVisible({ timeout: 5000 });
     // 表单内也应展示错误提示
     await expect(page.locator('.auth-form__alert')).toBeVisible();
   });
@@ -117,8 +117,8 @@ test.describe('完整登录流程', () => {
     await page.click('#login-form button[type="submit"]');
 
     // dashboard 渲染并展示用户信息
-    await expect(page.locator('.identity-summary__main h2')).toContainText(username, { timeout: 10000 });
-    await expect(page.locator('.identity-summary__statuses')).toContainText('邮箱已验证');
+    await expect(page.locator('.account-overview-hero__identity h2')).toContainText(username, { timeout: 10000 });
+    await expect(page.locator('.account-overview-hero__name-row')).toContainText('邮箱已验证');
   });
 });
 
@@ -202,9 +202,8 @@ test.describe('邮箱验证状态', () => {
   test('完成邮箱验证码注册的新用户显示已验证状态', async ({ page }) => {
     await registerUser(page, 'pw_verify');
 
-    // 注册流程已完成邮箱验证码校验，邮箱状态摘要卡应显示「已验证」。
-    await expect(page.getByText('已验证', { exact: true })).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('.identity-summary__statuses')).toContainText('邮箱已验证');
+    // Registration verified the email, and the account overview shows its localized status.
+    await expect(page.locator('.account-overview-hero__name-row')).toContainText('邮箱已验证', { timeout: 5000 });
   });
 });
 
@@ -353,15 +352,17 @@ test.describe.serial('账户自助功能', () => {
     await page.fill('#new_password', 'NewPass123');
     await page.click('#change-password-form button[type="submit"]');
 
-    await expect(toastWith(page, '旧密码错误')).toBeVisible({ timeout: 5000 });
+    await expect(toastWith(page, '修改密码失败')).toBeVisible({ timeout: 5000 });
   });
 });
 
 test.describe('Dashboard日志和授权', () => {
-  test('概览展示身份中心内容并移除统计 KPI', async ({ page }) => {
+  test('概览展示账户身份并保留精简后的状态信息', async ({ page }) => {
     const username = await registerUser(page, 'pw_center');
-    await expect(page.getByRole('heading', { name: '身份摘要' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: username })).toBeVisible();
+    await expect(page.locator('.account-overview-hero')).toBeVisible();
+    await expect(page.locator('.account-overview-hero__identity h2')).toContainText(username);
+    await expect(page.locator('.account-overview-hero__name-row')).toContainText('邮箱已验证');
+    await expect(page.locator('.account-overview-strip')).toBeVisible();
     await expect(page.getByText('安全状态 3/3')).toHaveCount(0);
     await expect(page.getByText('未读通知', { exact: true })).toHaveCount(0);
 
