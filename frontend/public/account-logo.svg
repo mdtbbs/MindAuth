@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="blueTopL" x1="38" y1="62" x2="126" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F80F7"/><stop offset="1" stop-color="#0E4FAE"/>
+    </linearGradient>
+    <linearGradient id="blueTopR" x1="128" y1="42" x2="218" y2="91" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B3F8E"/><stop offset="1" stop-color="#1872E6"/>
+    </linearGradient>
+    <linearGradient id="blueLeft" x1="32" y1="98" x2="111" y2="202" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0D55C8"/><stop offset="1" stop-color="#082E69"/>
+    </linearGradient>
+    <linearGradient id="blueRight" x1="224" y1="92" x2="152" y2="202" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2C85FA"/><stop offset="1" stop-color="#0B4FB4"/>
+    </linearGradient>
+    <linearGradient id="blueFront" x1="97" y1="165" x2="169" y2="224" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A3F8E"/><stop offset="1" stop-color="#2477EA"/>
+    </linearGradient>
+    <linearGradient id="orangeTop" x1="101" y1="108" x2="157" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD078"/><stop offset="1" stop-color="#FFAD43"/>
+    </linearGradient>
+    <linearGradient id="orangeLeft" x1="101" y1="128" x2="129" y2="173" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF9A3D"/><stop offset="1" stop-color="#FF6B22"/>
+    </linearGradient>
+    <linearGradient id="orangeRight" x1="129" y1="128" x2="157" y2="173" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB449"/><stop offset="1" stop-color="#FF8C2A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- upper blue frame -->
+  <path d="M25 73 105 27l24 14-80 46-24-14Z" fill="url(#blueTopL)"/>
+  <path d="m129 41 24-14 78 45-24 14-78-45Z" fill="url(#blueTopR)"/>
+
+  <!-- left M-like wall -->
+  <path d="M25 88 50 102v57l34 20v-53l24 14v81l-24 14-59-34V88Z" fill="url(#blueLeft)"/>
+  <!-- right M-like wall -->
+  <path d="m231 87-24 14v58l-35 20v-53l-24 14v81l24 14 59-34V87Z" fill="url(#blueRight)"/>
+
+  <!-- front lower face -->
+  <path d="m84 179 44 25 44-25v42l-44 25-44-25v-42Z" fill="url(#blueFront)"/>
+
+  <!-- center orange cube -->
+  <path d="m128 91 31 18-31 18-31-18 31-18Z" fill="url(#orangeTop)"/>
+  <path d="m97 109 31 18v37l-31-18v-37Z" fill="url(#orangeLeft)"/>
+  <path d="m159 109-31 18v37l31-18v-37Z" fill="url(#orangeRight)"/>
+
+  <!-- subtle highlights -->
+  <path d="m50 102 58-34" stroke="#6EAEFF" stroke-opacity=".45" stroke-width="2"/>
+  <path d="m207 101-59 34" stroke="#7AB8FF" stroke-opacity=".32" stroke-width="2"/>
+</svg>
