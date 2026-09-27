@@ -46,11 +46,11 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
     <div className="auth-shell">
       <header className="auth-shell__header">
         <div className="auth-shell__header-inner">
-          <Link to="/login" className="auth-brand">
-            <span className="brand-mark__logo">M</span>
+          <Link to="/login" className="auth-brand" aria-label="MDTBBS 用户中心">
+            <img className="brand-mark__image" src="/account-logo.svg" alt="" aria-hidden="true" />
             <span className="auth-brand__name">MDTBBS</span>
             <span className="auth-brand__divider" aria-hidden="true" />
-            <span className="auth-brand__section">账号中心</span>
+            <span className="auth-brand__section">用户中心</span>
           </Link>
           <a className="auth-shell__back" href="https://mdtbbs.cn/">返回论坛</a>
         </div>
@@ -58,7 +58,7 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
 
       <div className="auth-shell__notice" role="note">
         <span className="auth-shell__notice-icon" aria-hidden="true">i</span>
-        <span>MindAuth 为 MDTBBS 论坛与关联社区应用提供统一账号服务。</span>
+        <span>MDTBBS 用户中心为论坛与关联社区应用提供统一账号服务。</span>
       </div>
 
       <main className="auth-shell__main">
