@@ -13,10 +13,12 @@ import {
   formatAccountDate,
 } from '@/user/components/AccountPageParts';
 import { AccountShell } from '@/user/components/AccountShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 interface AuthorizationsResponse { success: boolean; authorizations: Authorization[] }
 
 export function AuthorizationsPage() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
   const [selected, setSelected] = useState<Authorization | null>(null);
@@ -33,20 +35,20 @@ export function AuthorizationsPage() {
     setRevoking(true);
     try {
       await api.del(`/api/authorizations/${encodeURIComponent(selected.client_id)}`);
-      toast('success', `已撤销 ${selected.client_name} 的授权`);
+      toast('success', t('authorization.revoked', { client: selected.client_name || selected.name || selected.client_id }));
       setSelected(null);
       await authorizations.reload();
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : '撤销授权失败');
+    } catch {
+      toast('error', t('authorization.failed'));
     } finally {
       setRevoking(false);
     }
   }
 
   return (
-    <AccountShell title="授权应用" description="查看通过 MindAuth 接入账户的应用，以及它们获得的权限。">
+    <AccountShell title={t('authorization.title')} description={t('authorization.description')}>
       {user ? (
-        <AccountSection id="authorizations-container" title="当前授权" description="撤销授权会同时使该应用的相关令牌失效。">
+        <AccountSection id="authorizations-container" title={t('authorization.current')} description={t('authorization.currentDescription')}>
           <AccountLoadState loading={authorizations.loading} error={authorizations.error} retry={authorizations.reload}>
             {items.length ? (
               <div className="account-list">
@@ -58,33 +60,33 @@ export function AuthorizationsPage() {
                         <div>
                         <h3>{item.client_name || item.name || item.client_id}</h3>
                         <p className="authorization-item__client">Client ID：<code>{item.client_id}</code></p>
-                        <p>{item.client_type === 'public' ? 'Public Client' : 'Confidential Client'} · {item.party_type === 'third_party' ? '第三方应用' : '第一方应用'}</p>
+                        <p>{item.client_type === 'public' ? t('authorization.public') : t('authorization.confidential')} · {item.party_type === 'third_party' ? t('authorization.thirdParty') : t('authorization.firstParty')}</p>
                         </div>
-                        <Button type="button" variant="danger" size="sm" onClick={() => setSelected(item)}>撤销授权</Button>
+                        <Button type="button" variant="danger" size="sm" onClick={() => setSelected(item)}>{t('authorization.revoke')}</Button>
                       </div>
                       <div className="authorization-item__details">
-                        <div><span>授权时间</span><strong>{formatAccountDate(item.created_at, true)}</strong></div>
-                        <div><span>最近使用</span><strong>{item.last_used_at ? formatAccountDate(item.last_used_at, true) : '暂无记录'}</strong></div>
+                        <div><span>{t('authorization.created')}</span><strong>{formatAccountDate(item.created_at, true)}</strong></div>
+                        <div><span>{t('authorization.lastUsed')}</span><strong>{item.last_used_at ? formatAccountDate(item.last_used_at, true) : t('authorization.noRecentUse')}</strong></div>
                       </div>
                       <div className="authorization-item__scopes">
-                        <span>权限范围</span>
-                        {scopes.length ? <ul>{scopes.map((scope) => <li key={scope}>{scope}</li>)}</ul> : <p>未提供权限范围</p>}
+                        <span>{t('authorization.scope')}</span>
+                        {scopes.length ? <ul>{scopes.map((scope) => <li key={scope}>{scope}</li>)}</ul> : <p>{t('authorization.noScope')}</p>}
                       </div>
                     </article>
                   );
                 })}
               </div>
-            ) : <AccountEmptyState>没有已授权的应用。</AccountEmptyState>}
+            ) : <AccountEmptyState>{t('authorization.empty')}</AccountEmptyState>}
           </AccountLoadState>
         </AccountSection>
       ) : null}
       <Dialog
         open={Boolean(selected)}
         onClose={() => setSelected(null)}
-        title="撤销应用授权"
-        footer={<><Button type="button" variant="ghost" onClick={() => setSelected(null)}>取消</Button><Button type="button" variant="danger" loading={revoking} onClick={() => void revokeAuthorization()}>确认撤销</Button></>}
+        title={t('authorization.revokeTitle')}
+        footer={<><Button type="button" variant="ghost" onClick={() => setSelected(null)}>{t('authorization.cancel')}</Button><Button type="button" variant="danger" loading={revoking} onClick={() => void revokeAuthorization()}>{t('authorization.confirm')}</Button></>}
       >
-        <p>撤销 <strong>{selected?.client_name || selected?.name || selected?.client_id}</strong> 的授权后，该应用将无法继续访问此账户，并且相关令牌会失效。</p>
+        <p>{t('authorization.revokeBody', { client: selected?.client_name || selected?.name || selected?.client_id || '' })}</p>
       </Dialog>
     </AccountShell>
   );

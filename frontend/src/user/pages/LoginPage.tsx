@@ -5,16 +5,21 @@ import { useToast } from '@/shared/ToastProvider';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
+import { SocialProviderButtons } from '@/user/components/SocialProviderButtons';
 
 export function LoginPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { login, user, loading: authLoading } = useAuth();
   const { toast } = useToast();
+  const { t } = useI18n();
 
   const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
+  const ecosystem = params.get('ecosystem') || '';
+  const uiLocales = params.get('ui_locales') || '';
   const state = params.get('state') || '';
   const scope = params.get('scope') || '';
   const codeChallenge = params.get('code_challenge') || '';
@@ -22,6 +27,11 @@ export function LoginPage() {
   const deviceUserCode = params.get('device_user_code') || '';
   const errorParam = params.get('error') || '';
   const messageParam = params.get('message') || '';
+  const providerError = errorParam === 'social_login_failed' || errorParam === 'qq_login_failed'
+    ? t('social.loginFailed')
+    : errorParam === 'USER_BANNED' || errorParam === 'ACCOUNT_LOCKED'
+      ? t('social.accountUnavailable')
+      : errorParam;
 
   const isOAuthFlow = Boolean(redirectUri && clientId);
 
@@ -32,29 +42,31 @@ export function LoginPage() {
       ...(scope && { scope }),
       ...(codeChallenge && { code_challenge: codeChallenge }),
       ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
-    }), [clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod]);
+      ...(uiLocales && { ui_locales: uiLocales }),
+    }), [clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod, uiLocales]);
 
   function buildAuthFlowParams() {
     return new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       ...(clientName && { client_name: clientName }),
+      ...(ecosystem && { ecosystem }),
       ...(state && { state }),
       ...(scope && { scope }),
       ...(codeChallenge && { code_challenge: codeChallenge }),
       ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+      ...(uiLocales && { ui_locales: uiLocales }),
     });
   }
 
   const authFlowQuery = isOAuthFlow ? buildAuthFlowParams().toString() : '';
   const registerHref = authFlowQuery ? `/register?${authFlowQuery}` : '/register';
-  const qqLoginHref = `/api/auth/qq${authFlowQuery ? `?${authFlowQuery}` : ''}`;
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [loginMethod, setLoginMethod] = useState<'password' | 'qq'>('password');
+  const [loginMethod, setLoginMethod] = useState<'password' | 'social'>('password');
 
   useEffect(() => {
     if (user && !authLoading) {
@@ -73,14 +85,14 @@ export function LoginPage() {
     setFormError('');
 
     if (!username.trim() || !password) {
-      setFormError('请输入用户名/邮箱和密码');
+      setFormError(t('auth.enterCredentials'));
       return;
     }
 
     setLoading(true);
     try {
       await login(username.trim(), password);
-      toast('success', '登录成功');
+      toast('success', t('auth.loginSuccess'));
 
       if (deviceUserCode) {
         navigate(`/device?user_code=${encodeURIComponent(deviceUserCode)}`, { replace: true });
@@ -90,7 +102,12 @@ export function LoginPage() {
         navigate('/dashboard', { replace: true });
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '登录失败';
+      const errorCode = (err as { code?: string } | null)?.code;
+      const msg = errorCode === 'USER_BANNED' || errorCode === 'ACCOUNT_LOCKED'
+        ? t('social.accountUnavailable')
+        : errorCode === 'RATE_LIMITED'
+          ? t('social.rateLimited')
+          : t('auth.loginFailed');
       setFormError(msg);
       toast('error', msg);
     } finally {
@@ -98,10 +115,10 @@ export function LoginPage() {
     }
   }
 
-  const title = isOAuthFlow && clientName ? `登录 ${clientName}` : '登录';
+  const title = isOAuthFlow && clientName ? t('auth.login') : t('auth.login');
   const description = isOAuthFlow
-    ? `继续后将返回 ${clientName || '目标应用'} 完成授权。`
-    : '使用 MDTBBS 账号访问论坛与相关服务。';
+    ? t('auth.continue', { client: clientName || 'the application' })
+    : t('auth.directDescription');
 
   return (
     <AuthShell
@@ -110,18 +127,18 @@ export function LoginPage() {
       footer={
         <>
           <Link to={registerHref} className="inline-link">
-            没有账号？注册
+            {t('auth.noAccount')} {t('auth.register')}
           </Link>
           <span className="text-muted">/</span>
           <Link to="/reset-request" className="inline-link">
-            忘记密码
+            {t('auth.forgot')}
           </Link>
         </>
       }
     >
       <form id="login-form" onSubmit={handleSubmit} data-testid="login-form">
         <div className="stack">
-          <div className="auth-method-tabs" role="tablist" aria-label="选择登录方式">
+          <div className="auth-method-tabs" role="tablist" aria-label={t('auth.chooseLogin')}>
             <button
               id="password-login-tab"
               type="button"
@@ -131,29 +148,29 @@ export function LoginPage() {
               className="auth-method-tab"
               onClick={() => setLoginMethod('password')}
             >
-              账号密码
+              {t('auth.passwordTab')}
             </button>
             <button
-              id="qq-login-tab"
+              id="social-login-tab"
               type="button"
               role="tab"
-              aria-selected={loginMethod === 'qq'}
+              aria-selected={loginMethod === 'social'}
               aria-controls="login-method-panel"
               className="auth-method-tab"
-              onClick={() => setLoginMethod('qq')}
+              onClick={() => setLoginMethod('social')}
             >
-              QQ 登录
+              {t('social.providers')}
             </button>
           </div>
 
           <div id="login-method-panel" role="tabpanel" aria-labelledby={`${loginMethod}-login-tab`}>
             {isOAuthFlow && clientName ? (
-              <div className="status-badge status-badge--info auth-login__context">正在连接应用：{clientName}</div>
+              <div className="status-badge status-badge--info auth-login__context">{t('auth.connecting', { client: clientName })}</div>
             ) : null}
             {formError || errorParam || messageParam ? (
               <div className="auth-form__alert" role="alert">
-                <div className="status-badge status-badge--danger">登录失败</div>
-                <p className="section-description auth-form__alert-text">{formError || messageParam || errorParam}</p>
+                <div className="status-badge status-badge--danger">{t('auth.loginError')}</div>
+                <p className="section-description auth-form__alert-text">{formError || (messageParam && !errorParam.endsWith('_failed') && errorParam !== 'USER_BANNED' && errorParam !== 'ACCOUNT_LOCKED' ? messageParam : '') || providerError}</p>
               </div>
             ) : null}
 
@@ -161,34 +178,31 @@ export function LoginPage() {
               <div className="stack auth-method-panel">
                 <TextField
                   id="username"
-                  label="用户名或邮箱"
+                  label={t('auth.usernameOrEmail')}
                   name="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入用户名或邮箱"
+                  placeholder={t('auth.usernamePlaceholder')}
                   autoComplete="username"
                   autoFocus
                 />
                 <TextField
                   id="password"
-                  label="密码"
+                  label={t('auth.password')}
                   type="password"
                   name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="请输入密码"
+                  placeholder={t('auth.passwordPlaceholder')}
                   autoComplete="current-password"
                 />
                 <Button type="submit" fullWidth size="lg" loading={loading} data-testid="login-submit">
-                  登录
+                  {t('auth.login')}
                 </Button>
               </div>
             ) : (
-              <div className="auth-method-panel auth-method-panel--qq">
-                <p>使用已绑定的 QQ 账号登录 MDTBBS。</p>
-                <a className="btn btn--primary btn--lg btn--full" href={qqLoginHref} data-testid="qq-login">
-                  使用 QQ 登录
-                </a>
+              <div className="auth-method-panel">
+                <SocialProviderButtons authorizeQuery={authFlowQuery} />
               </div>
             )}
           </div>

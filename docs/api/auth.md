@@ -1,8 +1,19 @@
 # 认证域 API
 
-本文档覆盖 MindAuth 认证域的全部端点，来源路由文件：`src/routes/auth.js`（挂载于 `/api`）、`src/routes/registerEmailCode.js`（挂载于 `/api/register`）、`src/routes/challenge.js`（挂载于 `/api/challenge`）、`src/routes/password.js`（挂载于 `/api/password`）、`src/routes/email-verification.js`（挂载于 `/api/email-verification`）。通用约定（错误响应格式、CSRF、Cookie 等）见 [README.md](README.md)。
+本文档覆盖 MindAuth 认证域的全部端点，来源路由文件：`src/routes/auth.js`（挂载于 `/api`）、`src/routes/socialAuth.js` 与 `src/routes/socialProviders.js`（挂载于 `/api/auth` 与 `/api/auth/social`）、`src/routes/registerEmailCode.js`（挂载于 `/api/register`）、`src/routes/challenge.js`（挂载于 `/api/challenge`）、`src/routes/password.js`（挂载于 `/api/password`）、`src/routes/email-verification.js`（挂载于 `/api/email-verification`）。通用约定（错误响应格式、CSRF、Cookie 等）见 [README.md](README.md)。
 
-> **维护提示**：修改 src/routes/auth.js、registerEmailCode.js、challenge.js、password.js、email-verification.js 时需同步更新本文档。
+## GitHub / Discord 社交登录
+
+GitHub 与 Discord provider 通过 `GITHUB_*`、`DISCORD_*` 环境变量分别启用，具体见[配置参考](../operations/configuration.md)。MindAuth 只请求 GitHub `read:user` 与 Discord `identify`，不向 provider 索取邮箱。首次登录需在 MindAuth 提交邮箱验证码、用户名和密码；系统不会按相同邮箱自动关联账户。OAuth state 为一次性随机值，绑定流程还会校验发起绑定时的 session。外部 access token 只在服务端短暂用于读取 profile，不存储、不返回给论坛。
+
+- `GET /api/auth/social/providers` 返回当前可用 provider 列表。
+- `GET /api/auth/social/github`、`GET /api/auth/social/discord` 启动登录；附 `intent=bind` 时要求有效用户 session 并启动绑定。每 IP 限流 30 次/分钟。
+- `GET /api/auth/social/:provider/callback` 处理 provider 回调；登录成功后设置 MindAuth session Cookie，未绑定账户转到 `/social-register`。
+- `POST /api/auth/social/complete` 完成新账户注册。请求字段为 `state`、`username`、`email`、`email_code`、`password`；启用注册问答时还须提供 `challenge_id` 与 `challenge_answer`。该端点按 IP 限制为 5 次/小时。
+
+QQ 继续使用既有 `/api/auth/qq`、`/api/auth/qq/callback` 与 `/api/auth/qq/complete` 路由，以保持旧客户端和已有绑定兼容。
+
+> **维护提示**：修改 src/routes/auth.js、socialAuth.js、socialProviders.js、registerEmailCode.js、challenge.js、password.js、email-verification.js 时需同步更新本文档。
 
 ## 用户认证（src/routes/auth.js → /api）
 
@@ -29,7 +40,7 @@
 |--------|------|----------|
 | 400 | `INVALID_EMAIL` | 邮箱格式不合规 |
 | 409 | `EMAIL_ALREADY_REGISTERED` | 该邮箱已在 `users` 表中注册；本端点**故意**暴露此信息以便用户区分"已注册"与"待注册"，代价是邮箱枚举风险 |
-| 429 | `EMAIL_COOLDOWN` | 同一邮箱 1 分钟内重复请求 |
+| 429 | `EMAIL_COOLDOWN` | 同一邮箱 1 分钟内重复请求；响应附 `retry_after_seconds` 剩余等待秒数 |
 | 429 | `ratelimit:register_send_code` | 同一 IP 10 分钟内超过 3 次 |
 | 503 | `SMTP_UNAVAILABLE` | 邮件服务未配置（`email_config` 无 host/密码） |
 | 503 | `SMTP_SEND_FAILED` | SMTP 发信失败（已清理本次生成的 code 与 cooldown，允许立即重试） |

@@ -49,9 +49,9 @@ jobs:
       RUN_INTEGRATION: '1'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -76,7 +76,26 @@ jobs:
           NODE_ENV: development
 
       - name: Integration tests
-        run: npm run test:integration
+        shell: bash
+        run: |
+          set +e
+          npm run test:integration 2>&1 | tee "$RUNNER_TEMP/integration-tests.log"
+          result=${PIPESTATUS[0]}
+          if [[ "$result" -ne 0 ]]; then
+            excerpt="$(grep -n -B 6 -A 18 -E 'not ok|failureType|error:|AssertionError|Error:|ERR_' "$RUNNER_TEMP/integration-tests.log" | tail -n 100)"
+            if [[ -z "$excerpt" ]]; then
+              excerpt="$(tail -n 50 "$RUNNER_TEMP/integration-tests.log")"
+            fi
+            excerpt="${excerpt//'%'/'%25'}"
+            excerpt="${excerpt//$'\r'/'%0D'}"
+            excerpt="${excerpt//$'\n'/'%0A'}"
+            printf '::notice file=.github/workflows/ci.yml,line=1::%s\n' "$excerpt"
+            {
+              echo "### Integration test failure output"
+              tail -n 120 "$RUNNER_TEMP/integration-tests.log"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$result"
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

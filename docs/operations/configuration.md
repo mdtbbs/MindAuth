@@ -62,6 +62,23 @@
 | `SMTP_FROM` | 无 | 发件人地址 |
 | `SMTP_SECURE` | `false` | `true` 启用 TLS 直连 |
 
+### 社交登录
+
+GitHub 与 Discord 登录默认关闭。启用前需在对应开发者平台登记回调地址；回调地址必须与平台配置完全一致。未配置完整凭据的 provider 不会出现在登录或账户绑定入口中。
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `GITHUB_OAUTH_ENABLED` | `false` | 启用 GitHub 登录与绑定 |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | 空 | GitHub OAuth 应用凭据 |
+| `GITHUB_REDIRECT_URI` | `${BASE_URL}/api/auth/social/github/callback` | GitHub 回调地址 |
+| `GITHUB_HTTP_TIMEOUT_MS` | `5000` | GitHub API 请求超时，毫秒 |
+| `DISCORD_OAUTH_ENABLED` | `false` | 启用 Discord 登录与绑定 |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | 空 | Discord OAuth 应用凭据 |
+| `DISCORD_REDIRECT_URI` | `${BASE_URL}/api/auth/social/discord/callback` | Discord 回调地址 |
+| `DISCORD_HTTP_TIMEOUT_MS` | `5000` | Discord API 请求超时，毫秒 |
+
+GitHub 只申请 `read:user`，Discord 只申请 `identify`，均不申请邮箱。MindAuth 会在本地注册时要求邮箱验证码，不依据 provider 返回的邮箱自动创建或关联账户。Provider access token 仅用于读取资料，处理完成即丢弃。
+
 ### admin / adminSecurity
 
 | 变量 | 默认值 | 说明 |
@@ -111,6 +128,8 @@
 |--------|------|-----------|
 | 登录 | 5 次 / 5 分钟 | `ratelimit:login` |
 | 注册 | 5 次 / 1 小时 | `ratelimit:register` |
+| 社交账号补充注册 | 5 次 / 1 小时 | `ratelimit:social_register` |
+| 社交 OAuth 发起 | 30 次 / 分钟 | `ratelimit:social_oauth_start` |
 | 管理员登录 | 3 次 / 15 分钟 | `ratelimit:admin_login` |
 | 管理端删除用户 | 10 次 / 1 小时 | `ratelimit:admin_user_delete` |
 | 管理端重置密码 | 20 次 / 1 小时 | `ratelimit:admin_password_reset` |

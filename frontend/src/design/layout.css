@@ -233,6 +233,24 @@
   color: #2f80ed;
 }
 
+.mindauth-locale-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #596579;
+  font-size: 0.72rem;
+}
+
+.mindauth-locale-switcher select {
+  min-height: 2rem;
+  padding: 0.2rem 1.5rem 0.2rem 0.45rem;
+  border: 1px solid #d9e0e9;
+  border-radius: 3px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+}
+
 .auth-shell__notice {
   width: min(calc(100% - 3rem), 76rem);
   min-height: 2.75rem;
@@ -343,6 +361,25 @@
   padding: 2rem 2.1rem;
   background: #eaf2fc;
   border: 1px solid #e0e8f2;
+}
+
+.auth-shell__promo--club {
+  min-height: 19rem;
+  justify-content: center;
+  background: #f5f7fa;
+  border-color: #e1e6ed;
+}
+
+.auth-shell__promo--club .auth-promo__eyebrow {
+  color: #526071;
+}
+
+.auth-shell__promo--club h1 {
+  color: #172033;
+}
+
+.auth-shell__promo--club .auth-promo__description {
+  color: #596579;
 }
 
 .auth-shell__promo--custom-bg {

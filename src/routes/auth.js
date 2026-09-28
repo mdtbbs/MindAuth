@@ -311,7 +311,8 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       if (prevLog.length > 0 && prevLog[0].ip !== ip) {
         await notificationCenter.create({
           user_id: user.id, type: 'login_new_device', title: '新设备登录',
-          content: `检测到新设备登录，IP: ${ip}`, ip_address: ip, user_agent: userAgent, sendEmail: true,
+          content: `检测到新设备登录，IP: ${ip}`, emailData: { deviceName: userAgent.slice(0, 160), ipAddress: ip },
+          ip_address: ip, user_agent: userAgent, sendEmail: true,
         });
       }
     } catch (notifyErr) {
@@ -348,13 +349,14 @@ router.get('/login-logs', requireAuth, async (req, res) => {
 
 // Get current user
 router.get('/me', requireAuth, (req, res) => {
-  const { id, username, email, email_verified, role, avatar_url, banner_url, phone, phone_verified, phone_verified_at, created_at } = req.user;
+  const { id, username, email, email_verified, preferred_locale, role, avatar_url, banner_url, phone, phone_verified, phone_verified_at, created_at } = req.user;
   res.json({
     success: true,
     id,
     username,
     email,
     email_verified: email_verified === 1 || email_verified === true,
+    preferred_locale: preferred_locale || null,
     role,
     avatar_url,
     banner_url,

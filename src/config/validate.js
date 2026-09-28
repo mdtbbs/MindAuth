@@ -114,6 +114,24 @@ function validateConfig(config) {
     }
   }
 
+  for (const provider of ['github', 'discord']) {
+    const social = config.social?.[provider];
+    if (!social?.enabled) continue;
+    const prefix = provider.toUpperCase();
+    if (!social.clientId || !social.clientSecret || !social.redirectUri) {
+      errors.push(`${prefix} OAuth is enabled but ${prefix}_CLIENT_ID, ${prefix}_CLIENT_SECRET, or ${prefix}_REDIRECT_URI is missing`);
+    }
+    try {
+      const redirect = new URL(social.redirectUri);
+      if (isProduction && redirect.protocol !== 'https:') errors.push(`${prefix}_REDIRECT_URI must use HTTPS in production`);
+    } catch {
+      errors.push(`${prefix}_REDIRECT_URI is not a valid URL`);
+    }
+    if (!Number.isFinite(social.timeoutMs) || social.timeoutMs < 1000 || social.timeoutMs > 30000) {
+      errors.push(`${prefix}_HTTP_TIMEOUT_MS must be between 1000 and 30000 milliseconds`);
+    }
+  }
+
   const uploadsDir = path.join(__dirname, '../../public/uploads');
   try {
     if (!fs.existsSync(uploadsDir)) {

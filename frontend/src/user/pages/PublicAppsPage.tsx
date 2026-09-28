@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api from '@/api/client';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 type PublicScope = { scope: string; name: string; description: string; sensitive?: boolean };
 type PublicApplication = {
@@ -16,6 +17,7 @@ function AppAvatar({ name }: { name: string }) {
 }
 
 export function PublicAppsPage() {
+  const { locale, t } = useI18n();
   const { clientId } = useParams();
   const [applications, setApplications] = useState<PublicApplication[]>([]);
   const [application, setApplication] = useState<PublicApplication | null>(null);
@@ -30,44 +32,44 @@ export function PublicAppsPage() {
     if (clientId) {
       api.get<{ application: PublicApplication }>(`/api/public/apps/${encodeURIComponent(clientId)}`)
         .then(response => { if (active) setApplication(response.application); })
-        .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : '无法读取应用信息'); })
+        .catch(() => { if (active) setError(t('apps.loadingDetail')); })
         .finally(() => { if (active) setLoading(false); });
     } else {
       api.get<{ applications: PublicApplication[] }>('/api/public/apps')
         .then(response => { if (active) setApplications(response.applications || []); })
-        .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : '无法读取应用目录'); })
+        .catch(() => { if (active) setError(t('apps.loading')); })
         .finally(() => { if (active) setLoading(false); });
     }
     return () => { active = false; };
-  }, [clientId]);
+  }, [clientId, t]);
 
   const visibleApplications = useMemo(() => applications.filter(item =>
     filter === 'all' || (filter === 'official' ? item.official : !item.official)), [applications, filter]);
 
   if (clientId) {
     return (
-      <AuthShell title="应用信息" description="查看 MDTBBS 社区应用的用途和权限。" footer={<Link to="/apps" className="inline-link">返回应用目录</Link>}>
-        {loading ? <p className="section-description">正在读取应用信息…</p> : null}
+      <AuthShell title={t('apps.detailTitle')} description={t('apps.detailDescription')} footer={<Link to="/apps" className="inline-link">{t('apps.backToDirectory')}</Link>}>
+        {loading ? <p className="section-description">{t('apps.loadingDetail')}</p> : null}
         {error ? <p className="status-badge status-badge--danger" role="alert">{error}</p> : null}
         {!loading && application?.available === false ? (
-          <section className="public-app-unavailable"><h2>该应用当前不可用。</h2><p>此应用已暂停或删除。</p></section>
+          <section className="public-app-unavailable"><h2>{t('apps.unavailable')}</h2><p>{t('apps.suspended')}</p></section>
         ) : null}
         {!loading && application?.available !== false && application ? (
           <div className="stack public-app-detail">
             <header className="public-app-detail__header">
               <AppAvatar name={application.name} />
-              <div><h2>{application.name}</h2><span className={`public-app-label ${application.official ? 'public-app-label--official' : ''}`}>{application.official ? 'MDTBBS 官方应用' : '第三方应用'}</span></div>
+              <div><h2>{application.name}</h2><span className={`public-app-label ${application.official ? 'public-app-label--official' : ''}`}>{application.official ? t('apps.official') : t('apps.thirdParty')}</span></div>
             </header>
-            <p>{application.description || '暂无应用简介。'}</p>
+            <p>{application.description || t('apps.noDescription')}</p>
             <dl className="public-app-meta">
-              <div><dt>开发者</dt><dd>{application.developer_url ? <a href={application.developer_url}>{application.developer_name || 'MDTBBS 开发者'}</a> : application.developer_name || 'MDTBBS'}</dd></div>
-              <div><dt>授权用户</dt><dd>{application.authorization_count.toLocaleString()}</dd></div>
-              {application.website_url ? <div><dt>项目主页</dt><dd><a href={application.website_url} target="_blank" rel="noreferrer">{application.website_url}</a></dd></div> : null}
+              <div><dt>{t('apps.developer')}</dt><dd>{application.developer_url ? <a href={application.developer_url}>{application.developer_name || t('apps.defaultDeveloper')}</a> : application.developer_name || t('apps.defaultDeveloper')}</dd></div>
+              <div><dt>{t('apps.authorizationCount')}</dt><dd>{new Intl.NumberFormat(locale).format(application.authorization_count)}</dd></div>
+              {application.website_url ? <div><dt>{t('apps.projectHome')}</dt><dd><a href={application.website_url} target="_blank" rel="noreferrer">{application.website_url}</a></dd></div> : null}
             </dl>
-            <section><h3>应用权限</h3><ul className="public-scope-list">{application.scopes.map(scope => (
-              <li key={scope.scope}><div><strong>{scope.name}</strong>{scope.sensitive ? <span className="public-scope-sensitive">敏感权限</span> : null}<p>{scope.description}</p><small>{scope.scope}</small></div></li>
+            <section><h3>{t('apps.permissions')}</h3><ul className="public-scope-list">{application.scopes.map(scope => (
+              <li key={scope.scope}><div><strong>{scope.name}</strong>{scope.sensitive ? <span className="public-scope-sensitive">{t('apps.sensitive')}</span> : null}<p>{scope.description}</p><small>{scope.scope}</small></div></li>
             ))}</ul></section>
-            <p className="section-description">授权后，你可以在 MindAuth 的“已授权应用”页面随时撤销访问。</p>
+            <p className="section-description">{t('apps.afterGrant')}</p>
           </div>
         ) : null}
       </AuthShell>
@@ -75,22 +77,22 @@ export function PublicAppsPage() {
   }
 
   return (
-    <AuthShell title="社区应用" description="了解社区应用使用 MDTBBS 账号登录时请求的权限。" footer={<Link to="/developer" className="inline-link">开发者应用</Link>}>
+    <AuthShell title={t('apps.title')} description={t('apps.description')} footer={<Link to="/developer" className="inline-link">{t('apps.developerCenter')}</Link>}>
       <div className="public-app-directory">
-        <nav className="public-app-filters" aria-label="筛选应用">
-          {([['all', '全部应用'], ['community', '第三方应用'], ['official', '官方应用']] as const).map(([value, label]) => (
+        <nav className="public-app-filters" aria-label={t('apps.filter')}>
+          {([['all', t('apps.all')], ['community', t('apps.community')], ['official', t('apps.official')]] as const).map(([value, label]) => (
             <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
           ))}
         </nav>
-        {loading ? <p className="section-description">正在读取社区应用…</p> : null}
+        {loading ? <p className="section-description">{t('apps.loading')}</p> : null}
         {error ? <p className="status-badge status-badge--danger" role="alert">{error}</p> : null}
-        {!loading && !error && !visibleApplications.length ? <p className="section-description">暂时没有符合条件的应用。</p> : null}
+        {!loading && !error && !visibleApplications.length ? <p className="section-description">{t('apps.empty')}</p> : null}
         <div className="public-app-grid">
           {visibleApplications.map(item => (
             <Link className="public-app-card" to={`/apps/${encodeURIComponent(item.client_id)}`} key={item.client_id}>
-              <header><AppAvatar name={item.name} /><span className={`public-app-label ${item.official ? 'public-app-label--official' : ''}`}>{item.official ? '官方' : '第三方'}</span></header>
-              <h2>{item.name}</h2><p>{item.description || '暂无应用简介。'}</p>
-              <div className="public-app-card__meta"><span>开发者：{item.developer_name || 'MDTBBS'}</span><span>授权用户：{item.authorization_count.toLocaleString()}</span></div>
+              <header><AppAvatar name={item.name} /><span className={`public-app-label ${item.official ? 'public-app-label--official' : ''}`}>{item.official ? t('apps.officialShort') : t('apps.thirdPartyShort')}</span></header>
+              <h2>{item.name}</h2><p>{item.description || t('apps.noDescription')}</p>
+              <div className="public-app-card__meta"><span>{t('apps.developerLabel')}{item.developer_name || t('apps.defaultDeveloper')}</span><span>{t('apps.authorizationLabel')}{new Intl.NumberFormat(locale).format(item.authorization_count)}</span></div>
               <div className="public-app-card__scopes">{item.scopes.slice(0, 3).map(scope => <span key={scope.scope}>{scope.name}</span>)}{item.scopes.length > 3 ? <span>+{item.scopes.length - 3}</span> : null}</div>
             </Link>
           ))}

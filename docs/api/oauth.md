@@ -32,11 +32,12 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `response_type` | 否 | 若提供必须为 `code` |
 | `code_challenge` | Public 必填 | PKCE challenge = Base64URL(SHA256(code_verifier)) |
 | `code_challenge_method` | Public 必填 | 必须是 `S256`；不接受 `plain` |
+| `ui_locales` | 否 | 空格分隔的 BCP 47 locale 提示，例如 `ja`、`ru en`。MindAuth 将其保留到登录、注册和授权确认页面；支持 `zh-CN`、`en`、`ru`、`ja`，不支持的值会回退。 |
 
 **响应**（均为 302 重定向，无 JSON）：
 
 - 已登录：`{redirect_uri}?code={code}&state={state}`（保留 redirect_uri 原有 query）
-- 未登录：`/#/login?redirect_uri=...&client_id=...&client_name=...`（携带原 OAuth 参数，登录后续跳）
+- 未登录：`/#/login?redirect_uri=...&client_id=...&client_name=...&ui_locales=...`（携带原 OAuth 参数和生态标识，登录/注册后续跳）
 
 **错误形态**：所有校验错误重定向到**本站错误页** `/oauth-error.html?error={code}&description={desc}`，**不会**重定向到 redirect_uri（与 RFC 6749 §4.1.2.1 不同，避免开放重定向）。
 
@@ -50,6 +51,8 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `server_error` | 未捕获异常 |
 
 **特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。用户已授予本次全部 scopes 时不重复显示同意页；新增 scope 时只突出显示尚未授予的权限。授权 scope 写回现有 `authorizations` 记录。
+
+用户界面语言解析顺序为 `ui_locales`、URL 显式语言、账户 `preferred_locale`、MindAuth locale cookie、`Accept-Language`、Client ecosystem 默认值，最后回退到 English。MDTBBS Client 默认 `zh-CN`；`mindustry-club` Client 默认 `en`。登录后的账户语言选择会保存到 `PUT /api/account/preferences` 的 `preferred_locale`。
 
 ---
 

@@ -39,3 +39,18 @@ test('validateConfig protects test runs from non-test databases', () => {
     else process.env.NODE_ENV = previous;
   }
 });
+
+test('validateConfig requires complete GitHub OAuth settings when enabled', () => {
+  const config = makeConfig({ social: { github: { enabled: true, clientId: '', clientSecret: '', redirectUri: '', timeoutMs: 5000 } } });
+  assert.throws(() => validateConfig(config), /GITHUB OAuth is enabled but GITHUB_CLIENT_ID/);
+});
+
+test('validateConfig requires HTTPS social callbacks in production', () => {
+  const config = makeConfig({
+    server: { isProduction: true, baseUrl: 'https://auth.example.com', allowedOrigins: [] },
+    mysql: { host: '127.0.0.1', user: 'mindauth', password: 'strong', database: 'mindauth' },
+    admin: { secret: 'a'.repeat(32) },
+    social: { discord: { enabled: true, clientId: 'client', clientSecret: 'secret', redirectUri: 'http://auth.example.com/callback', timeoutMs: 5000 } },
+  });
+  assert.throws(() => validateConfig(config), /DISCORD_REDIRECT_URI must use HTTPS in production/);
+});

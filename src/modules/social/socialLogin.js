@@ -13,6 +13,15 @@ async function findByQq(openid) {
   return rows[0] || null;
 }
 
+async function findByProvider(provider, providerUserId) {
+  if (!['qq', 'github', 'discord'].includes(provider)) throw new Error('SOCIAL_PROVIDER_UNSUPPORTED');
+  const [rows] = await pool.execute(
+    'SELECT * FROM social_accounts WHERE provider = ? AND provider_user_id = ? LIMIT 1',
+    [provider, providerUserId]
+  );
+  return rows[0] || null;
+}
+
 /**
  * 获取用户
  */
@@ -155,6 +164,36 @@ async function loginExisting({ openid, nickname, avatarUrl, ipAddress, userAgent
   return { user, session };
 }
 
+async function loginProvider({ provider, providerUserId, nickname, avatarUrl, ipAddress, userAgent }) {
+  const binding = await findByProvider(provider, providerUserId);
+  if (!binding) return null;
+
+  const user = await getUserById(binding.user_id);
+  if (!user) throw new Error('SOCIAL_USER_NOT_FOUND');
+  const loginCheck = await checkLoginAllowed(user);
+  if (!loginCheck.allowed) {
+    throw Object.assign(new Error('SOCIAL_LOGIN_BLOCKED'), { code: loginCheck.error.code, details: loginCheck.error });
+  }
+
+  await pool.execute(
+    'UPDATE social_accounts SET nickname = ?, avatar_url = ?, last_login_at = NOW() WHERE id = ?',
+    [nickname || null, avatarUrl || null, binding.id]
+  );
+  const session = await sessionManager.createUserSession({ userId: user.id, ipAddress, userAgent });
+  await pool.execute(
+    'INSERT INTO login_logs (user_id, ip, device, login_type) VALUES (?, ?, ?, ?)',
+    [user.id, ipAddress || '', (userAgent || '').slice(0, 200), 'social']
+  );
+  logUserAudit({
+    user_id: user.id,
+    action: 'social_login',
+    ip_address: ipAddress,
+    user_agent: userAgent,
+    details: { provider },
+  });
+  return { user, session };
+}
+
 /**
  * 绑定 QQ 到用户
  *
@@ -187,6 +226,30 @@ async function bindQq(userId, { openid, nickname, avatarUrl }) {
         code: 'QQ_ALREADY_BOUND_TO_OTHER',
         status: 409,
       });
+    }
+    throw err;
+  }
+}
+
+async function bindProvider(userId, { provider, providerUserId, nickname, avatarUrl }) {
+  if (!['qq', 'github', 'discord'].includes(provider)) throw new Error('SOCIAL_PROVIDER_UNSUPPORTED');
+  const existing = await findByProvider(provider, providerUserId);
+  if (existing && existing.user_id !== userId) {
+    throw Object.assign(new Error('SOCIAL_ALREADY_BOUND'), {
+      code: 'SOCIAL_ALREADY_BOUND_TO_OTHER',
+      status: 409,
+    });
+  }
+  if (existing) return existing;
+  try {
+    const [result] = await pool.execute(
+      'INSERT INTO social_accounts (user_id, provider, provider_user_id, nickname, avatar_url) VALUES (?, ?, ?, ?, ?)',
+      [userId, provider, providerUserId, nickname || null, avatarUrl || null]
+    );
+    return { id: result.insertId, user_id: userId, provider, provider_user_id: providerUserId };
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      throw Object.assign(new Error('SOCIAL_ALREADY_BOUND'), { code: 'SOCIAL_ALREADY_BOUND_TO_OTHER', status: 409 });
     }
     throw err;
   }
@@ -254,12 +317,46 @@ async function unbindQq(bindingId, userId) {
   });
 }
 
+async function unbindSocial(bindingId, userId) {
+  return transaction(async (conn) => {
+    const [rows] = await conn.execute(
+      'SELECT * FROM social_accounts WHERE id = ? AND user_id = ? LIMIT 1',
+      [bindingId, userId]
+    );
+    if (rows.length === 0) {
+      throw Object.assign(new Error('BINDING_NOT_FOUND'), { code: 'BINDING_NOT_FOUND', status: 404 });
+    }
+
+    const [passwordRows] = await conn.execute('SELECT password_hash FROM users WHERE id = ? LIMIT 1', [userId]);
+    const hasPassword = passwordRows[0]?.password_hash && passwordRows[0].password_hash.length > 0;
+    if (!hasPassword) {
+      const [otherBindings] = await conn.execute(
+        'SELECT COUNT(*) as count FROM social_accounts WHERE user_id = ? AND id != ?',
+        [userId, bindingId]
+      );
+      if (otherBindings[0].count === 0) {
+        throw Object.assign(new Error('CANNOT_UNBIND_LAST_LOGIN'), {
+          code: 'CANNOT_UNBIND_LAST_LOGIN',
+          message: 'This is the only sign-in method. Set a password before unlinking it.',
+          status: 400,
+        });
+      }
+    }
+    await conn.execute('DELETE FROM social_accounts WHERE id = ?', [bindingId]);
+    return true;
+  });
+}
+
 module.exports = {
   findByQq,
+  findByProvider,
   loginExisting,
+  loginProvider,
   bindQq,
+  bindProvider,
   listBindings,
   unbindQq,
+  unbindSocial,
   checkLoginAllowed,
   canUnbindQq,
 };

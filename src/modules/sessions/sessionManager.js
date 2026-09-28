@@ -67,7 +67,7 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
 
   // 2. Fetch user data for Redis cache (exclude password_hash)
   const [userRows] = await pool.execute(
-    `SELECT id, username, email, email_verified, role, avatar_url, banner_url,
+    `SELECT id, username, email, email_verified, preferred_locale, role, avatar_url, banner_url,
             phone, phone_verified, phone_verified_at, created_at
      FROM users WHERE id = ?`,
     [userId]
@@ -140,7 +140,7 @@ async function authenticateUserSession(rawToken) {
 
   // 3. Fetch user data
   const [userRows] = await pool.execute(
-    `SELECT id, username, email, email_verified, role, avatar_url, banner_url,
+    `SELECT id, username, email, email_verified, preferred_locale, role, avatar_url, banner_url,
             phone, phone_verified, phone_verified_at, created_at
      FROM users WHERE id = ?`,
     [sessionRow.user_id]

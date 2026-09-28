@@ -4,6 +4,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import api, { ApiError } from '@/api/client';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 type ScopeInfo = { name: string; description: string; sensitive?: boolean };
 type ConsentInfo = {
@@ -26,6 +27,7 @@ const SCOPE_ICONS: Record<string, string> = {
 };
 
 export function OAuthAuthorizePage() {
+  const { t } = useI18n();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -37,6 +39,7 @@ export function OAuthAuthorizePage() {
     response_type: params.get('response_type') || 'code',
     code_challenge: params.get('code_challenge') || '',
     code_challenge_method: params.get('code_challenge_method') || '',
+    ui_locales: params.get('ui_locales') || '',
   }), [params]);
   const query = useMemo(() => {
     const value = new URLSearchParams();
@@ -49,8 +52,8 @@ export function OAuthAuthorizePage() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!request.client_id || !request.redirect_uri) {
-      setError('这个应用的登录配置有问题，请联系开发者。');
+      if (!request.client_id || !request.redirect_uri) {
+      setError(t('oauth.invalidConfiguration'));
       return;
     }
     if (!user) {
@@ -67,11 +70,11 @@ export function OAuthAuthorizePage() {
       .catch((reason: unknown) => {
         if (!active) return;
         setError(reason instanceof ApiError && reason.status && reason.status < 500
-          ? '这个应用的登录配置有问题，请联系开发者。'
-          : '暂时无法验证这个授权请求，请稍后重试。');
+          ? t('oauth.invalidConfiguration')
+          : t('oauth.unavailable'));
       });
     return () => { active = false; };
-  }, [authLoading, user, request.client_id, request.redirect_uri, query, navigate]);
+  }, [authLoading, user, request.client_id, request.redirect_uri, query, navigate, t]);
 
   async function decide(decision: 'approve' | 'deny') {
     setBusy(true); setError('');
@@ -80,54 +83,54 @@ export function OAuthAuthorizePage() {
       window.location.assign(response.redirect_to);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError && reason.status && reason.status < 500
-        ? '这个应用的登录配置有问题，请联系开发者。'
-        : '提交授权决定失败，请稍后重试。');
+        ? t('oauth.invalidConfiguration')
+        : t('oauth.submitFailed'));
       setBusy(false);
     }
   }
 
   const scopesToShow = consent?.new_scopes?.length ? consent.new_scopes : consent?.scopes || [];
-  const redirectHost = (() => { try { return new URL(request.redirect_uri).host || new URL(request.redirect_uri).protocol.slice(0, -1); } catch { return '已登记的回调地址'; } })();
+  const redirectHost = (() => { try { return new URL(request.redirect_uri).host || new URL(request.redirect_uri).protocol.slice(0, -1); } catch { return t('oauth.registeredCallback'); } })();
   const official = consent?.client.party_type === 'first_party';
   const developerProfileUrl = consent?.client.developer_url || null;
   const initials = Array.from(consent?.client.name?.trim() || 'A')[0].toUpperCase();
 
   return (
-    <AuthShell title="确认应用授权" description="请确认应用的身份和它申请的权限。">
+    <AuthShell title={t('oauth.title')} description={t('oauth.description')}>
       {error ? <div className="status-badge status-badge--danger" role="alert">{error}</div> : null}
-      {!consent ? <p className="section-description">正在验证授权请求…</p> : (
+      {!consent ? <p className="section-description">{t('oauth.verifying')}</p> : (
         <div className="stack oauth-consent">
           <header className="oauth-consent__app">
             <div className="public-app-avatar">{initials}</div>
-            <div><h2>{consent.client.name}</h2><span className={`public-app-label ${official ? 'public-app-label--official' : ''}`}>{official ? 'MDTBBS 官方应用' : '第三方应用'}</span></div>
+            <div><h2>{consent.client.name}</h2><span className={`public-app-label ${official ? 'public-app-label--official' : ''}`}>{official ? t('oauth.official') : t('oauth.thirdParty')}</span></div>
           </header>
-          <p className="oauth-consent__developer">{consent.client.developer_name ? <>由 {developerProfileUrl ? <a href={developerProfileUrl} target="_blank" rel="noreferrer">{consent.client.developer_name}</a> : consent.client.developer_name} 开发</> : '由 MDTBBS 官方团队提供'}</p>
-          <p>{consent.client.description || '此应用将通过 MDTBBS 账号安全登录并使用社区 API。'}</p>
+          <p className="oauth-consent__developer">{consent.client.developer_name ? developerProfileUrl ? <a href={developerProfileUrl} target="_blank" rel="noreferrer">{t('oauth.developerBy', { name: consent.client.developer_name })}</a> : t('oauth.developerBy', { name: consent.client.developer_name }) : t('oauth.officialProvider')}</p>
+          <p>{consent.client.description || t('oauth.missingDescription')}</p>
 
           <section className="oauth-consent__permissions">
-            <h2>{consent.previous_scopes.length ? '此应用新增请求以下权限' : '此应用请求以下权限'}</h2>
+            <h2>{consent.previous_scopes.length ? t('oauth.newScopes') : t('oauth.requestedScopes')}</h2>
             <ul className="public-scope-list">
               {scopesToShow.map((scope) => (
                 <li key={scope.name}>
                   <span className="oauth-scope-icon" aria-hidden="true">{SCOPE_ICONS[scope.name] || '•'}</span>
-                  <div><strong>{scope.name}</strong>{scope.sensitive ? <span className="public-scope-sensitive">敏感权限</span> : null}<p>{scope.description}</p><small>{scope.name}</small></div>
+                  <div><strong>{t(`oauth.scope.${scope.name}`) === `oauth.scope.${scope.name}` ? scope.name : t(`oauth.scope.${scope.name}`)}</strong>{scope.sensitive ? <span className="public-scope-sensitive">{t('oauth.sensitive')}</span> : null}<p>{t(`oauth.scopeDesc.${scope.name}`) === `oauth.scopeDesc.${scope.name}` ? scope.description : t(`oauth.scopeDesc.${scope.name}`)}</p><small>{scope.name}</small></div>
                 </li>
               ))}
             </ul>
-            {consent.previous_scopes.length ? <p className="section-description">你之前已经允许过部分权限；确认后会将本次请求的权限加入此应用授权。</p> : null}
+            {consent.previous_scopes.length ? <p className="section-description">{t('oauth.previousConsent')}</p> : null}
           </section>
 
           <details className="oauth-consent__details">
-            <summary>应用详情</summary>
-            <dl><div><dt>Client ID</dt><dd><code>{consent.client.client_id}</code></dd></div><div><dt>Redirect Host</dt><dd>{redirectHost}</dd></div>
-              {consent.client.website_url ? <div><dt>应用主页</dt><dd><a href={consent.client.website_url} target="_blank" rel="noreferrer">{consent.client.website_url}</a></dd></div> : null}
-              {consent.client.developer_name ? <div><dt>开发者</dt><dd>{consent.client.developer_name}</dd></div> : null}
+            <summary>{t('oauth.details')}</summary>
+            <dl><div><dt>{t('oauth.clientId')}</dt><dd><code>{consent.client.client_id}</code></dd></div><div><dt>{t('oauth.redirectHost')}</dt><dd>{redirectHost}</dd></div>
+              {consent.client.website_url ? <div><dt>{t('oauth.website')}</dt><dd><a href={consent.client.website_url} target="_blank" rel="noreferrer">{consent.client.website_url}</a></dd></div> : null}
+              {consent.client.developer_name ? <div><dt>{t('oauth.developer')}</dt><dd>{consent.client.developer_name}</dd></div> : null}
             </dl>
           </details>
-          <p className="section-description">你可以随时在 MDTBBS 用户中心的已授权应用中撤销访问。论坛的账号状态、内容审核和站点规则仍然适用。</p>
+          <p className="section-description">{t('oauth.revokeNotice')}</p>
           <div className="oauth-consent__actions">
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => void decide('deny')}>取消</Button>
-            <Button type="button" disabled={busy} onClick={() => void decide('approve')}>{busy ? '提交中…' : '允许'}</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => void decide('deny')}>{t('oauth.cancel')}</Button>
+            <Button type="button" disabled={busy} onClick={() => void decide('approve')}>{busy ? t('oauth.submitting') : t('oauth.approve')}</Button>
           </div>
         </div>
       )}

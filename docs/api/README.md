@@ -146,6 +146,12 @@ Native 错误采用共享 API JSON 结构 `{success:false, code, message}`；常
 |------|------|------|-----------|------|
 | POST | `/api/register/send-code` | 无 | 3/10分钟（IP）+ 1/分钟（email 冷却） | 注册前发送 6 位邮箱验证码 |
 | POST | `/api/register` | 无 | 5/小时 | 用户注册（需携带 `email_code`，可能要求问答验证） |
+| GET | `/api/auth/social/providers` | 无 | — | 列出已启用的 QQ、GitHub、Discord provider |
+| GET | `/api/auth/social/:provider` | 无 / 登录会话（bind） | OAuth state | 发起 GitHub/Discord 登录或账户绑定 |
+| GET | `/api/auth/social/:provider/callback` | 无 | 一次性 state | GitHub/Discord OAuth 回调 |
+| POST | `/api/auth/social/complete` | 无 | 5/小时 | 社交注册补充邮箱验证码、用户名和密码 |
+| GET | `/api/auth/qq` / `/api/auth/qq/callback` | 无 / 登录会话（bind） | 一次性 state | 兼容既有 QQ OAuth 登录和绑定 |
+| POST | `/api/auth/qq/complete` | 无 | 5/小时 | 兼容既有 QQ 社交注册 |
 | POST | `/api/login` | 无 | 5/5分钟 | 用户名或邮箱登录，下发 session Cookie |
 | POST | `/api/logout` | 会话 | — | 登出并吊销当前会话 |
 | GET | `/logout` | 无（幂等） | — | SLO 浏览器登出；按注册白名单重定向回调用方（需 `redirect_uri` + `client_id`，详见 [auth.md](auth.md)） |

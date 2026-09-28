@@ -70,13 +70,23 @@ async function seedTestOAuthClient(pool) {
       name: 'MindFourm',
       client_id: 'forum',
       client_secret: 'forum_secret_key_for_development',
-      redirect_uri: 'http://localhost:4000/api/auth/callback'
+      redirect_uri: 'http://localhost:4000/api/auth/callback',
+      client_type: 'confidential',
+      party_type: 'first_party',
+      ecosystem: 'mdtbbs',
+      status: 'approved',
+      scopes: ['openid', 'profile', 'email', 'forum.read', 'forum.write', 'resource.read', 'resource.download', 'resource.upload', 'notification.read', 'message.read', 'message.write'],
     },
     {
       name: 'MindFourm (Test)',
       client_id: '6d875cc521f1c60ba17dd53c7b9edc5a',
       client_secret: '35d820f46aa6a1b330258d3af5b60b3c0094719acebcb149fc03d96cdf8f99f1',
-      redirect_uri: 'http://localhost:4000/api/auth/callback'
+      redirect_uri: 'http://localhost:4000/api/auth/callback',
+      client_type: 'confidential',
+      party_type: 'third_party',
+      ecosystem: 'mdtbbs',
+      status: 'approved',
+      scopes: ['openid', 'profile', 'email'],
     },
     // EasyManager — paused, preserved for restoration
     // {
@@ -91,29 +101,43 @@ async function seedTestOAuthClient(pool) {
     try {
       const storedSecret = hashClientSecret(client.client_secret);
       const [existing] = await pool.execute(
-        'SELECT id, name, client_secret, redirect_uri FROM clients WHERE client_id = ?',
+        'SELECT id FROM clients WHERE client_id = ?',
         [client.client_id]
       );
+      const scopeJson = JSON.stringify(client.scopes);
 
       if (existing.length === 0) {
         await pool.execute(
-          'INSERT INTO clients (name, client_id, client_secret, redirect_uri) VALUES (?, ?, ?, ?)',
-          [client.name, client.client_id, storedSecret, client.redirect_uri]
+          `INSERT INTO clients
+             (name, client_id, client_secret, redirect_uri, client_type, party_type, ecosystem, status,
+              require_pkce, requested_scopes, approved_scopes, approved_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)`,
+          [client.name, client.client_id, storedSecret, client.redirect_uri, client.client_type,
+            client.party_type, client.ecosystem, client.status, scopeJson, scopeJson]
         );
         console.log(`Test OAuth client '${client.name}' created`);
-      } else if (
-        existing[0].name !== client.name ||
-        existing[0].client_secret !== storedSecret ||
-        existing[0].redirect_uri !== client.redirect_uri
-      ) {
-        // Dev/test fixtures must match the seed definition exactly — E2E tests
-        // depend on these values.  Sync rows left behind by older seed data.
+      } else {
+        // Keep dev/test rows aligned with the approved downstream fixture
+        // contract; production security checks are unchanged.
         await pool.execute(
-          'UPDATE clients SET name = ?, client_secret = ?, redirect_uri = ? WHERE id = ?',
-          [client.name, storedSecret, client.redirect_uri, existing[0].id]
+          `UPDATE clients
+           SET name = ?, client_secret = ?, redirect_uri = ?, client_type = ?, party_type = ?, ecosystem = ?,
+               status = ?, require_pkce = 0, requested_scopes = ?, approved_scopes = ?,
+               approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP)
+           WHERE id = ?`,
+          [client.name, storedSecret, client.redirect_uri, client.client_type, client.party_type,
+            client.ecosystem, client.status, scopeJson, scopeJson, existing[0].id]
         );
         console.log(`Test OAuth client '${client.name}' re-synced to seed values`);
       }
+
+      const [clientRows] = await pool.execute('SELECT id FROM clients WHERE client_id = ?', [client.client_id]);
+      await pool.execute(
+        `INSERT INTO oauth_client_redirect_uris (oauth_client_id, redirect_uri, redirect_type)
+         VALUES (?, ?, 'web')
+         ON DUPLICATE KEY UPDATE redirect_type = VALUES(redirect_type)`,
+        [clientRows[0].id, client.redirect_uri]
+      );
     } catch (err) {
       console.warn(`Could not seed OAuth client '${client.name}':`, err.message);
     }

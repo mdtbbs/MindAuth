@@ -16,25 +16,27 @@ const ALLOWED_AUTHORIZE_FIELDS = new Set([
   'scope',
   'codeChallenge',
   'codeChallengeMethod',
+  'uiLocales',
 ]);
 
 // 允许的 intent 值
 const VALID_INTENTS = new Set(['login', 'bind', 'register']);
 
 // 允许的 provider 值
-const VALID_PROVIDERS = new Set(['qq']);
+const VALID_PROVIDERS = new Set(['qq', 'github', 'discord']);
 
 /**
  * 创建 OAuth state
  *
  * @param {object} payload - state payload
- * @param {string} payload.provider - OAuth provider (qq)
+ * @param {string} payload.provider - OAuth provider
  * @param {string} payload.intent - intent (login|bind|register)
  * @param {string} [payload.sessionToken] - session token (will be hashed)
  * @param {string} [payload.ip] - client IP
  * @param {string} [payload.userAgent] - user agent
  * @param {object} [payload.authorize] - OAuth authorize context
- * @param {string} [payload.openid] - QQ openid
+ * @param {string} [payload.openid] - Legacy QQ openid
+ * @param {string} [payload.providerUserId] - Stable provider account id
  * @param {string} [payload.nickname] - QQ nickname
  * @param {string} [payload.avatarUrl] - QQ avatar URL
  * @returns {Promise<string>} - opaque state token
@@ -81,8 +83,9 @@ function createState(payload = {}) {
     }
   }
 
-  // QQ profile 临时数据
+  // Provider profile data is temporary and expires with the one-time state.
   if (payload.openid) safePayload.openid = String(payload.openid).slice(0, 255);
+  if (payload.providerUserId) safePayload.providerUserId = String(payload.providerUserId).slice(0, 255);
   if (payload.nickname) safePayload.nickname = String(payload.nickname).slice(0, 255);
   if (payload.avatarUrl) safePayload.avatarUrl = String(payload.avatarUrl).slice(0, 1024);
 

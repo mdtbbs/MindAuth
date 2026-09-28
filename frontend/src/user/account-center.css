@@ -600,10 +600,22 @@
   --color-border-strong: #bfc0ba;
 }
 
+@media (prefers-color-scheme: dark) {
+  .account-shell {
+    --color-bg: #11151b;
+    --color-bg-subtle: #141920;
+    --color-bg-sunken: #202630;
+    --color-bg-elevated: #171c24;
+    --color-border: #303844;
+    --color-border-soft: #272f39;
+    --color-border-strong: #45505f;
+  }
+}
+
 .account-shell__layout { grid-template-columns: 13.5rem minmax(0, 1fr); }
 .account-shell__sidebar {
   padding: 1.15rem 0.7rem 1.4rem;
-  background: #eeeeeb;
+  background: var(--color-bg-subtle);
 }
 .account-sidebar__brand {
   margin-bottom: 1rem;
@@ -625,7 +637,7 @@
 }
 .account-nav__link[aria-current="page"] {
   box-shadow: inset 2px 0 0 var(--color-primary);
-  background: #ffffff;
+  background: var(--color-bg-elevated);
   color: var(--color-text);
 }
 
@@ -637,7 +649,7 @@
   margin-bottom: 1.15rem;
   padding-bottom: 0.9rem;
 }
-.account-page-heading__eyebrow { color: #85857e; }
+.account-page-heading__eyebrow { color: var(--color-text-muted); }
 .account-page-content,
 .account-shell .site-legal-footer { max-width: 78rem; }
 .account-shell .btn,

@@ -32,6 +32,7 @@ export function UserApp() {
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/qq/confirm" element={<QqConfirmPage />} />
         <Route path="/qq-register" element={<QqRegisterPage />} />
+        <Route path="/social-register" element={<QqRegisterPage />} />
         <Route path="/authorize" element={<OAuthAuthorizePage />} />
         <Route path="/device" element={<DeviceAuthorizationPage />} />
         <Route path="/oauth/device" element={<DeviceAuthorizationPage />} />

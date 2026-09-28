@@ -140,6 +140,7 @@ test('createState filters authorize context to allowlist', async () => {
       scope: 'openid profile',
       codeChallenge: 'challenge-value',
       codeChallengeMethod: 'S256',
+      uiLocales: 'ru en',
       secretField: 'should-be-filtered',
       extraField: 'should-not-exist',
     },
@@ -154,6 +155,7 @@ test('createState filters authorize context to allowlist', async () => {
   assert.equal(payload.authorize.scope, 'openid profile');
   assert.equal(payload.authorize.codeChallenge, 'challenge-value');
   assert.equal(payload.authorize.codeChallengeMethod, 'S256');
+  assert.equal(payload.authorize.uiLocales, 'ru en');
   assert.equal(payload.authorize.secretField, undefined, 'unknown fields must be filtered');
   assert.equal(payload.authorize.extraField, undefined, 'unknown fields must be filtered');
 });

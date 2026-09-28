@@ -6,6 +6,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
+import { currentText } from '@/i18n/runtimeText';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
               <button
                 className="toast__dismiss"
                 onClick={() => dismiss(t.id)}
-                aria-label="关闭通知"
+                aria-label={currentText('shared.closeNotification')}
                 type="button"
               >
                 ✕

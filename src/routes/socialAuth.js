@@ -14,6 +14,9 @@ const sessionManager = require('../modules/sessions/sessionManager');
 const clientRegistry = require('../modules/admin/clientRegistry');
 const { logUserAudit } = require('../utils/userAudit');
 const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
+const { VALID_SCOPES } = require('../modules/oauth/scopes');
+const challengeManager = require('../modules/challenges/challengeManager');
+const { createRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 const cookieOptions = {
@@ -23,6 +26,10 @@ const cookieOptions = {
   maxAge: 30 * 24 * 60 * 60 * 1000,
   path: '/',
 };
+const socialRegisterRateLimiter = createRateLimiter({
+  ...config.rateLimit.register,
+  keyPrefix: 'ratelimit:social_register',
+});
 
 // ===== 辅助函数 =====
 
@@ -44,7 +51,8 @@ async function validateAuthorizeContext(query) {
   }
 
   // 如果有 OAuth 参数，client_id 和 redirect_uri 必须都存在
-  if (!clientId || !redirectUri) {
+  if (typeof clientId !== 'string' || typeof redirectUri !== 'string' || !clientId || !redirectUri
+    || clientId.length > 255 || redirectUri.length > 2048) {
     throw new Error('INVALID_OAUTH_CONTEXT');
   }
 
@@ -55,39 +63,36 @@ async function validateAuthorizeContext(query) {
   }
 
   // 验证 redirect_uri 精确匹配
-  const registeredRedirectUris = oauthClient.redirect_uri.split('\n').map((uri) => uri.trim());
+  const registeredRedirectUris = oauthClient.redirect_uris?.map((item) => typeof item === 'string' ? item : item.redirect_uri)
+    || String(oauthClient.redirect_uri || '').split('\n').map((uri) => uri.trim());
   if (!registeredRedirectUris.includes(redirectUri)) {
     throw new Error('INVALID_OAUTH_CONTEXT');
   }
 
   // 验证 scope（如果提供）
+  if (scope !== undefined && typeof scope !== 'string') throw new Error('INVALID_OAUTH_CONTEXT');
   if (scope) {
-    const allowedScopes = new Set(['openid', 'profile', 'email']);
-    const requestedScopes = scope.split(' ');
-    for (const s of requestedScopes) {
-      if (!allowedScopes.has(s)) {
-        throw new Error('INVALID_OAUTH_CONTEXT');
-      }
-    }
+    const requestedScopes = scope.trim().split(/\s+/);
+    if (scope.length > 255 || requestedScopes.some((s) => !VALID_SCOPES.includes(s))) throw new Error('INVALID_OAUTH_CONTEXT');
   }
 
   // 验证 PKCE（如果提供）
   if (codeChallenge || codeChallengeMethod) {
-    if (codeChallengeMethod !== 'S256') {
-      throw new Error('INVALID_OAUTH_CONTEXT');
-    }
-    if (!codeChallenge || codeChallenge.length < 43 || codeChallenge.length > 128) {
+    if (codeChallengeMethod !== 'S256' || typeof codeChallenge !== 'string' || !/^[A-Za-z0-9_-]{43,128}$/.test(codeChallenge)) {
       throw new Error('INVALID_OAUTH_CONTEXT');
     }
   }
+  if (state !== undefined && (typeof state !== 'string' || state.length > 255)) throw new Error('INVALID_OAUTH_CONTEXT');
+  if (query.ui_locales !== undefined && (typeof query.ui_locales !== 'string' || query.ui_locales.length > 128)) throw new Error('INVALID_OAUTH_CONTEXT');
 
   return {
     clientId,
     redirectUri,
-    state: state ? String(state).slice(0, 255) : undefined,
-    scope: scope ? String(scope).slice(0, 255) : undefined,
-    codeChallenge: codeChallenge ? String(codeChallenge).slice(0, 128) : undefined,
-    codeChallengeMethod: codeChallengeMethod ? String(codeChallengeMethod).slice(0, 32) : undefined,
+    state: state || undefined,
+    scope: scope || undefined,
+    codeChallenge: codeChallenge || undefined,
+    codeChallengeMethod: codeChallengeMethod || undefined,
+    uiLocales: query.ui_locales || undefined,
   };
 }
 
@@ -108,6 +113,8 @@ function buildSuccessRedirect(authorize) {
   if (authorize.scope) params.set('scope', authorize.scope);
   if (authorize.codeChallenge) params.set('code_challenge', authorize.codeChallenge);
   if (authorize.codeChallengeMethod) params.set('code_challenge_method', authorize.codeChallengeMethod);
+  if (authorize.uiLocales) params.set('ui_locales', authorize.uiLocales);
+  if (authorize.uiLocales) params.set('ui_locales', authorize.uiLocales);
 
   return `/api/authorize?${params.toString()}`;
 }
@@ -150,12 +157,8 @@ router.get('/qq', async (req, res) => {
 
     // login 流程：验证 OAuth context（如果有）
     let authorize;
-    try {
-      authorize = await validateAuthorizeContext(req.query);
-    } catch {
-      // OAuth context 无效，忽略并继续普通登录
-      authorize = null;
-    }
+    try { authorize = await validateAuthorizeContext(req.query); }
+    catch { return res.status(400).json({ success: false, code: 'INVALID_OAUTH_CONTEXT' }); }
 
     const state = await stateManager.createState({
       provider: 'qq',
@@ -267,7 +270,9 @@ router.get('/qq/callback', async (req, res) => {
       authorize: saved.authorize,
     });
 
-    return res.redirect('/qq-register?state=' + encodeURIComponent(pendingState));
+    const registerParams = new URLSearchParams({ state: pendingState });
+    if (saved.authorize?.uiLocales) registerParams.set('ui_locales', saved.authorize.uiLocales);
+    return res.redirect('/qq-register?' + registerParams.toString());
   } catch (err) {
     // 封禁/锁定检查
     if (err.code === 'USER_BANNED' || err.code === 'ACCOUNT_LOCKED') {
@@ -282,24 +287,26 @@ router.get('/qq/callback', async (req, res) => {
 /**
  * POST /qq/complete - 注册完成
  */
-router.post('/qq/complete', async (req, res) => {
+router.post('/qq/complete', socialRegisterRateLimiter, async (req, res) => {
   try {
-    const { state, username, email, email_code: emailCode, password } = req.body;
+    const { state, username, email, email_code: emailCode, password, challenge_id: challengeId, challenge_answer: challengeAnswer } = req.body;
 
     // 验证必填字段
     if (!state || !username || !email || !emailCode || !password) {
       return res.status(400).json({ success: false, code: 'MISSING_FIELDS', message: '请填写所有字段' });
     }
 
-    // 消费 state
-    const pending = await stateManager.consumeState(state);
-    if (!pending || pending.intent !== 'register') {
-      return res.status(400).json({ success: false, code: 'INVALID_STATE', message: '注册状态无效或已过期' });
-    }
-
     // 验证字段格式
     if (!isValidUsername(username) || !isValidEmail(email) || !isValidPassword(password)) {
       return res.status(400).json({ success: false, code: 'INVALID_FIELDS', message: '用户名、邮箱或密码格式不正确' });
+    }
+
+    const challengeRequired = await challengeManager.isChallengeRequired();
+    if (challengeRequired && !challengeId) return res.status(400).json({ success: false, code: 'CHALLENGE_REQUIRED' });
+    if (challengeId) {
+      const csrfToken = req.cookies.csrf_token || 'anonymous';
+      const result = await challengeManager.verifyForRegistration(csrfToken, challengeId, challengeAnswer);
+      if (!result.success) return res.status(400).json({ success: false, code: result.code || 'CHALLENGE_FAILED' });
     }
 
     const emailDecision = await emailPolicy.checkEmail(email, { purpose: 'register', ipAddress: getClientIp(req) });
@@ -369,6 +376,12 @@ router.post('/qq/complete', async (req, res) => {
         }
       }
       return res.status(400).json({ success: false, code: 'EMAIL_CODE_INVALID', message: '邮箱验证码错误' });
+    }
+
+    // Consume provider state only after the user's form and email code pass validation.
+    const pending = await stateManager.consumeState(state);
+    if (!pending || pending.provider !== 'qq' || pending.intent !== 'register' || !pending.openid) {
+      return res.status(400).json({ success: false, code: 'INVALID_STATE', message: '注册状态无效或已过期' });
     }
 
     // 验证码正确，消费（删除）

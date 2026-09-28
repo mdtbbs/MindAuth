@@ -16,13 +16,13 @@
 
 const { pool } = require('../../db');
 const { sendEmail } = require('../../utils/email');
-const { escapeHtml } = require('../../utils/validation');
+const { resolveMailLocale, localizeNotification, buildNotificationEmail } = require('../../utils/emailTemplates');
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-async function getUserEmail(userId) {
-  const [rows] = await pool.execute('SELECT email FROM users WHERE id = ?', [userId]);
-  return rows[0]?.email || null;
+async function getUserNotificationProfile(userId) {
+  const [rows] = await pool.execute('SELECT email, preferred_locale FROM users WHERE id = ?', [userId]);
+  return rows[0] || {};
 }
 
 // ─── Public interface ────────────────────────────────────────
@@ -33,7 +33,18 @@ async function getUserEmail(userId) {
  * @param {{ user_id: number, type: string, title: string, content?: string, ip_address?: string, user_agent?: string, sendEmail?: boolean }} opts
  * @returns {Promise<{ id?: number }>}
  */
-async function create({ user_id, type, title, content, ip_address, user_agent, sendEmail: shouldSendEmail = false }) {
+async function create({ user_id, type, title, content, ip_address, user_agent, emailData, sendEmail: shouldSendEmail = false }) {
+  let profile = {};
+  try {
+    profile = await getUserNotificationProfile(user_id);
+  } catch (err) {
+    console.warn('[NotificationCenter] Could not load notification locale:', err.message);
+  }
+  const locale = resolveMailLocale(profile.preferred_locale);
+  const localized = localizeNotification(locale, type, emailData || {});
+  const notificationTitle = localized?.title || title;
+  const notificationContent = localized?.content || content;
+
   let insertId;
   try {
     const [result] = await pool.execute(
@@ -42,8 +53,8 @@ async function create({ user_id, type, title, content, ip_address, user_agent, s
       [
         user_id,
         type,
-        title,
-        content || null,
+        notificationTitle,
+        notificationContent || null,
         ip_address || null,
         user_agent ? String(user_agent).slice(0, 200) : null,
       ]
@@ -55,21 +66,10 @@ async function create({ user_id, type, title, content, ip_address, user_agent, s
 
   if (shouldSendEmail) {
     try {
-      const email = await getUserEmail(user_id);
+      const email = profile.email || null;
       if (email) {
-        await sendEmail(
-          email,
-          `[MindAuth] ${title}`,
-          `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #ff6b35;">${escapeHtml(title)}</h2>
-              <p>${escapeHtml(content || '')}</p>
-              ${ip_address ? `<p style="color: #666; font-size: 12px;">IP: ${escapeHtml(ip_address)}</p>` : ''}
-              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-              <p style="color: #999; font-size: 12px;">此邮件由 MindAuth 自动发送，请勿回复。</p>
-            </div>
-          `
-        );
+        const mail = buildNotificationEmail(locale, { type, title, content, ip_address, emailData });
+        await sendEmail(email, mail.subject, mail.html);
       }
     } catch (err) {
       console.warn('[NotificationCenter] email send failed:', err.message);

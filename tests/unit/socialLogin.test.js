@@ -291,6 +291,26 @@ test('loginExisting creates session for bound user', async () => {
   assert.ok(result.session.token);
 });
 
+test('loginProvider supports GitHub bindings and records a social login', async () => {
+  const user = createUser(100);
+  socialAccounts.push({ id: 1, user_id: user.id, provider: 'github', provider_user_id: 'gh-1', nickname: 'Player' });
+  const result = await socialLogin.loginProvider({
+    provider: 'github', providerUserId: 'gh-1', nickname: 'Player', ipAddress: '127.0.0.1', userAgent: 'test-agent',
+  });
+  assert.equal(result.user.id, user.id);
+  assert.equal(result.session.userId, user.id);
+  assert.equal(loginLogs.at(-1).login_type, 'social');
+  assert.equal(socialAccounts[0].last_login_at instanceof Date, true);
+});
+
+test('bindProvider rejects linking a provider account owned by another user', async () => {
+  socialAccounts.push({ id: 1, user_id: 200, provider: 'discord', provider_user_id: 'discord-1' });
+  await assert.rejects(
+    () => socialLogin.bindProvider(100, { provider: 'discord', providerUserId: 'discord-1' }),
+    (error) => error.code === 'SOCIAL_ALREADY_BOUND_TO_OTHER'
+  );
+});
+
 test('loginExisting returns null when no binding', async () => {
   const result = await socialLogin.loginExisting({
     openid: 'non-existent',

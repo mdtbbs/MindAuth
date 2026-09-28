@@ -35,6 +35,7 @@ const sessionsRoutes = require('./routes/sessions');
 const notificationsRoutes = require('./routes/notifications');
 const registerEmailCodeRoutes = require('./routes/registerEmailCode');
 const socialAuthRoutes = require('./routes/socialAuth');
+const socialProviderRoutes = require('./routes/socialProviders');
 const nativeAuthRoutes = require('./routes/nativeAuth');
 const nativeClientRoutes = require('./routes/nativeClient');
 
@@ -194,6 +195,7 @@ function createApp(deps = {}) {
   // is handled here; /api/register then falls through to authRoutes.
   app.use('/api/register', registerEmailCodeRoutes);
   app.use('/api/auth', socialAuthRoutes);
+  app.use('/api/auth/social', socialProviderRoutes);
   app.use('/api/v1/native', nativeAuthRoutes);
   app.use('/api/native', nativeClientRoutes);
   app.use('/api', authRoutes);

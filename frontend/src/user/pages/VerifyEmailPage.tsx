@@ -4,6 +4,7 @@ import api from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 type Status = 'loading' | 'success' | 'error' | 'no-token';
 
@@ -12,7 +13,7 @@ export function VerifyEmailPage() {
   const token = params.get('token');
   const { loadCurrentUser } = useAuth();
   const [status, setStatus] = useState<Status>('loading');
-  const [message, setMessage] = useState('');
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!token) {
@@ -23,16 +24,12 @@ export function VerifyEmailPage() {
     api
       .post<{ success: boolean; message: string }>('/api/email-verification/verify', { token })
       .then(async (res) => {
-        if (!res.success) {
-          throw new Error(res.message || '验证失败');
-        }
+        if (!res.success) throw new Error('verify-failed');
         setStatus('success');
-        setMessage(res.message || '邮箱验证成功');
         await loadCurrentUser();
       })
-      .catch((err: { message?: string }) => {
+      .catch(() => {
         setStatus('error');
-        setMessage(err.message || '验证失败');
       });
   }, [token, loadCurrentUser]);
 
@@ -43,36 +40,27 @@ export function VerifyEmailPage() {
         ? 'status-badge status-badge--info'
         : 'status-badge status-badge--danger';
 
-  const statusText =
-    status === 'loading'
-      ? '正在验证邮箱'
-      : status === 'success'
-        ? '邮箱验证成功'
-        : status === 'no-token'
-          ? '缺少验证令牌'
-          : '邮箱验证失败';
+  const statusText = status === 'loading' ? t('verify.loading')
+    : status === 'success' ? t('verify.success')
+      : status === 'no-token' ? t('verify.noToken') : t('verify.failed');
 
   const description =
-    status === 'success'
-      ? message
-      : status === 'loading'
-        ? '请稍候，系统正在确认该验证链接的有效性。'
-        : status === 'no-token'
-          ? '请检查邮件中的验证链接是否完整。'
-          : message;
+    status === 'loading' ? t('verify.loadingDescription')
+      : status === 'no-token' ? t('verify.noTokenDescription')
+        : status === 'success' ? t('verify.success') : t('verify.failed');
 
   return (
     <AuthShell
-      title="邮箱验证"
-      description="验证状态会实时显示在当前页面。"
+      title={t('verify.title')}
+      description={t('verify.description')}
       footer={
         <>
           <Link to="/dashboard" className="inline-link">
-            前往 Dashboard
+            {t('verify.dashboard')}
           </Link>
           <span className="text-muted">/</span>
           <Link to="/login" className="inline-link">
-            返回登录
+            {t('verify.login')}
           </Link>
         </>
       }
@@ -82,7 +70,7 @@ export function VerifyEmailPage() {
         <p className="section-description">{description}</p>
         <Link to={status === 'success' ? '/dashboard' : '/login'}>
           <Button variant="primary" fullWidth>
-            {status === 'success' ? '前往 Dashboard' : '返回登录'}
+            {status === 'success' ? t('verify.dashboard') : t('verify.login')}
           </Button>
         </Link>
       </div>

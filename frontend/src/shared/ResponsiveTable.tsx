@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { currentText } from '@/i18n/runtimeText';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,12 +28,12 @@ export function ResponsiveTable<T>({
   columns,
   data,
   keyExtractor,
-  emptyMessage = '暂无数据',
+  emptyMessage,
 }: ResponsiveTableProps<T>) {
   if (data.length === 0) {
     return (
       <p className="text-center" style={{ padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-        {emptyMessage}
+        {emptyMessage || currentText('shared.tableEmpty')}
       </p>
     );
   }

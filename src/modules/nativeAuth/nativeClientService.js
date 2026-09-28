@@ -82,6 +82,7 @@ function createNativeClientService({ pool = defaultPool, redis = defaultRedis, a
         await notify.create({
           user_id: result.user.id, type: 'login_new_device', title: '新设备登录',
           content: `检测到新的 MDTBBS Mindustry Mod 登录\n设备：${normalizedDeviceName}\nIP：${ip}`,
+          emailData: { deviceName: normalizedDeviceName, ipAddress: ip },
           ip_address: ip, user_agent: ua, sendEmail: true,
         });
       } catch (err) { console.warn('[NativeClient] new device notification failed:', err.message); }

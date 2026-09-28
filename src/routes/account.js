@@ -6,6 +6,7 @@ const { client } = require('../redis');
 const { isValidPassword, isValidEmail, getPasswordValidationError, getUsernameValidationError } = require('../utils/validation');
 const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
+const { resolveMailLocale } = require('../utils/emailTemplates');
 const requireAuth = require('../middleware/requireAuth');
 const { avatarUpload, bannerUpload } = require('../middleware/upload');
 const notificationCenter = require('../modules/notifications/notificationCenter');
@@ -18,6 +19,24 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
 
 const { safePublicPath, tryRemovePublicFile } = require('../utils/publicFiles');
+
+const SUPPORTED_LOCALES = new Set(['zh-CN', 'en', 'ru', 'ja']);
+
+router.put('/preferences', requireAuth, async (req, res) => {
+  const preferredLocale = typeof req.body?.preferred_locale === 'string' ? req.body.preferred_locale : '';
+  if (!SUPPORTED_LOCALES.has(preferredLocale)) {
+    return res.status(400).json({ success: false, code: 'INVALID_LOCALE', message: 'Choose a supported language.' });
+  }
+  try {
+    await pool.execute('UPDATE users SET preferred_locale = ? WHERE id = ?', [preferredLocale, req.user.id]);
+    req.user.preferred_locale = preferredLocale;
+    await sessionManager.invalidateUserSessionCache(req.cookies.session);
+    res.json({ success: true, preferred_locale: preferredLocale });
+  } catch (error) {
+    console.error('Update account preferences failed:', error.message);
+    res.status(500).json({ success: false, code: 'PREFERENCE_UPDATE_FAILED', message: 'Could not save your language preference.' });
+  }
+});
 
 // POST /change-password - Change password
 router.post('/change-password', requireAuth, async (req, res) => {
@@ -148,6 +167,7 @@ router.post('/change-username', requireAuth, async (req, res) => {
       type: 'username_changed',
       title: '用户名已修改',
       content: `您的用户名已从 "${oldUsername}" 更改为 "${trimmedUsername}"，请重新登录。`,
+      emailData: { oldUsername, newUsername: trimmedUsername },
       ip_address: getClientIp(req),
       user_agent: req.headers['user-agent'],
       sendEmail: true,
@@ -228,7 +248,7 @@ router.post('/change-email', requireAuth, async (req, res) => {
 
     // Send verification email to new address
     const verifyLink = `${BASE_URL}/#/verify-email?token=${token}`;
-    await sendVerificationEmail(new_email, verifyLink);
+    await sendVerificationEmail(new_email, verifyLink, resolveMailLocale(user.preferred_locale, req.get('accept-language')));
 
     res.json({ success: true, message: '验证邮件已发送到新邮箱，请点击链接完成更换' });
   } catch (err) {
@@ -524,7 +544,7 @@ router.delete('/bindings/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, code: 'INVALID_ID', message: '无效的绑定 ID' });
     }
 
-    await socialLogin.unbindQq(bindingId, req.user.id);
+    await socialLogin.unbindSocial(bindingId, req.user.id);
 
     logAudit({
       user_id: req.user.id,

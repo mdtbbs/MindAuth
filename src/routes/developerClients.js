@@ -31,7 +31,7 @@ router.put('/:id', async (req, res) => {
     await registry.updateOwnerApplication(req.user.id, Number(req.params.id), req.body || {});
     res.json({ success: true });
   } catch (error) {
-    res.status(error.message === '应用不存在' ? 404 : 400).json({ success: false, message: error.message || '更新应用失败' });
+    res.status(error.statusCode || (error.message === '应用不存在' ? 404 : 400)).json({ success: false, ...(error.code ? { code: error.code } : {}), message: error.message || '更新应用失败' });
   }
 });
 
@@ -40,7 +40,7 @@ router.post('/:id/submit', async (req, res) => {
     await registry.submitOwnerApplication(req.user.id, Number(req.params.id));
     res.json({ success: true, status: 'pending' });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message || '提交审核失败' });
+    res.status(error.statusCode || 400).json({ success: false, ...(error.code ? { code: error.code } : {}), message: error.message || '提交审核失败' });
   }
 });
 

@@ -12,6 +12,7 @@ export interface User {
   avatar_url: string | null;
   banner_url: string | null;
   email_verified: boolean;
+  preferred_locale?: string | null;
   phone_masked: string | null;
   phone_verified: boolean;
   phone_verified_at: string | null;
@@ -161,6 +162,11 @@ export interface SocialBinding {
 export interface SocialBindingsResponse {
   success: boolean;
   bindings: SocialBinding[];
+}
+
+export interface SocialProvidersResponse {
+  success: boolean;
+  providers: string[];
 }
 
 export interface SocialUnbindResponse {
@@ -321,6 +327,7 @@ export interface AdminOAuthClient {
   require_pkce?: boolean;
   client_type: 'public' | 'confidential';
   party_type: 'first_party' | 'third_party';
+  ecosystem: 'mdtbbs' | 'mindustry-club' | 'global';
   status: 'draft' | 'pending' | 'approved' | 'rejected' | 'suspended';
   owner_user_id: number | null;
   requested_scopes: string[];

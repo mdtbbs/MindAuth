@@ -10,6 +10,7 @@ import { Dialog } from '@/shared/Dialog';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
 import { SkeletonTable } from '@/shared/Skeleton';
 import type { AdminOAuthClient, AdminCreatedClient } from '@/api/types';
+import { useAdminClientsI18n } from '../i18n/adminClients';
 
 const SUPPORTED_SCOPES = [
   'openid', 'profile', 'email', 'forum.read', 'forum.write',
@@ -18,6 +19,7 @@ const SUPPORTED_SCOPES = [
 ] as const;
 
 export function AdminClientsPage() {
+  const { locale, setLocale, t } = useAdminClientsI18n();
   const navigate = useNavigate();
   const { hasPermission } = useAdminAuth();
   const { toast } = useToast();
@@ -31,12 +33,13 @@ export function AdminClientsPage() {
   const [rotateClient, setRotateClient] = useState<AdminOAuthClient | null>(null);
   const [revokeClient, setRevokeClient] = useState<AdminOAuthClient | null>(null);
   const [createdSecret, setCreatedSecret] = useState<AdminCreatedClient | null>(null);
-  const [secretDialogTitle, setSecretDialogTitle] = useState('客户端创建成功');
+  const [secretDialogTitle, setSecretDialogTitle] = useState(t('secretCreated'));
 
   // Form state
   const [name, setName] = useState('');
   const [redirectUri, setRedirectUri] = useState('');
   const [requirePkce, setRequirePkce] = useState(false);
+  const [ecosystem, setEcosystem] = useState<'mdtbbs' | 'mindustry-club' | 'global'>('mdtbbs');
   const [scopes, setScopes] = useState<string[]>([]);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
@@ -47,13 +50,13 @@ export function AdminClientsPage() {
       const res = await api.get<{ success: boolean; clients: AdminOAuthClient[] }>('/api/admin/clients');
       setClients(res.clients);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '获取客户端列表失败';
+      const message = error instanceof Error ? error.message : t('loadFailed');
       setLoadError(message);
       toast('error', message);
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => {
     void loadClients();
@@ -61,20 +64,20 @@ export function AdminClientsPage() {
 
   function validateRedirectUri(uri: string): string | null {
     const values = uri.split('\n').map(value => value.trim()).filter(Boolean);
-    if (!values.length) return '至少需要一个回调地址';
+    if (!values.length) return t('redirectRequired');
     for (const value of values) {
       try {
         const url = new URL(value);
-        if (url.username || url.password || url.hash) return '回调地址不能包含用户凭证或 fragment';
+        if (url.username || url.password || url.hash) return t('redirectCredentials');
         if (url.protocol === 'https:') continue;
         if (url.protocol === 'http:') {
           if (['127.0.0.1', '[::1]'].includes(url.hostname)) continue;
-          if (['localhost', '0.0.0.0'].includes(url.hostname) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(url.hostname)) return '回调地址不能使用内网地址';
+          if (['localhost', '0.0.0.0'].includes(url.hostname) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(url.hostname)) return t('redirectPrivate');
           continue; // Retained for already registered public HTTP integrations.
         }
         const scheme = url.protocol.slice(0, -1).toLowerCase();
-        if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(scheme) || ['javascript', 'vbscript', 'data', 'file', 'blob', 'about', 'intent', 'content', 'mailto'].includes(scheme) || !url.hostname) return '自定义回调协议不安全或格式不正确';
-      } catch { return `无效的 URL 格式：${value}`; }
+        if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(scheme) || ['javascript', 'vbscript', 'data', 'file', 'blob', 'about', 'intent', 'content', 'mailto'].includes(scheme) || !url.hostname) return t('redirectUnsafeScheme');
+      } catch { return t('invalidUrl', { value }); }
     }
     return null;
   }
@@ -87,6 +90,7 @@ export function AdminClientsPage() {
     setName('');
     setRedirectUri('');
     setRequirePkce(false);
+    setEcosystem('mdtbbs');
     setFormError('');
   }
 
@@ -97,7 +101,7 @@ export function AdminClientsPage() {
       return;
     }
     if (!name.trim()) {
-      setFormError('名称必填');
+      setFormError(t('nameRequired'));
       return;
     }
 
@@ -109,15 +113,16 @@ export function AdminClientsPage() {
         redirect_uri: redirectUriValues()[0],
         redirect_uris: redirectUriValues(),
         require_pkce: requirePkce,
+        ecosystem,
       });
-      setSecretDialogTitle('客户端创建成功');
+      setSecretDialogTitle(t('secretCreated'));
       setCreatedSecret(res);
       setCreateDialogOpen(false);
       resetForm();
       loadClients();
-      toast('success', '客户端已创建');
+      toast('success', t('createdToast'));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '创建失败';
+      const msg = err instanceof Error ? err.message : t('createFailed');
       setFormError(msg);
       toast('error', msg);
     } finally {
@@ -128,8 +133,8 @@ export function AdminClientsPage() {
   async function handleUpdate() {
     if (!editClient) return;
 
-    if (!name.trim()) { setFormError('名称必填'); return; }
-    if (!scopes.length) { setFormError('至少选择一个 OAuth Scope'); return; }
+    if (!name.trim()) { setFormError(t('nameRequired')); return; }
+    if (!scopes.length) { setFormError(t('scopeRequired')); return; }
     const uriError = validateRedirectUri(redirectUri);
     if (uriError) {
       setFormError(uriError);
@@ -144,13 +149,14 @@ export function AdminClientsPage() {
         redirect_uris: redirectUriValues(),
         require_pkce: requirePkce,
         scopes,
+        ecosystem,
       });
       setEditClient(null);
       resetForm();
       loadClients();
-      toast('success', '客户端已更新');
+      toast('success', t('updatedToast'));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '更新失败';
+      const msg = err instanceof Error ? err.message : t('updateFailed');
       setFormError(msg);
       toast('error', msg);
     } finally {
@@ -166,9 +172,9 @@ export function AdminClientsPage() {
       await api.del(`/api/admin/clients/${deleteClient.id}`);
       setDeleteClient(null);
       loadClients();
-      toast('success', '客户端已删除');
+      toast('success', t('deletedToast'));
     } catch {
-      toast('error', '删除失败');
+      toast('error', t('deleteFailed'));
     } finally {
       setFormLoading(false);
     }
@@ -181,11 +187,11 @@ export function AdminClientsPage() {
     try {
       const res = await api.post<AdminCreatedClient>(`/api/admin/clients/${rotateClient.id}/rotate-secret`);
       setRotateClient(null);
-      setSecretDialogTitle('密钥轮换成功');
+      setSecretDialogTitle(t('secretRotated'));
       setCreatedSecret(res);
-      toast('success', '密钥已轮换');
+      toast('success', t('rotatedToast'));
     } catch {
-      toast('error', '轮换密钥失败');
+      toast('error', t('rotateFailed'));
     } finally {
       setFormLoading(false);
     }
@@ -198,9 +204,9 @@ export function AdminClientsPage() {
         approved_scopes: status === 'approved' ? scopes : [],
       });
       await loadClients();
-      toast('success', status === 'approved' ? '应用已启用' : '应用已停用');
+      toast('success', status === 'approved' ? t('reviewApproved') : t('reviewSuspended'));
     } catch (error) {
-      toast('error', error instanceof Error ? error.message : '审核操作失败');
+      toast('error', error instanceof Error ? error.message : t('reviewFailed'));
     }
   }
 
@@ -209,8 +215,8 @@ export function AdminClientsPage() {
     setFormLoading(true);
     try {
       await api.post(`/api/admin/clients/${revokeClient.id}/revoke-authorizations`);
-      setRevokeClient(null); await loadClients(); toast('success', '该客户端的全部授权和令牌已撤销');
-    } catch (error) { toast('error', error instanceof Error ? error.message : '撤销授权失败'); }
+      setRevokeClient(null); await loadClients(); toast('success', t('revokeSuccess'));
+    } catch (error) { toast('error', error instanceof Error ? error.message : t('revokeFailed')); }
     finally { setFormLoading(false); }
   }
 
@@ -219,6 +225,7 @@ export function AdminClientsPage() {
     setName(client.name);
     setRedirectUri((client.redirect_uris || [{ redirect_uri: client.redirect_uri }]).map(item => item.redirect_uri).join('\n'));
     setRequirePkce(client.require_pkce ?? false);
+    setEcosystem(client.ecosystem || 'mdtbbs');
     setScopes([...(client.status === 'approved' ? client.approved_scopes : client.requested_scopes)]);
     setFormError('');
   }
@@ -227,11 +234,12 @@ export function AdminClientsPage() {
     <div>
       <div className="cluster cluster--spread" style={{ marginBottom: 'var(--space-6)' }}>
         <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)' }}>
-          OAuth 客户端管理
+          {t('pageTitle')}
         </h1>
+        <label className="admin-client-language"><span>{t('language')}</span><select aria-label={t('language')} value={locale} onChange={event => setLocale(event.target.value as typeof locale)}><option value="en">English</option><option value="ru">Русский</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select></label>
         {hasPermission('clients.write') && (
           <Button onClick={() => { resetForm(); setCreateDialogOpen(true); }}>
-            创建客户端
+            {t('createClient')}
           </Button>
         )}
       </div>
@@ -240,12 +248,12 @@ export function AdminClientsPage() {
         {loading ? (
           <SkeletonTable rows={5} columns={4} />
         ) : loadError ? (
-          <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadClients()}>重试</Button></div>
+          <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{loadError}</p><Button size="sm" variant="secondary" onClick={() => void loadClients()}>{t('retry')}</Button></div>
         ) : (
           <ResponsiveTable
             columns={[
               {
-                header: '名称',
+                header: t('name'),
                 accessor: 'name',
                 render: (c) => <span style={{ fontWeight: 'var(--weight-semibold)' }}>{c.name}</span>,
               },
@@ -259,7 +267,7 @@ export function AdminClientsPage() {
                 ),
               },
               {
-                header: '回调地址',
+                header: t('redirectUris'),
                 accessor: 'redirect_uri',
                 render: (c) => (
                   <span className="text-truncate" style={{ fontSize: 'var(--text-sm)', maxWidth: '200px', display: 'inline-block' }}>
@@ -268,89 +276,90 @@ export function AdminClientsPage() {
                 ),
               },
               {
-                header: '应用类型 / 状态',
+                header: t('ecosystemTypeStatus'),
                 accessor: 'client_type',
-                render: (c) => <span>{c.client_type === 'public' ? 'Public Client' : 'Confidential Client'} · {c.party_type === 'first_party' ? '第一方' : '第三方'} · {({ pending: '待审核', approved: '已启用', suspended: '已停用', rejected: '已拒绝', draft: '草稿' } as Record<string, string>)[c.status] || c.status}</span>,
+                render: (c) => <span>{c.ecosystem === 'mindustry-club' ? 'Mindustry Club' : c.ecosystem === 'global' ? t('globalEcosystem') : 'MDTBBS'} · {c.client_type === 'public' ? t('publicClient') : t('confidentialClient')} · {c.party_type === 'first_party' ? t('firstParty') : t('thirdParty')} · {t(c.status)}</span>,
               },
               {
-                header: 'Scope',
+                header: t('scopes'),
                 accessor: 'scopes',
-                render: (c) => <span title={`已批准：${c.approved_scopes.join(' ')}`}>{c.status === 'pending' ? `申请：${c.requested_scopes.join(' ')}` : `批准：${c.approved_scopes.join(' ')}`}</span>,
+                render: (c) => <span title={t('approvedTitle', { value: c.approved_scopes.join(' ') })}>{c.status === 'pending' ? t('requested', { value: c.requested_scopes.join(' ') }) : t('approvedScopes', { value: c.approved_scopes.join(' ') })}</span>,
               },
               {
-                header: 'PKCE',
+                header: t('pkce'),
                 accessor: 'pkce',
                 render: (c) => c.require_pkce ? (
-                  <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)' }}>{c.client_type === 'public' ? 'S256 必需' : '启用'}</span>
+                  <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)' }}>{c.client_type === 'public' ? t('s256Required') : t('enabled')}</span>
                 ) : (
-                  <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>关闭</span>
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>{t('disabled')}</span>
                 ),
               },
               {
-                header: '创建时间',
+                header: t('createdAt'),
                 accessor: 'created',
                 render: (c) => (
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                    {new Date(c.created_at).toLocaleDateString('zh-CN')}
+                    {new Date(c.created_at).toLocaleDateString(({ en: 'en', ru: 'ru', ja: 'ja-JP', 'zh-CN': 'zh-CN' } as const)[locale])}
                   </span>
                 ),
               },
-              { header: 'Owner / 授权用户', accessor: 'owner', render: (c) => <span>{c.owner_username || '平台应用'}<small className="admin-cell-sub">{c.authorization_count || 0} 人授权</small></span> },
-              { header: '最近使用', accessor: 'last_used', render: (c) => c.last_used_at ? new Date(c.last_used_at).toLocaleString('zh-CN') : '—' },
+              { header: t('ownerUsers'), accessor: 'owner', render: (c) => <span>{c.owner_username || t('platformApp')}<small className="admin-cell-sub">{t('authorizationCount', { count: c.authorization_count || 0 })}</small></span> },
+              { header: t('lastUsed'), accessor: 'last_used', render: (c) => c.last_used_at ? new Date(c.last_used_at).toLocaleString(({ en: 'en', ru: 'ru', ja: 'ja-JP', 'zh-CN': 'zh-CN' } as const)[locale]) : '—' },
               {
-                header: '操作',
+                header: t('actions'),
                 accessor: 'actions',
                 render: (c) => hasPermission('clients.write') ? (
                   <div className="cluster" style={{ gap: 'var(--space-1)' }}>
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>编辑</Button>
-                    {c.client_type === 'confidential' ? <Button size="sm" variant="ghost" onClick={() => setRotateClient(c)}>轮换密钥</Button> : null}
-                    {c.status === 'pending' && c.party_type === 'third_party' ? <Button size="sm" onClick={() => navigate('/applications')}>前往审核</Button> : null}
-                    {c.status === 'approved' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'suspended')}>停用</Button> : null}
-                    {c.status === 'suspended' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'approved', c.approved_scopes)}>恢复</Button> : null}
-                    {c.status === 'approved' && <Button size="sm" variant="secondary" onClick={() => setRevokeClient(c)}>撤销全部授权</Button>}
-                    <Button size="sm" variant="danger" onClick={() => setDeleteClient(c)}>删除</Button>
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>{t('edit')}</Button>
+                    {c.client_type === 'confidential' ? <Button size="sm" variant="ghost" onClick={() => setRotateClient(c)}>{t('rotateSecret')}</Button> : null}
+                    {c.status === 'pending' && c.party_type === 'third_party' ? <Button size="sm" onClick={() => navigate('/applications')}>{t('review')}</Button> : null}
+                    {c.status === 'approved' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'suspended')}>{t('disable')}</Button> : null}
+                    {c.status === 'suspended' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'approved', c.approved_scopes)}>{t('restore')}</Button> : null}
+                    {c.status === 'approved' && <Button size="sm" variant="secondary" onClick={() => setRevokeClient(c)}>{t('revokeAll')}</Button>}
+                    <Button size="sm" variant="danger" onClick={() => setDeleteClient(c)}>{t('delete')}</Button>
                   </div>
-                ) : <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>只读</span>,
+                ) : <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>{t('readOnly')}</span>,
               },
             ]}
             data={clients}
             keyExtractor={(c) => c.id}
-            emptyMessage="暂无客户端"
+            emptyMessage={t('empty')}
           />
         )}
       </Card>
 
-      <Dialog open={!!revokeClient} onClose={() => setRevokeClient(null)} title="撤销客户端全部授权" footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setRevokeClient(null)}>取消</Button><Button variant="danger" onClick={() => void handleRevokeAuthorizations()} loading={formLoading}>确认撤销</Button></div>}>
-        <p>将撤销 <strong>{revokeClient?.name}</strong> 的全部用户授权，并立即吊销相关 access token 和 refresh token。此操作不会停用客户端。</p>
+      <Dialog open={!!revokeClient} onClose={() => setRevokeClient(null)} title={t('revokeTitle')} footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setRevokeClient(null)}>{t('cancel')}</Button><Button variant="danger" onClick={() => void handleRevokeAuthorizations()} loading={formLoading}>{t('confirmRevoke')}</Button></div>}>
+        <p>{t('revokeBody', { name: revokeClient?.name || '' })}</p>
       </Dialog>
 
       {/* Create Dialog */}
       <Dialog
         open={createDialogOpen}
         onClose={() => { setCreateDialogOpen(false); resetForm(); }}
-        title="创建 OAuth 客户端"
+        title={t('createTitle')}
         footer={
           <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => { setCreateDialogOpen(false); resetForm(); }}>取消</Button>
-            <Button onClick={handleCreate} loading={formLoading}>创建</Button>
+            <Button variant="secondary" onClick={() => { setCreateDialogOpen(false); resetForm(); }}>{t('cancel')}</Button>
+            <Button onClick={handleCreate} loading={formLoading}>{t('create')}</Button>
           </div>
         }
       >
         <div className="stack">
+          <label className="field"><span className="field__label">{t('ecosystem')}</span><select className="field__input" value={ecosystem} onChange={event => setEcosystem(event.target.value as typeof ecosystem)}><option value="mdtbbs">MDTBBS</option><option value="mindustry-club">Mindustry Club</option><option value="global">{t('globalEcosystem')}</option></select></label>
           <TextField
-            label="客户端名称"
+            label={t('clientName')}
             value={name}
             onChange={(e) => setName(e.target.value)}
             error={formError && !name.trim() ? formError : undefined}
-            placeholder="例如: MindFourm"
+            placeholder={t('createNamePlaceholder')}
             autoFocus
           />
           <label className="field">
-            <span className="field__label">回调地址 (Redirect URI)，每行一个</span>
+            <span className="field__label">{t('callbackLabel')}</span>
             <textarea className="field__input" rows={4} value={redirectUri}
               onChange={(e) => { setRedirectUri(e.target.value); setFormError(''); }}
               placeholder={'https://example.com/callback\nmyapp://oauth/callback\nhttp://127.0.0.1:0/callback'} />
-            <span className="field__hint">支持 HTTPS、自定义应用协议，以及 loopback 随机端口。</span>
+            <span className="field__hint">{t('callbackHint')}</span>
           </label>
           {formError ? <p role="alert" style={{ color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>{formError}</p> : null}
           <label className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
@@ -359,7 +368,7 @@ export function AdminClientsPage() {
               checked={requirePkce}
               onChange={(e) => setRequirePkce(e.target.checked)}
             />
-            <span style={{ fontSize: 'var(--text-sm)' }}>要求 PKCE (推荐)</span>
+            <span style={{ fontSize: 'var(--text-sm)' }}>{t('requirePkceRecommended')}</span>
           </label>
           {formError && !redirectUri && (
             <p style={{ color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>{formError}</p>
@@ -371,29 +380,30 @@ export function AdminClientsPage() {
       <Dialog
         open={!!editClient}
         onClose={() => { setEditClient(null); resetForm(); }}
-        title="编辑 OAuth 客户端"
+        title={t('editTitle')}
         footer={
           <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => { setEditClient(null); resetForm(); }}>取消</Button>
-            <Button onClick={handleUpdate} loading={formLoading}>保存</Button>
+            <Button variant="secondary" onClick={() => { setEditClient(null); resetForm(); }}>{t('cancel')}</Button>
+            <Button onClick={handleUpdate} loading={formLoading}>{t('save')}</Button>
           </div>
         }
       >
         <div className="stack">
+          <label className="field"><span className="field__label">{t('ecosystem')}</span><select className="field__input" value={ecosystem} onChange={event => setEcosystem(event.target.value as typeof ecosystem)}><option value="mdtbbs">MDTBBS</option><option value="mindustry-club">Mindustry Club</option><option value="global">{t('globalEcosystem')}</option></select></label>
           <TextField
-            label="客户端名称"
+            label={t('clientName')}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="客户端名称"
+            placeholder={t('editNamePlaceholder')}
           />
           <label className="field">
-            <span className="field__label">回调地址 (Redirect URI)，每行一个</span>
+            <span className="field__label">{t('callbackLabel')}</span>
             <textarea className="field__input" rows={4}
             value={redirectUri}
             onChange={(e) => { setRedirectUri(e.target.value); setFormError(''); }}
             placeholder={'https://example.com/callback\nmyapp://oauth/callback\nhttp://127.0.0.1:0/callback'}
             />
-            <span className="field__hint">支持 HTTPS、自定义应用协议，以及 loopback 随机端口。</span>
+            <span className="field__hint">{t('callbackHint')}</span>
           </label>
           <label className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
             <input
@@ -401,10 +411,10 @@ export function AdminClientsPage() {
               checked={requirePkce}
               onChange={(e) => setRequirePkce(e.target.checked)}
             />
-            <span style={{ fontSize: 'var(--text-sm)' }}>要求 PKCE</span>
+            <span style={{ fontSize: 'var(--text-sm)' }}>{t('requirePkce')}</span>
           </label>
           <fieldset className="field">
-            <legend className="field__label">允许的 OAuth Scope</legend>
+            <legend className="field__label">{t('allowedScopes')}</legend>
             <div className="admin-scope-options">
               {SUPPORTED_SCOPES.map(scope => (
                 <label key={scope} className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
@@ -419,7 +429,7 @@ export function AdminClientsPage() {
                 </label>
               ))}
             </div>
-            <span className="field__hint">修改已启用客户端的 Scope 会立即撤销它的全部用户授权及相关令牌。</span>
+            <span className="field__hint">{t('scopeChangeWarning')}</span>
           </fieldset>
         </div>
       </Dialog>
@@ -428,32 +438,31 @@ export function AdminClientsPage() {
       <Dialog
         open={!!deleteClient}
         onClose={() => setDeleteClient(null)}
-        title="删除客户端"
+        title={t('deleteTitle')}
         footer={
           <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => setDeleteClient(null)}>取消</Button>
-            <Button variant="danger" onClick={handleDelete} loading={formLoading}>确认删除</Button>
+            <Button variant="secondary" onClick={() => setDeleteClient(null)}>{t('cancel')}</Button>
+            <Button variant="danger" onClick={handleDelete} loading={formLoading}>{t('confirmDelete')}</Button>
           </div>
         }
       >
-        <p>确认删除客户端 <strong>{deleteClient?.name}</strong>? 所有使用该客户端的授权将失效。</p>
+        <p>{t('deleteBody', { name: deleteClient?.name || '' })}</p>
       </Dialog>
 
       {/* Rotate Secret Confirm Dialog */}
       <Dialog
         open={!!rotateClient}
         onClose={() => setRotateClient(null)}
-        title="轮换客户端密钥"
+        title={t('rotateTitle')}
         footer={
           <div className="cluster cluster--end">
-            <Button variant="secondary" onClick={() => setRotateClient(null)}>取消</Button>
-            <Button variant="danger" onClick={handleRotate} loading={formLoading}>确认轮换</Button>
+            <Button variant="secondary" onClick={() => setRotateClient(null)}>{t('cancel')}</Button>
+            <Button variant="danger" onClick={handleRotate} loading={formLoading}>{t('confirmRotate')}</Button>
           </div>
         }
       >
         <p>
-          确认为客户端 <strong>{rotateClient?.name}</strong> 生成新的 Client Secret?
-          旧密钥将<strong>立即失效</strong>，使用旧密钥的应用需要更新配置后才能继续换取令牌。
+          {t('rotateBody', { name: rotateClient?.name || '' })} {t('rotateWarning')}
         </p>
       </Dialog>
 
@@ -463,16 +472,16 @@ export function AdminClientsPage() {
         onClose={() => setCreatedSecret(null)}
         title={secretDialogTitle}
         footer={
-          <Button onClick={() => setCreatedSecret(null)}>我已保存，关闭</Button>
+          <Button onClick={() => setCreatedSecret(null)}>{t('savedClose')}</Button>
         }
       >
         {createdSecret && (
           <div className="stack">
             <p style={{ color: 'var(--color-warning)', fontWeight: 'var(--weight-semibold)' }}>
-              请立即保存 Client Secret，关闭后将无法再次查看!
+              {t('saveSecretNow')}
             </p>
             <div>
-              <label className="field__label">Client ID</label>
+              <label className="field__label">{t('clientId')}</label>
               <div style={{
                 padding: 'var(--space-2) var(--space-3)',
                 background: 'var(--color-bg-sunken)',
@@ -485,7 +494,7 @@ export function AdminClientsPage() {
               </div>
             </div>
             <div>
-              <label className="field__label">Client Secret</label>
+              <label className="field__label">{t('clientSecret')}</label>
               <div style={{
                 padding: 'var(--space-2) var(--space-3)',
                 background: 'var(--color-warning-bg)',

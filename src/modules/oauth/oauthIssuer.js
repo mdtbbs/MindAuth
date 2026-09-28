@@ -404,6 +404,7 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
       consentRequired: missingConsent,
       client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
         website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type,
+        ecosystem: clientData.ecosystem || 'mdtbbs',
         developer_name: developerName, owner_user_id: clientData.owner_user_id || null,
         developer_url: clientData.owner_user_id ? forumProfileUrl(clientData.owner_user_id) : null },
       requestedScopes: requested,
@@ -416,6 +417,7 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
       consentRequired: true,
       client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
         website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type,
+        ecosystem: clientData.ecosystem || 'mdtbbs',
         developer_name: developerName, owner_user_id: clientData.owner_user_id || null,
         developer_url: clientData.owner_user_id ? forumProfileUrl(clientData.owner_user_id) : null },
       requestedScopes: requested,
@@ -832,7 +834,7 @@ async function userinfo(accessToken) {
 
   // 2. Get user info
   const [userRows] = await pool.execute(
-    'SELECT id, username, email, email_verified, phone, phone_verified, phone_verified_at, avatar_url, ban_status, created_at FROM users WHERE id = ?',
+    'SELECT id, username, email, email_verified, preferred_locale, phone, phone_verified, phone_verified_at, avatar_url, ban_status, created_at FROM users WHERE id = ?',
     [tokenData.user_id]
   );
   const user = userRows[0];
@@ -848,6 +850,7 @@ async function userinfo(accessToken) {
     claims.id = user.id;
     claims.username = user.username;
     claims.avatar_url = user.avatar_url;
+    claims.preferred_locale = user.preferred_locale || null;
     claims.phone_verified = user.phone_verified === 1 || user.phone_verified === true;
     claims.phone_verified_at = user.phone_verified_at;
     claims.phone_masked = maskPhone(user.phone);
@@ -896,7 +899,7 @@ async function userByAccessToken(accessToken) {
   await assertNativeSessionActive(tokenData.native_session_id);
 
   const [userRows] = await pool.execute(
-    'SELECT id, username, email, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?',
+    'SELECT id, username, email, email_verified, preferred_locale, phone, phone_verified, phone_verified_at, avatar_url, created_at FROM users WHERE id = ?',
     [tokenData.user_id]
   );
   const user = userRows[0];
@@ -908,6 +911,8 @@ async function userByAccessToken(accessToken) {
     id: user.id,
     username: user.username,
     email: user.email,
+    email_verified: user.email_verified === 1 || user.email_verified === true,
+    preferred_locale: user.preferred_locale || null,
     avatar_url: user.avatar_url,
     phone_masked: maskPhone(user.phone),
     phone_verified: user.phone_verified === 1 || user.phone_verified === true,

@@ -7,11 +7,13 @@ import { useToast } from '@/shared/ToastProvider';
 import { Button } from '@/shared/Button';
 import { AccountEmptyState, AccountLoadState, AccountSection, formatAccountDate, StatusLabel } from '@/user/components/AccountPageParts';
 import { AccountShell } from '@/user/components/AccountShell';
+import { useI18n } from '@/i18n/I18nProvider';
 
 interface NotificationPagination { page: number; limit: number; total: number; totalPages: number }
 interface NotificationsResponse { success: boolean; notifications: Notification[]; pagination: NotificationPagination }
 
 export function NotificationsPage() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
   const [page, setPage] = useState(1);
@@ -30,8 +32,8 @@ export function NotificationsPage() {
     try {
       await api.patch(`/api/notifications/${id}/read`);
       await notifications.reload();
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : '标记已读失败');
+    } catch {
+      toast('error', t('notification.readAllFailed'));
     } finally {
       setBusyId(null);
     }
@@ -41,10 +43,10 @@ export function NotificationsPage() {
     setBusyId(-1);
     try {
       await api.patch('/api/notifications/read-all');
-      toast('success', '所有通知已标记为已读');
+      toast('success', t('notification.readAllSuccess'));
       await notifications.reload();
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : '标记失败');
+    } catch {
+      toast('error', t('notification.readAllFailed'));
     } finally {
       setBusyId(null);
     }
@@ -54,23 +56,23 @@ export function NotificationsPage() {
     setBusyId(item.id);
     try {
       await api.del(`/api/notifications/${item.id}`);
-      toast('success', '通知已删除');
+      toast('success', t('notification.delete'));
       if (items.length === 1 && page > 1) setPage((current) => current - 1);
       else await notifications.reload();
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : '删除通知失败');
+    } catch {
+      toast('error', t('notification.deleteFailed'));
     } finally {
       setBusyId(null);
     }
   }
 
   return (
-    <AccountShell title="通知" description="查看 MindAuth 的账户、安全和服务消息。">
+    <AccountShell title={t('notification.title')} description={t('notification.description')}>
       {user ? (
         <AccountSection
-          title="通知中心"
-          description={pageInfo ? `共 ${pageInfo.total} 条通知` : '最新的账户消息会显示在这里。'}
-          action={hasNotifications ? <Button type="button" variant="secondary" size="sm" loading={busyId === -1} onClick={() => void markAllRead()}>全部标记已读</Button> : undefined}
+          title={t('notification.center')}
+          description={pageInfo ? t('notification.count', { count: pageInfo.total }) : t('notification.latest')}
+          action={hasNotifications ? <Button type="button" variant="secondary" size="sm" loading={busyId === -1} onClick={() => void markAllRead()}>{t('notification.markAll')}</Button> : undefined}
         >
           <AccountLoadState loading={notifications.loading} error={notifications.error} retry={notifications.reload}>
             {items.length ? (
@@ -80,25 +82,25 @@ export function NotificationsPage() {
                     <div className="notification-item__body">
                       <div className="notification-item__title-line">
                         <h3>{item.title}</h3>
-                        {!item.is_read ? <StatusLabel needsAction>未读</StatusLabel> : null}
+                        {!item.is_read ? <StatusLabel needsAction>{t('notification.unread')}</StatusLabel> : null}
                       </div>
                       {item.content ? <p>{item.content}</p> : null}
                       <span className="account-list__meta">{formatAccountDate(item.created_at, true)}</span>
                     </div>
                     <div className="account-button-row">
-                      {!item.is_read ? <Button type="button" variant="ghost" size="sm" disabled={busyId === item.id} onClick={() => void markRead(item.id)}>标记已读</Button> : null}
-                      <Button type="button" variant="ghost" size="sm" disabled={busyId === item.id} onClick={() => void removeNotification(item)}>删除</Button>
+                      {!item.is_read ? <Button type="button" variant="ghost" size="sm" disabled={busyId === item.id} onClick={() => void markRead(item.id)}>{t('notification.markRead')}</Button> : null}
+                      <Button type="button" variant="ghost" size="sm" disabled={busyId === item.id} onClick={() => void removeNotification(item)}>{t('notification.delete')}</Button>
                     </div>
                   </article>
                 ))}
               </div>
-            ) : <AccountEmptyState>暂无需要处理的通知。</AccountEmptyState>}
+            ) : <AccountEmptyState>{t('notification.empty')}</AccountEmptyState>}
           </AccountLoadState>
           {pageInfo && pageInfo.totalPages > 1 ? (
-            <nav className="account-pagination" aria-label="通知分页">
-              <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button>
-              <span>第 {pageInfo.page} / {pageInfo.totalPages} 页</span>
-              <Button type="button" variant="secondary" size="sm" disabled={page >= pageInfo.totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button>
+            <nav className="account-pagination" aria-label={t('notification.pageLabel')}>
+              <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>{t('notification.previous')}</Button>
+              <span>{t('notification.page', { page: pageInfo.page, total: pageInfo.totalPages })}</span>
+              <Button type="button" variant="secondary" size="sm" disabled={page >= pageInfo.totalPages} onClick={() => setPage((current) => current + 1)}>{t('notification.next')}</Button>
             </nav>
           ) : null}
         </AccountSection>

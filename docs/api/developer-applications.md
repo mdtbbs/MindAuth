@@ -6,9 +6,10 @@
 
 ## 使用条件与安全边界
 
-- 开发者 API 使用 MindAuth `session` Cookie。创建应用还要求账号手机号已验证。
+- 开发者 API 使用 MindAuth `session` Cookie。所有生态都要求邮箱已验证；`mdtbbs` 生态还要求手机号已验证，`mindustry-club` 与 `global` 不要求手机号。
 - 创建接口按 IP 限制为每小时 10 次；应用数量没有固定上限。
-- 新应用立即为 `approved`，类型固定为 `public` / `third_party`，`client_secret` 为 `NULL`，并强制 PKCE S256。
+- 新应用类型固定为 `public` / `third_party`，`client_secret` 为 `NULL`，并强制 PKCE S256；创建后进入 `pending`，由管理员审核后启用。
+- 每个应用有明确的 `ecosystem`：`mdtbbs`、`mindustry-club` 或 `global`。省略时兼容默认 `mdtbbs`。迁移 `018_international_locales_and_ecosystems.sql` 将既有客户端设为 `mdtbbs`，保持旧资格策略。
 - 应用使用 Authorization Code Flow；Public Client 不支持客户端密钥、implicit flow 或 password grant。
 - 新第三方应用只允许 HTTPS、明确的 loopback HTTP（含端口 `0`）或安全自定义 scheme 回调。HTTPS 和回调地址会拒绝用户凭证、fragment、内网地址及危险协议。
 - 更新 scopes 会同步更新应用允许的 scopes，并撤销该应用现存的 refresh/access token；用户下次授权时按新增 scope 重新确认。
@@ -34,7 +35,8 @@ Cookie: session=...
     "client_id": "...",
     "client_type": "public",
     "party_type": "third_party",
-    "status": "approved",
+    "ecosystem": "mdtbbs",
+    "status": "pending",
     "require_pkce": true,
     "requested_scopes": ["profile", "forum.read"],
     "approved_scopes": ["profile", "forum.read"],
@@ -66,6 +68,7 @@ Content-Type: application/json
   "name": "MDT Launcher",
   "description": "用于登录 MDTBBS 并浏览社区内容的启动器。",
   "website_url": "https://example.org",
+  "ecosystem": "mdtbbs",
   "redirect_uris": ["http://127.0.0.1:0/oauth/callback", "mdtlauncher://oauth/callback"],
   "requested_scopes": ["profile", "forum.read"]
 }
@@ -83,14 +86,15 @@ Content-Type: application/json
     "client_id": "...",
     "client_type": "public",
     "party_type": "third_party",
-    "status": "approved",
-    "approved_scopes": ["profile", "forum.read"],
+    "ecosystem": "mdtbbs",
+    "status": "pending",
+    "approved_scopes": [],
     "client_secret": null
   }
 }
 ```
 
-未登录返回 `401`；手机号未验证返回 `403` 与 `PHONE_VERIFICATION_REQUIRED`；字段、URI 或 scope 无效返回 `400`；限流返回 `429`。
+未登录返回 `401`；邮箱未验证返回 `403` 与 `EMAIL_VERIFICATION_REQUIRED`；选择 `mdtbbs` 生态但手机号未验证返回 `403` 与 `PHONE_VERIFICATION_REQUIRED`；字段、URI、scope 或生态无效返回 `400`；限流返回 `429`。
 
 ## 修改应用
 
@@ -100,7 +104,7 @@ Cookie: session=...
 Content-Type: application/json
 ```
 
-请求字段与创建相同，提交完整应用配置。只允许应用所有者修改自助创建的 Public Client。名称、简介、主页、Redirect URI 和 scopes 安全校验通过后立即生效；修正后的旧 `draft` / `pending` 应用也会立即启用。`rejected` 和 `suspended` 保留原状态。scope 变化会撤销该应用的现有令牌；仅调整资料或 Redirect URI 不会注销用户授权。
+请求字段与创建相同，提交完整应用配置。只允许应用所有者修改自助创建的 Public Client。名称、简介、主页、生态、Redirect URI 和 scopes 会重新进入管理员审核；已启用应用的授权与令牌会在重新审核期间撤销。scope 变化会要求用户在下次授权时重新确认。
 
 成功：`{ "success": true }`。不属于当前用户或已删除应用返回 `404`；无效配置返回 `400`。
 

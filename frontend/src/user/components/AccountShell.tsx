@@ -1,26 +1,27 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { LoadingState } from '@/shared/LoadingState';
+import { LocaleSwitcher, useI18n } from '@/i18n/I18nProvider';
 
-type AccountNavItem = { label: string; href: string };
-type AccountNavGroup = { label?: string; items: AccountNavItem[] };
+type AccountNavItem = { key: string; href: string };
+type AccountNavGroup = { labelKey?: string; items: AccountNavItem[] };
 
 const NAV_GROUPS: AccountNavGroup[] = [
-  { items: [{ label: '概览', href: '/dashboard' }] },
-  { label: '账户', items: [{ label: '个人资料', href: '/profile' }] },
+  { items: [{ key: 'nav.dashboard', href: '/dashboard' }] },
+  { labelKey: 'nav.account', items: [{ key: 'nav.profile', href: '/profile' }] },
   {
-    label: '安全',
+    labelKey: 'nav.securityGroup',
     items: [
-      { label: '登录与安全', href: '/security' },
-      { label: '登录设备', href: '/sessions' },
-      { label: '登录记录', href: '/activity' },
+      { key: 'nav.security', href: '/security' },
+      { key: 'nav.sessions', href: '/sessions' },
+      { key: 'nav.activity', href: '/activity' },
     ],
   },
-  { label: '应用', items: [{ label: '授权应用', href: '/authorizations' }] },
-  { label: '消息', items: [{ label: '通知', href: '/notifications' }] },
-  { label: '开发', items: [{ label: '应用管理', href: '/developer' }] },
+  { labelKey: 'nav.apps', items: [{ key: 'nav.authorizations', href: '/authorizations' }] },
+  { labelKey: 'nav.messagesGroup', items: [{ key: 'nav.notifications', href: '/notifications' }] },
+  { labelKey: 'nav.developer', items: [{ key: 'nav.developerApps', href: '/developer' }] },
 ];
 
 interface AccountShellProps {
@@ -34,10 +35,17 @@ function getInitial(name: string) {
 }
 
 export function AccountShell({ title, description, children }: AccountShellProps) {
+  const { t } = useI18n();
   const { user, loading, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const [searchParams] = useSearchParams();
+  const ecosystem = searchParams.get('ecosystem') || '';
+  const clientName = searchParams.get('client_name') || '';
+  const isClub = ecosystem === 'mindustry-club' || /mindustry\s*club/i.test(clientName);
+  const communityName = isClub ? 'Mindustry Club' : 'MindAuth';
+  const communityUrl = isClub ? 'https://mindustry.club/' : 'https://mdtbbs.cn/';
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavRef = useRef<HTMLElement>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
@@ -45,10 +53,10 @@ export function AccountShell({ title, description, children }: AccountShellProps
 
   useEffect(() => {
     if (!loading && !user) {
-      toast('warning', '请先登录');
+      toast('warning', t('shell.loginRequired'));
       navigate('/login', { replace: true });
     }
-  }, [loading, user, navigate, toast]);
+  }, [loading, user, navigate, toast, t]);
 
   useEffect(() => {
     if (!mobileNavOpen) {
@@ -93,10 +101,10 @@ export function AccountShell({ title, description, children }: AccountShellProps
 
   function renderNavigation(onNavigate?: () => void) {
     return (
-      <nav className="account-nav" aria-label="账户导航">
+      <nav className="account-nav" aria-label={t('nav.account')}>
         {NAV_GROUPS.map((group, groupIndex) => (
-          <div className="account-nav__group" key={group.label ?? `group-${groupIndex}`}>
-            {group.label ? <div className="account-nav__heading">{group.label}</div> : null}
+          <div className="account-nav__group" key={group.labelKey ?? `group-${groupIndex}`}>
+            {group.labelKey ? <div className="account-nav__heading">{t(group.labelKey)}</div> : null}
             {group.items.map((item) => (
               <Link
                 key={item.href}
@@ -105,7 +113,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
                 aria-current={pathname === item.href ? 'page' : undefined}
                 onClick={onNavigate}
               >
-                {item.label}
+                {t(item.key)}
               </Link>
             ))}
           </div>
@@ -122,24 +130,25 @@ export function AccountShell({ title, description, children }: AccountShellProps
             type="button"
             ref={menuToggleRef}
             className="account-menu-toggle"
-            aria-label={mobileNavOpen ? '关闭导航' : '打开导航'}
+            aria-label={mobileNavOpen ? t('shell.menuClose') : t('shell.menuOpen')}
             aria-expanded={mobileNavOpen}
             aria-controls="account-navigation-panel"
             onClick={() => setMobileNavOpen((open) => !open)}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">{mobileNavOpen ? <path d="m6 6 12 12M18 6 6 18" /> : <path d="M4 6h16M4 12h16M4 18h16" />}</svg>
           </button>
-          <Link to="/dashboard" className="account-brand" aria-label="MDTBBS 用户中心概览">
+          <Link to="/dashboard" className="account-brand" aria-label={t('shell.brandOverview')}>
             <img className="brand-mark__image" src="/account-logo.svg" alt="" aria-hidden="true" />
-            <span className="account-brand__name">MDTBBS</span>
+            <span className="account-brand__name">{communityName}</span>
             <span className="account-brand__divider" aria-hidden="true" />
-            <span className="account-brand__section">用户中心</span>
+            <span className="account-brand__section">{t('brand.account')}</span>
           </Link>
           <div className="account-header-actions">
-            <a className="account-help-link" href="/docs.html">帮助</a>
+            <LocaleSwitcher />
+            <a className="account-help-link" href="/docs.html">{t('shell.help')}</a>
             {user ? (
               <details className="account-user-menu">
-                <summary aria-label={`用户菜单：${user.username}`}>
+                <summary aria-label={t('shell.userMenu', { username: user.username })}>
                   <span className="account-user-menu__avatar" aria-hidden="true">
                     {user.avatar_url ? <img src={user.avatar_url} alt="" /> : getInitial(user.username)}
                   </span>
@@ -151,22 +160,22 @@ export function AccountShell({ title, description, children }: AccountShellProps
                     <strong>{user.username}</strong>
                     <span>{user.email}</span>
                   </div>
-                  <Link to="/profile">个人资料</Link>
-                  <Link to="/security">登录与安全</Link>
-                  <a href="https://mdtbbs.cn/">返回 MDTBBS</a>
-                  <button type="button" onClick={handleLogout}>退出登录</button>
+                  <Link to="/profile">{t('nav.profile')}</Link>
+                  <Link to="/security">{t('nav.security')}</Link>
+                  <a href={communityUrl}>{isClub ? t('shell.homeClub') : t('shell.home')}</a>
+                  <button type="button" onClick={handleLogout}>{t('shell.logout')}</button>
                 </div>
               </details>
-            ) : <span className="account-user-menu__loading" aria-label="正在加载账户" />}
+            ) : <span className="account-user-menu__loading" aria-label={t('shell.loadingAccount')} />}
           </div>
         </div>
       </header>
 
       <div className="account-shell__layout">
-        <aside className="account-shell__sidebar" aria-label="账户中心侧栏">
+        <aside className="account-shell__sidebar" aria-label={t('shell.sidebar')}>
           <div className="account-sidebar__brand">
-            <span>MDTBBS</span>
-            <small>用户中心</small>
+            <span>{communityName}</span>
+            <small>{t('brand.account')}</small>
           </div>
           {renderNavigation()}
         </aside>
@@ -176,7 +185,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
             <button
               type="button"
               className="account-mobile-nav__backdrop"
-              aria-label="关闭导航"
+              aria-label={t('shell.menuClose')}
               onClick={() => setMobileNavOpen(false)}
             />
           ) : null}
@@ -184,14 +193,14 @@ export function AccountShell({ title, description, children }: AccountShellProps
               id="account-navigation-panel"
               ref={mobileNavRef}
               className="account-mobile-nav"
-              aria-label="账户中心导航"
+              aria-label={t('shell.navigation')}
               role="dialog"
               aria-modal="true"
               hidden={!mobileNavOpen}
             >
               <div className="account-mobile-nav__header">
-                <strong>账户中心</strong>
-                <button type="button" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+                <strong>{t('shell.mobileTitle')}</strong>
+                <button type="button" aria-label={t('shell.menuClose')} onClick={() => setMobileNavOpen(false)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
               </div>
               {renderNavigation(() => setMobileNavOpen(false))}
           </aside>
@@ -200,7 +209,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
         <main className="account-shell__main">
           <div className="account-page-heading">
             <div>
-              <p className="account-page-heading__eyebrow">账户中心</p>
+              <p className="account-page-heading__eyebrow">{t('shell.eyebrow')}</p>
               <h1>{title}</h1>
               <p>{description}</p>
             </div>

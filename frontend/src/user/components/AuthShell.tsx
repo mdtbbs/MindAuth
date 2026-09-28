@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/api/client';
 import { LegalFooter } from '@/user/components/LegalFooter';
+import { useSearchParams } from 'react-router-dom';
+import { LocaleSwitcher, useI18n } from '@/i18n/I18nProvider';
 
 interface AuthShellProps {
   title: string;
@@ -31,6 +33,13 @@ function fetchBackgroundUrl(): Promise<string | null> {
 
 export function AuthShell({ title, description, footer, children }: AuthShellProps) {
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const { t } = useI18n();
+  const ecosystem = params.get('ecosystem') || '';
+  const clientName = params.get('client_name') || '';
+  const isClub = ecosystem === 'mindustry-club' || /mindustry\s*club/i.test(clientName);
+  const brandName = isClub ? 'Mindustry Club' : clientName || 'MDTBBS';
+  const backHref = isClub ? 'https://mindustry.club/' : 'https://mdtbbs.cn/';
 
   useEffect(() => {
     let cancelled = false;
@@ -46,19 +55,19 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
     <div className="auth-shell">
       <header className="auth-shell__header">
         <div className="auth-shell__header-inner">
-          <Link to="/login" className="auth-brand" aria-label="MDTBBS 用户中心">
+          <Link to="/login" className="auth-brand" aria-label={`${brandName} ${t('brand.account')}`}>
             <img className="brand-mark__image" src="/account-logo.svg" alt="" aria-hidden="true" />
-            <span className="auth-brand__name">MDTBBS</span>
+            <span className="auth-brand__name">{brandName}</span>
             <span className="auth-brand__divider" aria-hidden="true" />
-            <span className="auth-brand__section">用户中心</span>
+            <span className="auth-brand__section">{t('brand.account')}</span>
           </Link>
-          <a className="auth-shell__back" href="https://mdtbbs.cn/">返回论坛</a>
+          <div className="cluster"><LocaleSwitcher /><a className="auth-shell__back" href={backHref}>{t('brand.back')}</a></div>
         </div>
       </header>
 
       <div className="auth-shell__notice" role="note">
         <span className="auth-shell__notice-icon" aria-hidden="true">i</span>
-        <span>MDTBBS 用户中心为论坛与关联社区应用提供统一账号服务。</span>
+        <span>{isClub && clientName ? t('auth.continue', { client: clientName }) : t('brand.powered')}</span>
       </div>
 
       <main className="auth-shell__main">
@@ -74,15 +83,15 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
             </div>
           </section>
 
-          <aside className={`auth-shell__promo${backgroundUrl ? ' auth-shell__promo--custom-bg' : ''}`}>
+          {isClub ? <aside className="auth-shell__promo auth-shell__promo--club"><div className="auth-promo__copy"><p className="auth-promo__eyebrow">Mindustry Club</p><h1>{t('auth.continue', { client: 'Mindustry Club' })}</h1><p className="auth-promo__description">Powered by MindAuth</p></div></aside> : <aside className={`auth-shell__promo${backgroundUrl ? ' auth-shell__promo--custom-bg' : ''}`}>
             {backgroundUrl ? <span className="auth-shell__promo-background" style={{ backgroundImage: `url(${backgroundUrl})` }} aria-hidden="true" /> : null}
             <div className="auth-promo__copy">
-              <p className="auth-promo__eyebrow">MDTBBS 社区</p>
-              <h1>Mindustry 中文玩家社区</h1>
-              <p className="auth-promo__description">找 Mod、地图、蓝图、服务器，或加入正在发生的讨论。</p>
-              <a className="auth-promo__link" href="https://mdtbbs.cn/">访问 MDTBBS <span aria-hidden="true">→</span></a>
+              <p className="auth-promo__eyebrow">MDTBBS</p>
+              <h1>{t('brand.tagline')}</h1>
+              <p className="auth-promo__description">{t('brand.description')}</p>
+              <a className="auth-promo__link" href="https://mdtbbs.cn/">{t('brand.visit')} <span aria-hidden="true">→</span></a>
             </div>
-            <svg className="auth-promo__art" viewBox="0 0 560 300" role="img" aria-label="Mindustry 方块与输送带构成的社区插图">
+            <svg className="auth-promo__art" viewBox="0 0 560 300" role="img" aria-label={t('brand.artAlt')}>
               <path d="M30 236 225 126l301 174-196 0Z" fill="#d6e8ff" />
               <path d="m87 236 138-80 190 110-140 0Z" fill="#9fc7fb" />
               <path d="m144 236 81-47 109 63-82 0Z" fill="#5b9bea" />
@@ -97,10 +106,10 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
               <path d="m378 189 35 21v38l-35-21Z" fill="#b6d5fc" stroke="#90baf0" strokeWidth="2" />
               <path d="m40 250 185-106m-139 125 189-108m-142 127 189-109" fill="none" stroke="#fff" strokeWidth="3" opacity=".8" />
             </svg>
-          </aside>
+          </aside>}
         </div>
       </main>
-      <LegalFooter className="auth-shell__footer" />
+      <LegalFooter className="auth-shell__footer" ecosystem={isClub ? 'mindustry-club' : 'mdtbbs'} />
     </div>
   );
 }

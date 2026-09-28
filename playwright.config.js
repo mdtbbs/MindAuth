@@ -17,6 +17,7 @@ export default defineConfig({
   reporter: [['html'], ['list']],
   use: {
     baseURL,
+    locale: 'zh-CN',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -26,6 +27,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         baseURL,
+        locale: 'zh-CN',
       },
     },
     {
@@ -33,6 +35,7 @@ export default defineConfig({
       use: {
         ...devices['Pixel 5'],
         baseURL,
+        locale: 'zh-CN',
       },
     },
   ],

@@ -7,6 +7,9 @@ import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
 import type { SendRegistrationCodeResponse } from '@/api/types';
+import { useI18n } from '@/i18n/I18nProvider';
+import { localizeRegistrationError } from '@/i18n/authErrors';
+import { SocialProviderButtons } from '@/user/components/SocialProviderButtons';
 
 interface ChallengeQuestion {
   challenge_id: string | number;
@@ -14,25 +17,25 @@ interface ChallengeQuestion {
 }
 
 // Mirrors backend rules (utils/validation.js): 8+ chars, upper + lower + digit
-function validateUsername(v: string): string {
-  if (!v.trim()) return '请输入用户名';
-  if (v.trim().length < 3) return '用户名至少 3 个字符';
+function validateUsername(v: string, t: (key: string) => string): string {
+  if (!v.trim()) return t('register.usernameRequired');
+  if (v.trim().length < 3) return t('register.usernameMin');
   return '';
 }
-function validateEmail(v: string): string {
-  if (!v.trim()) return '请输入邮箱';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())) return '邮箱格式不正确';
+function validateEmail(v: string, t: (key: string) => string): string {
+  if (!v.trim()) return t('register.emailRequired');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())) return t('register.emailInvalid');
   return '';
 }
-function validatePassword(v: string): string {
-  if (!v) return '请输入密码';
-  if (v.length < 8) return '密码至少 8 个字符';
-  if (!(/[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v))) return '需包含大小写字母和数字';
+function validatePassword(v: string, t: (key: string) => string): string {
+  if (!v) return t('register.passwordRequired');
+  if (v.length < 8) return t('register.passwordMin');
+  if (!(/[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v))) return t('register.passwordComplexity');
   return '';
 }
-function validateEmailCode(v: string): string {
-  if (!v) return '请输入验证码';
-  if (!/^\d{6}$/.test(v)) return '验证码为 6 位数字';
+function validateEmailCode(v: string, t: (key: string) => string): string {
+  if (!v) return t('register.codeRequired');
+  if (!/^\d{6}$/.test(v)) return t('register.codeFormat');
   return '';
 }
 
@@ -46,11 +49,10 @@ function passwordStrength(v: string): number {
   if (/\d/.test(v) && /[^A-Za-z0-9]/.test(v)) score++;
   return Math.min(score, 4);
 }
-const STRENGTH_LABELS = ['太弱', '较弱', '一般', '较强', '很强'];
-
 const SEND_COOLDOWN_SECONDS = 60;
 
 export function RegisterPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { user, login } = useAuth();
@@ -59,24 +61,26 @@ export function RegisterPage() {
   const redirectUri = params.get('redirect_uri') || params.get('redirect') || '';
   const clientId = params.get('client_id') || '';
   const clientName = params.get('client_name') || '';
+  const ecosystem = params.get('ecosystem') || '';
   const stateParam = params.get('state') || '';
   const scope = params.get('scope') || '';
   const codeChallenge = params.get('code_challenge') || '';
   const codeChallengeMethod = params.get('code_challenge_method') || '';
+  const uiLocales = params.get('ui_locales') || '';
   const errorParam = params.get('error') || '';
   const messageParam = params.get('message') || '';
   const isOAuthFlow = Boolean(clientId && redirectUri);
-  const qqRegisterParams = new URLSearchParams({
-    intent: 'login',
+  const socialRegisterParams = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     ...(clientName && { client_name: clientName }),
+    ...(ecosystem && { ecosystem }),
     ...(stateParam && { state: stateParam }),
     ...(scope && { scope }),
     ...(codeChallenge && { code_challenge: codeChallenge }),
     ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+    ...(uiLocales && { ui_locales: uiLocales }),
   });
-  const qqRegisterHref = `/api/auth/qq?${qqRegisterParams.toString()}`;
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -103,6 +107,7 @@ export function RegisterPage() {
   const countdownRef = useRef<number | null>(null);
 
   const strength = passwordStrength(password);
+  const strengthLabel = t(`register.strength.${strength}`);
 
   const [challenge, setChallenge] = useState<ChallengeQuestion | null>(null);
   const [challengeAnswer, setChallengeAnswer] = useState('');
@@ -135,15 +140,15 @@ export function RegisterPage() {
           setChallenge(null);
         }
       })
-      .catch(() => setChallengeError('验证问题加载失败，请稍后重试'))
+      .catch(() => setChallengeError(t('register.challengeLoadFailed')))
       .finally(() => setChallengeLoading(false));
-  }, []);
+  }, [t]);
 
   function runValidation() {
     const errs = {
-      username: validateUsername(username),
-      email: validateEmail(email),
-      password: validatePassword(password),
+      username: validateUsername(username, t),
+      email: validateEmail(email, t),
+      password: validatePassword(password, t),
     };
     setFieldErrors(errs);
     setTouched({ username: true, email: true, password: true });
@@ -170,7 +175,7 @@ export function RegisterPage() {
   }
 
   async function handleSendCode() {
-    const emailErr = validateEmail(email);
+    const emailErr = validateEmail(email, t);
     if (emailErr) {
       setFieldErrors((p) => ({ ...p, email: emailErr }));
       setTouched((p) => ({ ...p, email: true }));
@@ -194,14 +199,14 @@ export function RegisterPage() {
         }
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '发送失败';
+      const msg = localizeRegistrationError(err, t, t('register.codeSendFailed'));
       // Map known error codes to inline email field errors
       const errObj = err as { code?: string; message?: string } | null;
       const code = errObj?.code;
       if (code === 'EMAIL_ALREADY_REGISTERED') {
-        setEmailFieldError('该邮箱已注册，请直接登录');
+        setEmailFieldError(t('register.emailAlreadyRegistered'));
       } else if (code === 'SMTP_UNAVAILABLE') {
-        setCodeError('邮件服务暂时不可用，请稍后重试');
+        setCodeError(t('register.emailServiceUnavailable'));
       } else if (code === 'EMAIL_COOLDOWN') {
         setCodeError(msg);
       } else {
@@ -217,14 +222,14 @@ export function RegisterPage() {
 
     if (!runValidation()) return;
 
-    const codeErr = validateEmailCode(emailCode);
+    const codeErr = validateEmailCode(emailCode, t);
     if (codeErr) {
       setCodeError(codeErr);
       return;
     }
 
     if (challenge && !challengeAnswer.trim()) {
-      setChallengeError('请输入验证答案');
+      setChallengeError(t('register.challengeAnswerRequired'));
       return;
     }
 
@@ -239,7 +244,7 @@ export function RegisterPage() {
       });
 
       if (res.success) {
-        toast('success', res.message || '注册成功');
+        toast('success', t('register.success'));
 
         try {
           await login(username.trim(), password);
@@ -252,6 +257,7 @@ export function RegisterPage() {
               ...(scope && { scope }),
               ...(codeChallenge && { code_challenge: codeChallenge }),
               ...(codeChallengeMethod && { code_challenge_method: codeChallengeMethod }),
+              ...(uiLocales && { ui_locales: uiLocales }),
             });
             window.location.href = `/api/authorize?${oauthParams.toString()}`;
           } else {
@@ -262,9 +268,9 @@ export function RegisterPage() {
         }
       }
     } catch (err: unknown) {
-      const errObj = err as { code?: string; message?: string } | null;
+      const errObj = err as { code?: string } | null;
       const code = errObj?.code;
-      const msg = err instanceof Error ? err.message : '注册失败';
+      const msg = localizeRegistrationError(err, t, t('register.submitFailed'));
 
       if (code === 'EMAIL_CODE_INVALID' || code === 'EMAIL_CODE_MISMATCH' || code === 'EMAIL_CODE_MAX_FAILURES') {
         setCodeError(msg);
@@ -278,27 +284,25 @@ export function RegisterPage() {
     }
   }
 
-  const emailValid = !validateEmail(email);
+  const emailValid = !validateEmail(email, t);
   const canSendCode = emailValid && !codeSending && countdown === 0;
   const canSubmit = emailValid && codeSent && /^\d{6}$/.test(emailCode) && !loading;
 
   return (
     <AuthShell
-      title={clientId && clientName ? `注册 ${clientName}` : '创建 MindAuth 账户'}
+      title={t('auth.register')}
       description={clientId && clientName
-        ? `创建账户后将继续跳转到 ${clientName} 完成授权。`
-        : '注册后即可统一管理账户资料、会话状态和授权应用。'}
+        ? t('auth.continue', { client: clientName })
+        : t('auth.directDescription')}
       footer={
         <div className="stack" style={{ alignItems: 'center', gap: 'var(--space-2)' }}>
           <Link to="/login" className="inline-link">
-            已有账号？登录
+            {t('auth.haveAccount')} {t('auth.login')}
           </Link>
           {isOAuthFlow ? (
             <>
-              <span className="text-muted">或</span>
-              <a className="btn btn--secondary btn--lg btn--full" href={qqRegisterHref} data-testid="qq-register">
-                <span aria-hidden="true" style={{ fontWeight: 700 }}>Q</span> 使用 QQ 注册
-              </a>
+              <span className="text-muted">{t('register.or')}</span>
+              <SocialProviderButtons authorizeQuery={socialRegisterParams.toString()} />
             </>
           ) : null}
         </div>
@@ -307,40 +311,40 @@ export function RegisterPage() {
       <form id="register-form" onSubmit={handleSubmit} data-testid="register-form">
         <div className="stack">
           {clientId && clientName ? (
-            <div className="status-badge status-badge--info">注册后将继续连接：{clientName}</div>
+            <div className="status-badge status-badge--info">{t('register.oauthContinuing', { client: clientName })}</div>
           ) : null}
           {errorParam || messageParam ? <div className="auth-form__alert" role="alert">{messageParam || errorParam}</div> : null}
-          {challengeLoading ? <div className="text-muted">正在加载验证问题...</div> : null}
+          {challengeLoading ? <div className="text-muted">{t('register.loadingChallenge')}</div> : null}
           {challengeError && !challenge ? <div className="auth-form__alert" role="alert">{challengeError}</div> : null}
           <TextField
             id="username"
-            label="用户名"
+            label={t('register.username')}
             name="username"
             value={username}
             onChange={(e) => {
               setUsername(e.target.value);
-              if (touched.username) setFieldErrors((p) => ({ ...p, username: validateUsername(e.target.value) }));
+              if (touched.username) setFieldErrors((p) => ({ ...p, username: validateUsername(e.target.value, t) }));
             }}
             onBlur={() => {
               setTouched((p) => ({ ...p, username: true }));
-              setFieldErrors((p) => ({ ...p, username: validateUsername(username) }));
+              setFieldErrors((p) => ({ ...p, username: validateUsername(username, t) }));
             }}
             error={touched.username ? fieldErrors.username : undefined}
-            placeholder="至少 3 个字符"
+            placeholder={t('register.usernamePlaceholder')}
             autoComplete="username"
             autoFocus
           />
           <div>
             <TextField
               id="email"
-              label="邮箱"
+              label={t('register.email')}
               type="email"
               name="email"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
                 setEmailFieldError('');
-                if (touched.email) setFieldErrors((p) => ({ ...p, email: validateEmail(e.target.value) }));
+                if (touched.email) setFieldErrors((p) => ({ ...p, email: validateEmail(e.target.value, t) }));
                 // Reset code state when email changes.
                 if (codeSent && e.target.value.trim().toLowerCase() !== email.trim().toLowerCase()) {
                   setCodeSent(false);
@@ -350,10 +354,10 @@ export function RegisterPage() {
               }}
               onBlur={() => {
                 setTouched((p) => ({ ...p, email: true }));
-                setFieldErrors((p) => ({ ...p, email: validateEmail(email) }));
+                setFieldErrors((p) => ({ ...p, email: validateEmail(email, t) }));
               }}
               error={touched.email ? fieldErrors.email || emailFieldError : emailFieldError || undefined}
-              placeholder="请输入邮箱地址"
+              placeholder={t('register.emailPlaceholder')}
               autoComplete="email"
             />
             <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -366,11 +370,11 @@ export function RegisterPage() {
                 loading={codeSending}
                 data-testid="register-send-code"
               >
-                {countdown > 0 ? `重新发送 (${countdown}s)` : codeSent ? '重新发送验证码' : '发送验证码'}
+                {countdown > 0 ? t('register.resendAfter', { seconds: countdown }) : codeSent ? t('register.resendCode') : t('register.sendCode')}
               </Button>
               {codeSent && (
                 <span className="text-muted" style={{ fontSize: 12 }} data-testid="register-code-sent-hint">
-                  验证码已发送到您的邮箱，请查收
+                  {t('register.emailCodeSent')}
                 </span>
               )}
             </div>
@@ -379,7 +383,7 @@ export function RegisterPage() {
           {codeSent && (
             <TextField
               id="emailCode"
-              label="邮箱验证码"
+              label={t('register.emailCode')}
               name="emailCode"
               value={emailCode}
               onChange={(e) => {
@@ -390,12 +394,12 @@ export function RegisterPage() {
               }}
               onBlur={() => {
                 if (emailCode) {
-                  const err = validateEmailCode(emailCode);
+                  const err = validateEmailCode(emailCode, t);
                   if (err) setCodeError(err);
                 }
               }}
               error={codeError || undefined}
-              placeholder="请输入 6 位数字验证码"
+              placeholder={t('register.emailCodePlaceholder')}
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={6}
@@ -406,21 +410,21 @@ export function RegisterPage() {
           <div className="stack stack--sm">
             <TextField
               id="password"
-              label="密码"
+              label={t('register.password')}
               type="password"
               name="password"
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                if (touched.password) setFieldErrors((p) => ({ ...p, password: validatePassword(e.target.value) }));
+                if (touched.password) setFieldErrors((p) => ({ ...p, password: validatePassword(e.target.value, t) }));
               }}
               onBlur={() => {
                 setTouched((p) => ({ ...p, password: true }));
-                setFieldErrors((p) => ({ ...p, password: validatePassword(password) }));
+                setFieldErrors((p) => ({ ...p, password: validatePassword(password, t) }));
               }}
               error={touched.password ? fieldErrors.password : undefined}
-              hint={touched.password && fieldErrors.password ? undefined : '至少 8 个字符，包含大小写字母和数字'}
-              placeholder="请输入密码"
+              hint={touched.password && fieldErrors.password ? undefined : t('register.passwordHint')}
+              placeholder={t('register.passwordPlaceholder')}
               autoComplete="new-password"
             />
             {password ? (
@@ -431,14 +435,14 @@ export function RegisterPage() {
                     style={{ width: `${(strength / 4) * 100}%` }}
                   />
                 </div>
-                <span className="password-strength__label">密码强度：{STRENGTH_LABELS[strength]}</span>
+                <span className="password-strength__label">{t('register.strengthLabel')}{strengthLabel}</span>
               </div>
             ) : null}
           </div>
 
           {challenge ? (
             <TextField
-              label={`验证问题：${challenge.question}`}
+              label={t('register.challengeLabel', { question: challenge.question })}
               name="challenge"
               value={challengeAnswer}
               onChange={(e) => {
@@ -446,12 +450,12 @@ export function RegisterPage() {
                 setChallengeError('');
               }}
               error={challengeError}
-              placeholder="请输入答案"
+              placeholder={t('register.answerPlaceholder')}
             />
           ) : null}
 
           <Button type="submit" fullWidth size="lg" loading={loading} disabled={!canSubmit} data-testid="register-submit">
-            注册并继续
+            {t('register.submit')}
           </Button>
         </div>
       </form>

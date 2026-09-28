@@ -18,7 +18,8 @@
     "db:migrate": "node scripts/migrate.js",
     "test:verify-routing": "node scripts/verify-routing.js",
     "test:secrets": "node --test tests/unit/secrets.test.js",
-    "verify": "npm run lint && npm run typecheck && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm run build",
+    "readiness:production": "node scripts/production-readiness.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
