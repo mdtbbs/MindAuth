@@ -10,6 +10,9 @@ interface Application {
   id: number; name: string; description: string | null; website_url: string | null; client_id: string;
   client_type: string; party_type: string; status: 'pending' | 'approved' | 'rejected' | 'suspended' | 'draft';
   owner_user_id: number | null; owner_username: string | null; requested_scopes: string[]; approved_scopes: string[];
+  application_icon_url: string | null; launch_uri_template: string | null;
+  supports_presence_requested: boolean | number; supports_multiplayer_requested: boolean | number; supports_join_intent_requested: boolean | number;
+  supports_presence: boolean | number; supports_multiplayer: boolean | number; supports_join_intent: boolean | number; launch_uri_approved: boolean | number;
   redirect_uris: { redirect_uri: string }[]; created_at: string; admin_review_note: string | null; authorization_count: number;
 }
 type ReviewStatus = 'approved' | 'rejected';
@@ -30,6 +33,7 @@ export function AdminApplicationsPage() {
   const [selected, setSelected] = useState<Application | null>(null);
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('approved');
   const [approvedScopes, setApprovedScopes] = useState<string[]>([]);
+  const [approvedCapabilities, setApprovedCapabilities] = useState({ supports_presence: false, supports_multiplayer: false, supports_join_intent: false, launch_uri_approved: false });
   const [reviewReason, setReviewReason] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -55,6 +59,12 @@ export function AdminApplicationsPage() {
   function openReview(application: Application, status: ReviewStatus) {
     setSelected(application); setReviewStatus(status);
     setApprovedScopes(application.approved_scopes.length ? application.approved_scopes : application.requested_scopes);
+    setApprovedCapabilities({
+      supports_presence: Boolean(application.supports_presence),
+      supports_multiplayer: Boolean(application.supports_multiplayer),
+      supports_join_intent: Boolean(application.supports_join_intent),
+      launch_uri_approved: Boolean(application.launch_uri_approved),
+    });
     setReviewReason(status === 'rejected' ? '' : application.admin_review_note || '');
   }
 
@@ -67,6 +77,7 @@ export function AdminApplicationsPage() {
       await api.patch(`/api/admin/developer-applications/${selected.id}/review`, {
         status: reviewStatus,
         approved_scopes: reviewStatus === 'approved' ? approvedScopes : [],
+        approved_capabilities: reviewStatus === 'approved' ? approvedCapabilities : {},
         review_reason: reviewReason.trim() || null,
       });
       setSelected(null); await load(); toast('success', reviewStatus === 'approved' ? '应用已批准' : '申请已拒绝');
@@ -85,8 +96,9 @@ export function AdminApplicationsPage() {
       </tr>)}</tbody></table></div>}
     </Card>
     <Dialog open={!!selected} onClose={() => setSelected(null)} title={reviewStatus === 'approved' ? '审核并批准应用' : '拒绝应用申请'} footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setSelected(null)}>取消</Button><Button variant={reviewStatus === 'rejected' ? 'danger' : 'primary'} onClick={submitReview} loading={saving}>{reviewStatus === 'rejected' ? '确认拒绝' : '批准应用'}</Button></div>}>
-      {selected && <div className="admin-form-stack"><p><strong>{selected.name}</strong> · {selected.owner_username || `用户 ${selected.owner_user_id}`}</p><p>{selected.description || '未填写应用说明'}</p><dl className="admin-detail-list"><div><dt>Client ID</dt><dd><code>{selected.client_id}</code></dd></div><div><dt>回调地址</dt><dd>{selected.redirect_uris.map(uri => <code key={uri.redirect_uri}>{uri.redirect_uri}</code>)}</dd></div></dl>
+      {selected && <div className="admin-form-stack"><p><strong>{selected.name}</strong> · {selected.owner_username || `用户 ${selected.owner_user_id}`}</p><p>{selected.description || '未填写应用说明'}</p><dl className="admin-detail-list"><div><dt>Client ID</dt><dd><code>{selected.client_id}</code></dd></div><div><dt>回调地址</dt><dd>{selected.redirect_uris.map(uri => <code key={uri.redirect_uri}>{uri.redirect_uri}</code>)}</dd></div><div><dt>图标 URL</dt><dd>{selected.application_icon_url || '未设置'}</dd></div><div><dt>Join Intent URI</dt><dd><code>{selected.launch_uri_template || '未设置'}</code></dd></div></dl>
         {reviewStatus === 'approved' && <fieldset className="admin-scope-editor"><legend>批准的权限（可调整）</legend>{selected.requested_scopes.map(scope => <label key={scope}><input type="checkbox" checked={approvedScopes.includes(scope)} onChange={e => setApprovedScopes(scopes => e.target.checked ? [...scopes, scope] : scopes.filter(item => item !== scope))} /><code>{scope}</code></label>)}</fieldset>}
+        {reviewStatus === 'approved' && <fieldset className="admin-scope-editor"><legend>批准客户端能力（可调整）</legend>{([['supports_presence', 'Presence 客户端', selected.supports_presence_requested], ['supports_multiplayer', 'Multiplayer 客户端', selected.supports_multiplayer_requested], ['launch_uri_approved', '启动 URI 模板', Boolean(selected.launch_uri_template)], ['supports_join_intent', 'Join Intent 启动器', selected.supports_join_intent_requested]] as const).map(([key, label, requested]) => <label key={key}><input type="checkbox" disabled={!requested} checked={approvedCapabilities[key]} onChange={event => setApprovedCapabilities(current => ({ ...current, [key]: event.target.checked }))} />{label}{!requested ? '（未申请）' : ''}</label>)}</fieldset>}
         <label className="field"><span className="field__label">{reviewStatus === 'rejected' ? '拒绝原因（必填）' : '审核备注（可选）'}</span><textarea rows={3} maxLength={1000} value={reviewReason} onChange={e => setReviewReason(e.target.value)} /></label>
         <p className="admin-form-note">Public Client 不生成或保存 client_secret，获批后必须使用 Authorization Code + PKCE S256。</p>
       </div>}

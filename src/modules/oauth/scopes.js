@@ -10,10 +10,17 @@ const SCOPE_DESCRIPTIONS = Object.freeze({
   'notification.read': { name: '读取通知', description: '允许此应用读取你的 MDTBBS 通知。' },
   'message.read': { name: '读取你的私信', description: '允许此应用读取你在 MDTBBS 中的私信和会话内容。', sensitive: true },
   'message.write': { name: '发送私信', description: '允许此应用以你的身份向其他用户发送私信。', sensitive: true },
+  'friends.read': { name: '查看好友', description: '允许此应用读取你的好友列表和可见的社交状态。', sensitive: true },
+  'presence.read': { name: '查看在线状态', description: '允许此应用按你的隐私设置读取在线状态和活动。', sensitive: true },
+  'presence.write': { name: '更新在线状态', description: '允许此应用更新你的在线状态和 Rich Activity。', sensitive: true },
+  'multiplayer.read': { name: '查看联机会话', description: '允许此应用查看有权访问的联机会话、Peer 和连接候选。', sensitive: true },
+  'multiplayer.write': { name: '使用联机功能', description: '允许此应用创建或加入联机会话、邀请好友并申请官方中继凭证。', sensitive: true },
 });
 
 const VALID_SCOPES = Object.freeze(Object.keys(SCOPE_DESCRIPTIONS));
-const LEGACY_NATIVE_SCOPES = Object.freeze([...VALID_SCOPES, 'game_content']);
+// Native password login continues to issue only this fixed legacy scope set.
+// OAuth scopes are intentionally not folded into existing Native tokens.
+const LEGACY_NATIVE_SCOPES = Object.freeze(['openid', 'profile', 'game_content']);
 
 function normalizeScopes(value, fallback = []) {
   let scopes = value;

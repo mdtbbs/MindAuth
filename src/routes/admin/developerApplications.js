@@ -23,7 +23,8 @@ router.patch('/:id/review', requireAdmin, requireAdminPermission('developers.rev
   if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ success: false, message: '应用 ID 无效' });
   try {
     await clientRegistry.reviewClient(id,
-      { status: req.body?.status, approvedScopes: req.body?.approved_scopes, reviewReason: req.body?.review_reason },
+      { status: req.body?.status, approvedScopes: req.body?.approved_scopes, reviewReason: req.body?.review_reason,
+        approvedCapabilities: req.body?.approved_capabilities },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) });
     res.json({ success: true });
   } catch (err) {

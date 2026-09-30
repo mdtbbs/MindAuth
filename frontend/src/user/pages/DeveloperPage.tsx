@@ -18,6 +18,11 @@ const SCOPE_OPTIONS = [
   ['notification.read', 'developer.scope.notificationRead', 'developer.scope.notificationReadHelp'],
   ['message.read', 'developer.scope.messageRead', 'developer.scope.messageReadHelp'],
   ['message.write', 'developer.scope.messageWrite', 'developer.scope.messageWriteHelp'],
+  ['friends.read', 'developer.scope.friendsRead', 'developer.scope.friendsReadHelp'],
+  ['presence.read', 'developer.scope.presenceRead', 'developer.scope.presenceReadHelp'],
+  ['presence.write', 'developer.scope.presenceWrite', 'developer.scope.presenceWriteHelp'],
+  ['multiplayer.read', 'developer.scope.multiplayerRead', 'developer.scope.multiplayerReadHelp'],
+  ['multiplayer.write', 'developer.scope.multiplayerWrite', 'developer.scope.multiplayerWriteHelp'],
   ['openid', 'developer.scope.openid', 'developer.scope.openidHelp'],
   ['email', 'developer.scope.email', 'developer.scope.emailHelp'],
 ] as const;
@@ -27,6 +32,9 @@ type Ecosystem = 'mdtbbs' | 'mindustry-club' | 'global';
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 type DeveloperApplication = {
   id: number; client_id: string; name: string; description: string | null; website_url: string | null;
+  application_icon_url: string | null; launch_uri_template: string | null; launch_uri_approved: boolean | number;
+  supports_presence_requested: boolean | number; supports_multiplayer_requested: boolean | number; supports_join_intent_requested: boolean | number;
+  supports_presence: boolean | number; supports_multiplayer: boolean | number; supports_join_intent: boolean | number;
   status: AppStatus; client_type: string; party_type: string; ecosystem: Ecosystem;
   requested_scopes: string[]; approved_scopes: string[]; redirect_uris: { redirect_uri: string }[];
   usage?: { authorization_count: number; last_used_at: string | null; requests_30d?: number;
@@ -78,6 +86,11 @@ export function DeveloperPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [website, setWebsite] = useState('');
+  const [applicationIconUrl, setApplicationIconUrl] = useState('');
+  const [launchUriTemplate, setLaunchUriTemplate] = useState('');
+  const [supportsPresence, setSupportsPresence] = useState(false);
+  const [supportsMultiplayer, setSupportsMultiplayer] = useState(false);
+  const [supportsJoinIntent, setSupportsJoinIntent] = useState(false);
   const [redirectUris, setRedirectUris] = useState('');
   const [scopes, setScopes] = useState<string[]>(['profile', 'forum.read']);
   const [ecosystem, setEcosystem] = useState<Ecosystem>('mdtbbs');
@@ -102,10 +115,15 @@ export function DeveloperPage() {
   useEffect(() => {
     if (selected) {
       setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || '');
+      setApplicationIconUrl(selected.application_icon_url || ''); setLaunchUriTemplate(selected.launch_uri_template || '');
+      setSupportsPresence(Boolean(selected.supports_presence_requested)); setSupportsMultiplayer(Boolean(selected.supports_multiplayer_requested));
+      setSupportsJoinIntent(Boolean(selected.supports_join_intent_requested));
       setRedirectUris(selected.redirect_uris.map(item => item.redirect_uri).join('\n'));
       setScopes(selected.requested_scopes); setEcosystem(selected.ecosystem || 'mdtbbs'); setEditing(false); setTab('overview'); setFormError('');
     } else if (isCreate) {
-      setName(''); setDescription(''); setWebsite(''); setRedirectUris(''); setScopes(['profile', 'forum.read']);
+      setName(''); setDescription(''); setWebsite(''); setApplicationIconUrl(''); setLaunchUriTemplate('');
+      setSupportsPresence(false); setSupportsMultiplayer(false); setSupportsJoinIntent(false);
+      setRedirectUris(''); setScopes(['profile', 'forum.read']);
       setEcosystem('mdtbbs');
       setEditing(true); setTab('overview');
     }
@@ -126,6 +144,8 @@ export function DeveloperPage() {
     setSaving(true);
     const body = {
       name: normalizedName, description: normalizedDescription, website_url: website.trim() || null,
+      application_icon_url: applicationIconUrl.trim() || null, launch_uri_template: launchUriTemplate.trim() || null,
+      supports_presence: supportsPresence, supports_multiplayer: supportsMultiplayer, supports_join_intent: supportsJoinIntent,
       redirect_uris: normalizedRedirectUris, requested_scopes: scopes, ecosystem,
     };
     try {
@@ -172,7 +192,7 @@ export function DeveloperPage() {
       {isCreate ? (
         <AccountSection title={t('developer.createTitle')} description={t('developer.createDescription')}>
           {eligibilityError ? <div className="developer-create-gate" role="alert"><strong>{ecosystem === 'mdtbbs' ? t('developer.eligibilityMdtbbs') : t('developer.eligibilityGlobal')}</strong><p>{eligibilityError}</p>{ecosystem === 'mdtbbs' && !user?.phone_verified ? <Link className="btn btn--secondary" to="/security">{t('developer.openSecurity')}</Link> : null}</div> : null}
-          <ApplicationForm ecosystem={ecosystem} setEcosystem={setEcosystem} name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(eligibilityError)} saveLabel={t('developer.create')} />
+          <ApplicationForm ecosystem={ecosystem} setEcosystem={setEcosystem} name={name} setName={setName} description={description} setDescription={setDescription} website={website} setWebsite={setWebsite} applicationIconUrl={applicationIconUrl} setApplicationIconUrl={setApplicationIconUrl} launchUriTemplate={launchUriTemplate} setLaunchUriTemplate={setLaunchUriTemplate} supportsPresence={supportsPresence} setSupportsPresence={setSupportsPresence} supportsMultiplayer={supportsMultiplayer} setSupportsMultiplayer={setSupportsMultiplayer} supportsJoinIntent={supportsJoinIntent} setSupportsJoinIntent={setSupportsJoinIntent} redirectUris={redirectUris} setRedirectUris={setRedirectUris} scopes={scopes} setScopes={setScopes} onSave={() => void saveApplication()} onCancel={() => navigate('/developer')} saving={saving} saveDisabled={Boolean(eligibilityError)} saveLabel={t('developer.create')} />
         </AccountSection>
       ) : null}
 
@@ -182,8 +202,8 @@ export function DeveloperPage() {
         {tab !== 'usage' ? <AccountSection title={tab === 'overview' ? t('developer.section.overview') : tab === 'oauth' ? t('developer.section.oauth') : t('developer.section.scopes')} description={tab === 'oauth' ? t('developer.pkceDescription') : undefined}>
           {tab === 'overview' ? <div className="stack">
             <p><strong>Client ID:</strong> <code>{selected.client_id}</code></p><p><strong>{t('developer.clientType')}:</strong> {appLabel(selected, t)} · {t('developer.publicClient')}</p><p><strong>{t('developer.officialPage')}:</strong> <Link to={appPageUrl}>{window.location.origin}{appPageUrl}</Link></p>
-            {editing ? <><EcosystemField value={ecosystem} onChange={setEcosystem} /><TextField label={t('developer.name')} value={name} onChange={event => setName(event.target.value)} maxLength={120} /><label className="field"><span className="field__label">{t('developer.description')}</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label><TextField label={t('developer.websiteHttps')} value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" /></> : <><p>{selected.description || t('developer.noDescription')}</p><p><strong>{t('developer.ecosystem')}:</strong> {selected.ecosystem}</p><p><strong>{t('developer.projectHome')}:</strong> {selected.website_url || t('developer.notSet')}</p></>}
-            <div className="cluster">{editing ? <><Button type="button" disabled={saving || Boolean(eligibilityError)} onClick={() => void saveApplication()}>{saving ? t('developer.saving') : t('developer.saveChanges')}</Button><Button type="button" variant="secondary" onClick={() => { setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || ''); setEcosystem(selected.ecosystem); setEditing(false); }}>{t('developer.cancel')}</Button></> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>{t('developer.edit')}</Button>}</div>
+            {editing ? <><EcosystemField value={ecosystem} onChange={setEcosystem} /><TextField label={t('developer.name')} value={name} onChange={event => setName(event.target.value)} maxLength={120} /><label className="field"><span className="field__label">{t('developer.description')}</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label><TextField label={t('developer.websiteHttps')} value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" /><ClientCapabilitiesFields applicationIconUrl={applicationIconUrl} setApplicationIconUrl={setApplicationIconUrl} launchUriTemplate={launchUriTemplate} setLaunchUriTemplate={setLaunchUriTemplate} supportsPresence={supportsPresence} setSupportsPresence={setSupportsPresence} supportsMultiplayer={supportsMultiplayer} setSupportsMultiplayer={setSupportsMultiplayer} supportsJoinIntent={supportsJoinIntent} setSupportsJoinIntent={setSupportsJoinIntent} /></> : <><p>{selected.description || t('developer.noDescription')}</p><p><strong>{t('developer.ecosystem')}:</strong> {selected.ecosystem}</p><p><strong>{t('developer.projectHome')}:</strong> {selected.website_url || t('developer.notSet')}</p><p><strong>已批准能力：</strong> {[selected.supports_presence && 'Presence', selected.supports_multiplayer && 'Multiplayer', selected.supports_join_intent && 'Join Intent'].filter(Boolean).join(' · ') || '无'}</p></>}
+            <div className="cluster">{editing ? <><Button type="button" disabled={saving || Boolean(eligibilityError)} onClick={() => void saveApplication()}>{saving ? t('developer.saving') : t('developer.saveChanges')}</Button><Button type="button" variant="secondary" onClick={() => { setName(selected.name); setDescription(selected.description || ''); setWebsite(selected.website_url || ''); setApplicationIconUrl(selected.application_icon_url || ''); setLaunchUriTemplate(selected.launch_uri_template || ''); setSupportsPresence(Boolean(selected.supports_presence_requested)); setSupportsMultiplayer(Boolean(selected.supports_multiplayer_requested)); setSupportsJoinIntent(Boolean(selected.supports_join_intent_requested)); setEcosystem(selected.ecosystem); setEditing(false); }}>{t('developer.cancel')}</Button></> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>{t('developer.edit')}</Button>}</div>
             <div className="developer-danger-zone"><h3>{t('developer.delete')}</h3><p>{t('developer.deleteWarning')}</p><Button type="button" variant="danger" disabled={saving} onClick={() => void deleteApplication()}>{t('developer.delete')}</Button></div>
           </div> : null}
           {tab === 'oauth' ? <div className="stack"><p className="section-description">{t('developer.redirectDescription')}</p>{editing ? <label className="field"><span className="field__label">{t('developer.redirectLabel')}</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={6} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /></label> : <ul className="developer-redirect-list">{selected.redirect_uris.map(item => <li key={item.redirect_uri}><code>{item.redirect_uri}</code></li>)}</ul>}<p>{t('developer.pkce')}</p><div className="cluster">{editing ? <Button type="button" disabled={saving} onClick={() => void saveApplication()}>{saving ? t('developer.saving') : t('developer.saveOAuth')}</Button> : <Button type="button" variant="secondary" onClick={() => setEditing(true)}>{t('developer.editRedirects')}</Button>}</div></div> : null}
@@ -205,16 +225,23 @@ export function DeveloperPage() {
 
 function ScopeOptions({ scopes, setScopes }: { scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>> }) {
   const { t } = useI18n();
-  return <fieldset className="stack developer-scope-options"><legend className="field__label">{t('developer.allowedScopes')}</legend>{SCOPE_OPTIONS.map(([scope, labelKey, helpKey]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{t(labelKey)}</strong>{scope === 'message.read' || scope === 'message.write' ? <span className="public-scope-sensitive">{t('developer.sensitive')}</span> : null}<small>{scope} · {t(helpKey)}</small></span></label>)}</fieldset>;
 }
 
 function ApplicationForm({
-  ecosystem, setEcosystem, name, setName, description, setDescription, website, setWebsite, redirectUris, setRedirectUris,
+  ecosystem, setEcosystem, name, setName, description, setDescription, website, setWebsite,
+  applicationIconUrl, setApplicationIconUrl, launchUriTemplate, setLaunchUriTemplate,
+  supportsPresence, setSupportsPresence, supportsMultiplayer, setSupportsMultiplayer, supportsJoinIntent, setSupportsJoinIntent,
+  redirectUris, setRedirectUris,
   scopes, setScopes, onSave, onCancel, saving, saveDisabled = false, saveLabel,
 }: {
   ecosystem: Ecosystem; setEcosystem: (value: Ecosystem) => void;
   name: string; setName: (value: string) => void; description: string; setDescription: (value: string) => void;
   website: string; setWebsite: (value: string) => void; redirectUris: string; setRedirectUris: (value: string) => void;
+  applicationIconUrl: string; setApplicationIconUrl: (value: string) => void;
+  launchUriTemplate: string; setLaunchUriTemplate: (value: string) => void;
+  supportsPresence: boolean; setSupportsPresence: (value: boolean) => void;
+  supportsMultiplayer: boolean; setSupportsMultiplayer: (value: boolean) => void;
+  supportsJoinIntent: boolean; setSupportsJoinIntent: (value: boolean) => void;
   scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>>;
   onSave: () => void; onCancel: () => void; saving: boolean; saveDisabled?: boolean; saveLabel: string;
 }) {
@@ -224,9 +251,32 @@ function ApplicationForm({
     <TextField label={t('developer.name')} value={name} onChange={event => setName(event.target.value)} maxLength={120} />
     <label className="field"><span className="field__label">{t('developer.description')}</span><textarea className="field__input" value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} placeholder={t('developer.descriptionHint')} /></label>
     <TextField label={t('developer.website')} value={website} onChange={event => setWebsite(event.target.value)} placeholder="https://example.com" />
+    <ClientCapabilitiesFields applicationIconUrl={applicationIconUrl} setApplicationIconUrl={setApplicationIconUrl} launchUriTemplate={launchUriTemplate} setLaunchUriTemplate={setLaunchUriTemplate} supportsPresence={supportsPresence} setSupportsPresence={setSupportsPresence} supportsMultiplayer={supportsMultiplayer} setSupportsMultiplayer={setSupportsMultiplayer} supportsJoinIntent={supportsJoinIntent} setSupportsJoinIntent={setSupportsJoinIntent} />
     <label className="field"><span className="field__label">{t('developer.redirectRequired')}</span><textarea className="field__input" value={redirectUris} onChange={event => setRedirectUris(event.target.value)} rows={5} placeholder={'https://example.com/oauth/callback\nmdtlauncher://oauth/callback\nhttp://127.0.0.1:0/callback\nhttp://localhost:0/callback'} /><span className="field__hint">{t('developer.redirectHelp')}</span></label>
     <ScopeOptions scopes={scopes} setScopes={setScopes} />
     <div className="cluster"><Button type="button" disabled={saving || saveDisabled} onClick={onSave}>{saving ? t('developer.processing') : saveLabel}</Button><Button type="button" variant="secondary" onClick={onCancel}>{t('developer.cancel')}</Button></div>
+  </div>;
+}
+
+function ClientCapabilitiesFields({
+  applicationIconUrl, setApplicationIconUrl, launchUriTemplate, setLaunchUriTemplate,
+  supportsPresence, setSupportsPresence, supportsMultiplayer, setSupportsMultiplayer, supportsJoinIntent, setSupportsJoinIntent,
+}: {
+  applicationIconUrl: string; setApplicationIconUrl: (value: string) => void;
+  launchUriTemplate: string; setLaunchUriTemplate: (value: string) => void;
+  supportsPresence: boolean; setSupportsPresence: (value: boolean) => void;
+  supportsMultiplayer: boolean; setSupportsMultiplayer: (value: boolean) => void;
+  supportsJoinIntent: boolean; setSupportsJoinIntent: (value: boolean) => void;
+}) {
+  return <div className="stack">
+    <TextField label="应用图标 HTTPS URL" value={applicationIconUrl} onChange={event => setApplicationIconUrl(event.target.value)} placeholder="https://example.com/icon.png" />
+    <TextField label="启动 URI 模板" value={launchUriTemplate} onChange={event => setLaunchUriTemplate(event.target.value)} maxLength={1000} placeholder="xenon-launcher://join?intent={intent_id}" />
+    <fieldset className="stack"><legend className="field__label">申请的客户端能力（需管理员审核）</legend>
+      <label><input type="checkbox" checked={supportsPresence} onChange={event => setSupportsPresence(event.target.checked)} /> Presence 客户端</label>
+      <label><input type="checkbox" checked={supportsMultiplayer} onChange={event => setSupportsMultiplayer(event.target.checked)} /> Multiplayer 客户端</label>
+      <label><input type="checkbox" checked={supportsJoinIntent} onChange={event => setSupportsJoinIntent(event.target.checked)} /> Join Intent 启动器</label>
+    </fieldset>
+    <p className="section-description">Join Intent 模板必须包含且只能包含一个 {'{intent_id}'} 占位符。</p>
   </div>;
 }
 

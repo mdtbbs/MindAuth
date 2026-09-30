@@ -7,7 +7,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { validateRedirectUri, validateApplication, assertPhoneVerifiedDeveloper, createOwnerApplication, updateOwnerApplication, deleteOwnerApplication, updateClient } = require('../../src/modules/admin/clientRegistry');
+const { validateRedirectUri, validateApplication, assertPhoneVerifiedDeveloper, createOwnerApplication, updateOwnerApplication, deleteOwnerApplication, updateClient, reviewClient } = require('../../src/modules/admin/clientRegistry');
 const { pool } = require('../../src/db');
 const tokenStore = require('../../src/modules/oauth/tokenStore');
 
@@ -80,6 +80,36 @@ test('validates a self-service public application and rejects scope/redirect esc
   assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['https://client.example.org/cb'], requested_scopes: 'openid profile' }));
 });
 
+test('requires approved OAuth write scopes before an administrator can enable app capabilities', async () => {
+  const originalExecute = pool.execute;
+  const queries = [];
+  try {
+    pool.execute = async (sql) => {
+      queries.push(sql);
+      if (sql.includes('FROM clients WHERE id = ?')) return [[{
+        id: 21, name: 'Launcher', client_id: 'launcher', status: 'pending', client_type: 'public',
+        party_type: 'third_party', ecosystem: 'mdtbbs', requested_scopes: '["profile","presence.write","multiplayer.write"]',
+        approved_scopes: '[]', supports_presence_requested: 1, supports_multiplayer_requested: 1,
+        supports_join_intent_requested: 0, launch_uri_template: 'xenon://join/{intent_id}', launch_uri_approved: 0,
+      }]];
+      if (sql.includes('FROM oauth_client_redirect_uris')) return [[{ redirect_uri: 'xenon://oauth/callback', redirect_type: 'web' }]];
+      return [{ affectedRows: 1 }];
+    };
+
+    await assert.rejects(reviewClient(21, {
+      status: 'approved', approvedScopes: ['profile'], reviewReason: null,
+      approvedCapabilities: { supports_presence: true },
+    }, { adminId: 2, ipAddress: '127.0.0.1' }), /批准 Presence 能力需要同时批准 presence\.write/);
+    await assert.rejects(reviewClient(21, {
+      status: 'approved', approvedScopes: ['profile', 'presence.write'], reviewReason: null,
+      approvedCapabilities: { supports_multiplayer: true },
+    }, { adminId: 2, ipAddress: '127.0.0.1' }), /批准 Multiplayer 能力需要同时批准 multiplayer\.write/);
+    assert.equal(queries.some((sql) => sql.startsWith('UPDATE clients SET status = ?')), false);
+  } finally {
+    pool.execute = originalExecute;
+  }
+});
+
 test('requires a verified phone number before a user can create an application', async () => {
   const originalExecute = pool.execute;
   try {
@@ -119,8 +149,10 @@ test('creates verified users Public Clients as pending, secretless PKCE applicat
     const second = await createOwnerApplication(9, body);
 
     assert.equal(inserts.length, 2, 'the self-service flow does not impose an application count cap');
-    assert.match(inserts[0].sql, /client_secret, redirect_uri[\s\S]*VALUES \(\?, \?, \?, \?, NULL, \?, 1, 'public', 'third_party', \?, 'pending'/);
-    assert.deepEqual(inserts[0].params.slice(-2), [9, '["profile","forum.read"]']);
+    assert.match(inserts[0].sql, /application_icon_url, launch_uri_template[\s\S]*client_id, client_secret, redirect_uri[\s\S]*VALUES \([\s\S]*NULL, \?, 1, 'public', 'third_party'/);
+    assert.equal(inserts[0].params[8], first.client_id);
+    assert.equal(inserts[0].params[11], 9);
+    assert.equal(inserts[0].params[12], '["profile","forum.read"]');
     for (const application of [first, second]) {
       assert.equal(application.status, 'pending');
       assert.equal(application.client_type, 'public');
@@ -218,8 +250,10 @@ test('updates app details, redirects, and scopes immediately, then revokes token
     }), { updated: true, status: 'pending', re_review_required: true, scopes_changed: true });
 
     assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?')
-      && params[0] === 'New Launcher' && params[4] === '["profile","forum.write"]'));
-    assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?') && sql.includes("status = 'pending'") && params[4] === '["profile","forum.write"]'));
+      && sql.includes('supports_join_intent_requested = ?') && params[0] === 'New Launcher'
+      && params[9] === '["profile","forum.write"]'));
+    assert.ok(mutations.some(({ sql, params }) => sql.startsWith('UPDATE clients SET name = ?')
+      && sql.includes("status = 'pending'") && params[9] === '["profile","forum.write"]'));
     assert.ok(mutations.some(({ sql, params }) => sql.startsWith('INSERT INTO oauth_client_redirect_uris')
       && params[1] === 'http://localhost:0/oauth/callback'));
     assert.ok(mutations.some(({ sql }) => sql.startsWith('UPDATE refresh_tokens SET revoked = 1')));

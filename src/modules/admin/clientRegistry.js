@@ -85,6 +85,43 @@ function parseScopes(value, fallback = []) {
   return normalizeScopes(value, fallback);
 }
 
+function validateApplicationIconUrl(value) {
+  const iconUrl = value == null || value === '' ? null : String(value).trim();
+  if (!iconUrl) return null;
+  let url;
+  try { url = new URL(iconUrl); } catch { throw new Error('应用图标必须是 HTTPS URL'); }
+  if (url.protocol !== 'https:' || isPrivateOrInternalHost(url.hostname) || url.username || url.password || url.hash || iconUrl.length > 2048) {
+    throw new Error('应用图标必须是公开 HTTPS URL');
+  }
+  return iconUrl;
+}
+
+function validateLaunchUriTemplate(value) {
+  const template = value == null || value === '' ? null : String(value).trim();
+  if (!template) return null;
+  if (template.length > 1000 || (template.match(/\{intent_id\}/g) || []).length !== 1
+    || /\{(?!intent_id\})[^}]*\}/.test(template)) {
+    throw new Error('启动 URI 模板必须且只能包含一个 {intent_id}');
+  }
+  const validation = validateRedirectUri(template.replace('{intent_id}', 'mdtbbs-intent-placeholder'));
+  if (!validation.valid) throw new Error(`启动 URI 模板无效：${validation.error}`);
+  return template;
+}
+
+function requestedCapabilities(data, scopes) {
+  const requested = {
+    supports_presence: data.supports_presence === true,
+    supports_multiplayer: data.supports_multiplayer === true,
+    supports_join_intent: data.supports_join_intent === true,
+  };
+  if (requested.supports_presence && !scopes.includes('presence.write')) throw new Error('Presence 客户端能力需要申请 presence.write');
+  if (requested.supports_multiplayer && !scopes.includes('multiplayer.write')) throw new Error('Multiplayer 客户端能力需要申请 multiplayer.write');
+  if (requested.supports_join_intent && (!scopes.includes('multiplayer.write') || !data.launch_uri_template)) {
+    throw new Error('Join Intent 客户端能力需要 multiplayer.write 和启动 URI 模板');
+  }
+  return requested;
+}
+
 async function readRedirectUris(clientNumericId, executor = pool) {
   const [rows] = await executor.execute(
     'SELECT redirect_uri, redirect_type, created_at FROM oauth_client_redirect_uris WHERE oauth_client_id = ? ORDER BY id',
@@ -114,7 +151,9 @@ async function syncRedirectUris(executor, clientNumericId, uris) {
 
 async function listClients() {
   const [clients] = await pool.execute(
-    `SELECT c.id, c.name, c.description, c.website_url, c.client_id, c.client_secret, c.redirect_uri,
+    `SELECT c.id, c.name, c.description, c.website_url, c.application_icon_url, c.launch_uri_template,
+            c.launch_uri_approved, c.supports_presence_requested, c.supports_multiplayer_requested, c.supports_join_intent_requested,
+            c.supports_presence, c.supports_multiplayer, c.supports_join_intent, c.client_id, c.client_secret, c.redirect_uri,
             c.require_pkce, c.client_type, c.party_type, c.ecosystem, c.status, c.owner_user_id,
             c.requested_scopes, c.approved_scopes, c.approved_at, c.approved_by, c.admin_review_note, c.created_at, c.updated_at,
             u.username AS owner_username,
@@ -143,7 +182,9 @@ async function listClients() {
 
 async function getClient(id) {
   const [rows] = await pool.execute(
-    `SELECT id, name, description, website_url, client_id, client_secret, redirect_uri,
+    `SELECT id, name, description, website_url, application_icon_url, launch_uri_template,
+            launch_uri_approved, supports_presence_requested, supports_multiplayer_requested, supports_join_intent_requested,
+            supports_presence, supports_multiplayer, supports_join_intent, client_id, client_secret, redirect_uri,
             require_pkce, client_type, party_type, ecosystem, status, owner_user_id,
             requested_scopes, approved_scopes, approved_at, approved_by, admin_review_note, created_at, updated_at
      FROM clients WHERE id = ?`, [id],
@@ -309,7 +350,10 @@ async function revokeClientGrants(clientId, status) {
 
 async function listOwnerApplications(ownerUserId) {
   const [rows] = await pool.execute(
-    `SELECT id, name, description, website_url, client_id, redirect_uri, require_pkce,
+    `SELECT id, name, description, website_url, application_icon_url, launch_uri_template,
+            supports_presence_requested, supports_multiplayer_requested, supports_join_intent_requested,
+            supports_presence, supports_multiplayer, supports_join_intent, launch_uri_approved,
+            client_id, redirect_uri, require_pkce,
             client_type, party_type, ecosystem, status, requested_scopes, approved_scopes,
             approved_at, created_at, updated_at
      FROM clients WHERE owner_user_id = ? AND status <> 'deleted' ORDER BY updated_at DESC`, [ownerUserId],
@@ -369,9 +413,13 @@ function validateApplication(data) {
     throw new Error('至少申请一个有效且不重复的 scope');
   }
   if (requestedScopes.some(scope => !VALID_SCOPES.includes(scope))) throw new Error('申请了无效的 scope');
+  const applicationIconUrl = validateApplicationIconUrl(data.application_icon_url);
+  const launchUriTemplate = validateLaunchUriTemplate(data.launch_uri_template);
+  const capabilities = requestedCapabilities({ ...data, launch_uri_template: launchUriTemplate }, requestedScopes);
   const ecosystem = data.ecosystem === undefined ? 'mdtbbs' : data.ecosystem;
   if (!isSupportedEcosystem(ecosystem)) throw new Error('Choose a supported developer ecosystem.');
-  return { name, description: description || null, websiteUrl, redirectUris: [...new Set(redirectUris)], requestedScopes, ecosystem };
+  return { name, description: description || null, websiteUrl, applicationIconUrl, launchUriTemplate,
+    ...capabilities, redirectUris: [...new Set(redirectUris)], requestedScopes, ecosystem };
 }
 
 async function createOwnerApplication(ownerUserId, data) {
@@ -380,11 +428,15 @@ async function createOwnerApplication(ownerUserId, data) {
   const clientId = generateShortToken();
   const id = await transaction(async (conn) => {
     const [result] = await conn.execute(
-      `INSERT INTO clients (name, description, website_url, client_id, client_secret, redirect_uri,
-         require_pkce, client_type, party_type, ecosystem, status, owner_user_id, requested_scopes, approved_scopes, approved_at)
-       VALUES (?, ?, ?, ?, NULL, ?, 1, 'public', 'third_party', ?, 'pending', ?, ?, '[]', NULL)`,
-      [value.name, value.description, value.websiteUrl, clientId, value.redirectUris[0], value.ecosystem, ownerUserId,
-        JSON.stringify(value.requestedScopes)],
+      `INSERT INTO clients (name, description, website_url, application_icon_url, launch_uri_template,
+         supports_presence_requested, supports_multiplayer_requested, supports_join_intent_requested,
+         launch_uri_approved, supports_presence, supports_multiplayer, supports_join_intent,
+         client_id, client_secret, redirect_uri, require_pkce, client_type, party_type, ecosystem, status,
+         owner_user_id, requested_scopes, approved_scopes, approved_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, NULL, ?, 1, 'public', 'third_party', ?, 'pending', ?, ?, '[]', NULL)`,
+      [value.name, value.description, value.websiteUrl, value.applicationIconUrl, value.launchUriTemplate,
+        value.supports_presence ? 1 : 0, value.supports_multiplayer ? 1 : 0, value.supports_join_intent ? 1 : 0,
+        clientId, value.redirectUris[0], value.ecosystem, ownerUserId, JSON.stringify(value.requestedScopes)],
     );
     await syncRedirectUris(conn, result.insertId, value.redirectUris);
     return result.insertId;
@@ -418,10 +470,15 @@ async function updateOwnerApplication(ownerUserId, id, data) {
     const nextScopes = [...value.requestedScopes].sort();
     scopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
     await conn.execute(
-      `UPDATE clients SET name = ?, description = ?, website_url = ?, ecosystem = ?, requested_scopes = ?, approved_scopes = '[]',
+      `UPDATE clients SET name = ?, description = ?, website_url = ?, application_icon_url = ?, launch_uri_template = ?,
+         supports_presence_requested = ?, supports_multiplayer_requested = ?, supports_join_intent_requested = ?,
+         launch_uri_approved = 0, supports_presence = 0, supports_multiplayer = 0, supports_join_intent = 0,
+         ecosystem = ?, requested_scopes = ?, approved_scopes = '[]',
          status = 'pending', approved_at = NULL, approved_by = NULL
        WHERE id = ?`,
-      [value.name, value.description, value.websiteUrl, ecosystem, JSON.stringify(value.requestedScopes), id],
+      [value.name, value.description, value.websiteUrl, value.applicationIconUrl, value.launchUriTemplate,
+        value.supports_presence ? 1 : 0, value.supports_multiplayer ? 1 : 0, value.supports_join_intent ? 1 : 0,
+        ecosystem, JSON.stringify(value.requestedScopes), id],
     );
     await syncRedirectUris(conn, Number(id), value.redirectUris);
     if (wasApproved) {
@@ -485,7 +542,8 @@ async function deleteOwnerApplication(ownerUserId, id) {
 
 async function listPublicApplications() {
   const [rows] = await pool.execute(
-    `SELECT c.client_id, c.name, c.description, c.website_url, c.client_type, c.party_type,
+    `SELECT c.client_id, c.name, c.description, c.website_url, c.application_icon_url, c.launch_uri_template, c.ecosystem,
+            c.launch_uri_approved, c.supports_presence, c.supports_multiplayer, c.supports_join_intent, c.client_type, c.party_type,
             c.requested_scopes, c.approved_scopes, c.owner_user_id, u.username AS developer_name,
             (SELECT COUNT(DISTINCT a.user_id) FROM authorizations a WHERE a.client_id = c.client_id) AS authorization_count
      FROM clients c LEFT JOIN users u ON u.id = c.owner_user_id
@@ -497,7 +555,8 @@ async function listPublicApplications() {
 
 async function getPublicApplication(clientId) {
   const [rows] = await pool.execute(
-    `SELECT c.client_id, c.name, c.description, c.website_url, c.client_type, c.party_type, c.status,
+    `SELECT c.client_id, c.name, c.description, c.website_url, c.application_icon_url, c.launch_uri_template, c.ecosystem,
+            c.launch_uri_approved, c.supports_presence, c.supports_multiplayer, c.supports_join_intent, c.client_type, c.party_type, c.status,
             c.requested_scopes, c.approved_scopes, c.owner_user_id, u.username AS developer_name,
             (SELECT COUNT(DISTINCT a.user_id) FROM authorizations a WHERE a.client_id = c.client_id) AS authorization_count
      FROM clients c LEFT JOIN users u ON u.id = c.owner_user_id WHERE c.client_id = ? LIMIT 1`, [clientId],
@@ -515,6 +574,11 @@ function publicApplicationView(row) {
     name: row.name,
     description: row.description || '',
     website_url: row.website_url || null,
+    application_icon_url: row.application_icon_url || null,
+    launch_uri_template: row.launch_uri_approved && row.supports_join_intent ? row.launch_uri_template || null : null,
+    supports_presence: Boolean(row.supports_presence),
+    supports_multiplayer: Boolean(row.supports_multiplayer),
+    supports_join_intent: Boolean(row.supports_join_intent && row.launch_uri_approved && row.launch_uri_template),
     client_type: row.client_type,
     party_type: row.party_type,
     ecosystem: normalizeEcosystem(row.ecosystem),
@@ -526,7 +590,7 @@ function publicApplicationView(row) {
   };
 }
 
-async function reviewClient(id, { status, approvedScopes, reviewReason }, actor) {
+async function reviewClient(id, { status, approvedScopes, reviewReason, approvedCapabilities = {} }, actor) {
   if (!['approved', 'rejected', 'suspended', 'pending'].includes(status)) throw new Error('无效的审核状态');
   const client = await getClient(id);
   if (!client) throw new Error('客户端不存在');
@@ -539,6 +603,29 @@ async function reviewClient(id, { status, approvedScopes, reviewReason }, actor)
     throw new Error('批准的 scopes 必须来自应用申请列表');
   }
   if (status === 'approved' && scopes.length === 0) throw new Error('至少批准一个 scope');
+  const requestedCapabilities = {
+    supports_presence: Boolean(client.supports_presence_requested),
+    supports_multiplayer: Boolean(client.supports_multiplayer_requested),
+    supports_join_intent: Boolean(client.supports_join_intent_requested),
+  };
+  const approved = {
+    supports_presence: status === 'approved' && approvedCapabilities.supports_presence === true,
+    supports_multiplayer: status === 'approved' && approvedCapabilities.supports_multiplayer === true,
+    supports_join_intent: status === 'approved' && approvedCapabilities.supports_join_intent === true,
+    launch_uri_approved: status === 'approved' && approvedCapabilities.launch_uri_approved === true,
+  };
+  for (const key of ['supports_presence', 'supports_multiplayer', 'supports_join_intent']) {
+    if (approved[key] && !requestedCapabilities[key]) throw new Error(`${key} 未由开发者申请，不能批准`);
+  }
+  if (approved.supports_presence && !scopes.includes('presence.write')) {
+    throw new Error('批准 Presence 能力需要同时批准 presence.write');
+  }
+  if ((approved.supports_multiplayer || approved.supports_join_intent) && !scopes.includes('multiplayer.write')) {
+    throw new Error('批准 Multiplayer 能力需要同时批准 multiplayer.write');
+  }
+  if (approved.supports_join_intent && (!approved.launch_uri_approved || !client.launch_uri_template)) {
+    throw new Error('Join Intent 需要批准启动 URI 模板');
+  }
   const safeReviewReason = typeof reviewReason === 'string' ? reviewReason.trim().slice(0, 1000) || null : null;
   if (status === 'rejected' && !safeReviewReason) throw new Error('拒绝申请时请填写原因');
   const previousScopes = [...client.approved_scopes].sort();
@@ -550,9 +637,14 @@ async function reviewClient(id, { status, approvedScopes, reviewReason }, actor)
     revokedUsers = await revokeClientGrants(client.client_id, status === 'approved' ? 'suspended' : status);
   }
   await pool.execute(
-    `UPDATE clients SET status = ?, approved_scopes = IF(? = 'suspended', approved_scopes, ?), approved_at = IF(? = 'approved', CURRENT_TIMESTAMP, NULL),
+    `UPDATE clients SET status = ?, approved_scopes = IF(? = 'suspended', approved_scopes, ?),
+       launch_uri_approved = ?, supports_presence = ?, supports_multiplayer = ?, supports_join_intent = ?,
+       approved_at = IF(? = 'approved', CURRENT_TIMESTAMP, NULL),
        approved_by = IF(? = 'approved', ?, NULL), admin_review_note = ? WHERE id = ?`,
-    [status, status, JSON.stringify(status === 'approved' ? scopes : []), status, status, actor.adminId, safeReviewReason, id],
+    [status, status, JSON.stringify(status === 'approved' ? scopes : []),
+      approved.launch_uri_approved ? 1 : 0, approved.supports_presence ? 1 : 0,
+      approved.supports_multiplayer ? 1 : 0, approved.supports_join_intent ? 1 : 0,
+      status, status, actor.adminId, safeReviewReason, id],
   );
   if (revokedUsers.length) await Promise.all(revokedUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, client.client_id)));
   await writeAdminAudit(actor.adminId, `client.${status}`, 'client', Number(id), { approved_scopes: scopes, review_reason: safeReviewReason }, actor.ipAddress);
