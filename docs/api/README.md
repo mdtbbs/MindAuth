@@ -134,7 +134,7 @@ Native 错误统一为 `{ "error": { "code", "message", "retryable", "details": 
 | POST | `/api/native/logout` | 用 Bearer access token（或绑定设备的 refresh token）注销当前 Mod 设备会话 |
 | GET | `/api/native/me` | 返回当前用户的最小资料 |
 
-登录请求为 `{client_id, username, password, device_id, device_name?}`；刷新为 `{client_id, refresh_token, device_id}`。成功响应沿用 OAuth Token 字段（`access_token`、`refresh_token`、`token_type`、`expires_in`、`scope`），登录额外返回 `success: true`。默认 scope 为 `openid profile game_content`。Native access token 仍是 Redis 中标准 Bearer token，audience client 由 `native_auth_clients.token_audience_client_id` 指向 MindFourm OAuth client（默认 `forum`），可由现有 `/api/introspect`、`/api/userinfo` 验证；不会向 OIDC Discovery 宣称支持 password grant。
+登录请求为 `{client_id, username, password, device_id, device_name?}`；刷新为 `{client_id, refresh_token, device_id}`。成功响应沿用 OAuth Token 字段（`access_token`、`refresh_token`、`token_type`、`expires_in`、`scope`），登录额外返回 `success: true`。新 Native 登录固定 scope 为 `openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete`；refresh rotation 保留已存储的 scope，不会给旧会话补发新增权限。Native access token 仍是 Redis 中标准 Bearer token，audience client 由 `native_auth_clients.token_audience_client_id` 指向 MindFourm OAuth client（默认 `forum`），可由现有 `/api/introspect`、`/api/userinfo` 验证；不会向 OIDC Discovery 宣称支持 password grant。
 
 Native 错误采用共享 API JSON 结构 `{success:false, code, message}`；常见 code 为 `INVALID_CLIENT`、`INVALID_REQUEST`、`INVALID_CREDENTIALS`、`ACCOUNT_LOCKED`、`USER_BANNED`、`INVALID_REFRESH_TOKEN`、`SESSION_REVOKED`、`RATE_LIMITED`。Native POST 只在 CSRF middleware 中按完整路径精确豁免；授权仍只依赖密码或 Bearer/refresh token、TLS、限流与账号锁定。
 

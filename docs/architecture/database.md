@@ -28,6 +28,8 @@ MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承
 | [`014_public_clients_self_service.sql`](../../src/db/migrations/014_public_clients_self_service.sql) | 增加已删除状态与公开目录索引；仅自动启用 secret 为空、PKCE 开启、scope 全部位于允许列表且登记回调不含公网 HTTP 的 Public Client 草稿/pending；不安全旧配置保留原状态，scope 检查兼容 MySQL 5.7 |
 | [`015_email_domain_rules.sql`](../../src/db/migrations/015_email_domain_rules.sql) | 新增邮箱域名规则与命中事件表、白名单模式配置；规则唯一键为 `(match_type, pattern, policy)`，deny 与 allow 可并存 |
 | [`016_developer_application_review.sql`](../../src/db/migrations/016_developer_application_review.sql) | 增加应用审核备注，以及开发者申请/创建时间、授权创建时间、登录 IP、用户审计、封禁、锁定和 Native 活动会话索引；复用 011 已有的 owner/status 索引 |
+| [`017_mark_official_forum_client.sql`](../../src/db/migrations/017_mark_official_forum_client.sql) | 将官方论坛 `https://mdtbbs.cn/api/auth/callback` 对应的已批准 Confidential Client（含旧 `forum` ID）标记为 first-party，登录时可无确认页授权 |
+| [`019_multiplayer_application_metadata.sql`](../../src/db/migrations/019_multiplayer_application_metadata.sql) | OAuth `clients` 增加应用图标、启动 URI 模板与审核标记，以及 Presence/Multiplayer/Join Intent 的开发者申请和管理员批准字段；新旧应用默认能力关闭 |
 
 ## MySQL 表
 
@@ -59,7 +61,7 @@ MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承
 
 | 表 | 用途 | 关键列与关联 |
 |----|------|-------------|
-| `clients` | OAuth 应用注册 | `client_id`（UNIQUE，软删除后不复用）、`client_secret`（Confidential Client 哈希存储；Public Client 为 NULL）、`client_type`、`party_type`、`status`、`owner_user_id`、`requested_scopes`、`approved_scopes`、`admin_review_note`、`redirect_uri`、`require_pkce`。无 OAuth 资源外键 |
+| `clients` | OAuth 应用注册 | `client_id`（UNIQUE，软删除后不复用）、`client_secret`（Confidential Client 哈希存储；Public Client 为 NULL）、`client_type`、`party_type`、`status`、`owner_user_id`、`requested_scopes`、`approved_scopes`、`admin_review_note`、`redirect_uri`、`require_pkce`；019 增加 `application_icon_url`、`launch_uri_template`/`launch_uri_approved` 与 `supports_{presence,multiplayer,join_intent}_{requested/approved}`。无 OAuth 资源外键 |
 | `authorizations` | 用户对客户端的授权记录 | `(user_id, client_id)` UNIQUE；`scope`、`last_used_at`。`client_id` 为字符串关联 `clients.client_id`（无外键约束） |
 | `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销；009 增加 nullable `native_session_id` 关联单设备 Native family |
 

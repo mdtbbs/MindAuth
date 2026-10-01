@@ -8,7 +8,7 @@ const notificationCenter = require('../notifications/notificationCenter');
 const { getClientIp } = require('../../utils/request');
 
 const OFFICIAL_CLIENT_ID = 'mdtbbs-mindustry-mod';
-const DEFAULT_SCOPE = 'openid profile game_content';
+const DEFAULT_SCOPE = 'openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class NativeClientError extends Error {

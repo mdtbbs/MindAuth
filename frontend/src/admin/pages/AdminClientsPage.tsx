@@ -16,6 +16,8 @@ const SUPPORTED_SCOPES = [
   'openid', 'profile', 'email', 'forum.read', 'forum.write',
   'resource.read', 'resource.download', 'resource.upload',
   'notification.read', 'message.read', 'message.write',
+  'friends.read', 'presence.read', 'presence.write', 'multiplayer.read', 'multiplayer.write',
+  'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete',
 ] as const;
 
 export function AdminClientsPage() {

@@ -11,10 +11,12 @@
 - MindAuth 发布 OIDC Discovery 元数据和 UserInfo，但**不签发 ID Token，也不提供 JWKS**。需要验证签名 ID Token 的 OIDC 客户端不能直接使用当前契约；登录后应由后端调用 UserInfo，并以 `issuer + sub` 作为外部用户标识。
 - `/api/native/*` 与 `/api/v1/native/*` 是预先登记的第一方客户端接口，不是第三方 OAuth 接口。其他应用不得收集 MindAuth 密码或调用 Native Password Login。
 - RFC 8628 Device Flow 保持可用，验证页为 React 路由 `/device`；设备码、授权与轮询接口见 [OAuth API 参考](api/oauth.md)。
+- MDTBBS 好友 Presence 与 Multiplayer API 使用 `friends.read`、`presence.read`、`presence.write`、`multiplayer.read`、`multiplayer.write`；这些是敏感权限。Public Client 自助创建后进入审核。使用 Presence/Multiplayer 的应用还要申报并获批客户端能力，Launcher URI 仅在 `supports_join_intent` 与启动 URI 模板都审核通过后公开。字段与流程见[开发者应用目录 API](api/developer-applications.md)。
+- MDTBBS 游戏云存档 API 使用 `game_content.saves.read`、`game_content.saves.write` 和 `game_content.saves.delete`。第三方 OAuth 应用需逐项申请并由管理员批准。官方 Mindustry Mod 的新 Native 登录会固定签发这三个 scope；登录请求不能自行选择 scope，已有 Native 会话刷新时仍保留其原始 scope。
 
 ## 1. 注册 OAuth 应用
 
-Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助创建并即时启用；服务端校验 HTTPS、localhost/loopback、自定义 scheme 和 scope 白名单，不需要管理员逐项审核。详见 [PKCE 指南](public-client-pkce.md)。
+Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助创建后进入管理员审核；服务端校验 HTTPS、localhost/loopback、自定义 scheme 和 scope 白名单。详见 [PKCE 指南](public-client-pkce.md) 与[开发者应用目录 API](api/developer-applications.md)。
 
 取得以下配置后，将密钥放在服务端密钥管理或环境变量中：
 
@@ -45,6 +47,7 @@ Confidential Client 可配置 `require_pkce`。Public Client 强制要求 PKCE�
 5. 客户端用返回的 `access_token` 调用 MindFourm `/api/v1/*`；服务端网站可继续调用 `/api/userinfo` 并建立本地 session。
 
 授权码有效期为 5 分钟且只能兑换一次。`state` 应当随机、单次使用，并在回调时与发起登录的服务端会话比对。
+第三方客户端首次请求或增加尚未授权的 scope 时，MindAuth 会显示授权确认页；已登记为 `first_party` 的官方账号客户端会自动授予该客户端已批准的请求 scope。
 
 ## 4. Node.js / Express Confidential Client 示例
 

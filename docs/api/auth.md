@@ -128,7 +128,7 @@ QQ 继续使用既有 `/api/auth/qq`、`/api/auth/qq/callback` 与 `/api/auth/qq
 成功响应含标准 Bearer token 字段及 `success: true`：
 
 ```json
-{ "success": true, "access_token": "…", "refresh_token": "…", "token_type": "Bearer", "expires_in": 3600, "scope": "openid profile game_content" }
+{ "success": true, "access_token": "…", "refresh_token": "…", "token_type": "Bearer", "expires_in": 3600, "scope": "openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete" }
 ```
 
 #### `POST /api/native/refresh`

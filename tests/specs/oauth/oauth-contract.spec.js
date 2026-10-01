@@ -142,6 +142,9 @@ test.describe('OIDC Discovery (/.well-known/openid-configuration)', () => {
     expect(body.scopes_supported).toContain('openid');
     expect(body.scopes_supported).toContain('profile');
     expect(body.scopes_supported).toContain('email');
+    expect(body.scopes_supported).toContain('game_content.saves.read');
+    expect(body.scopes_supported).toContain('game_content.saves.write');
+    expect(body.scopes_supported).toContain('game_content.saves.delete');
     expect(body.token_endpoint_auth_methods_supported).toContain('client_secret_post');
     expect(body.grant_types_supported).toContain('authorization_code');
     expect(body.grant_types_supported).toContain('refresh_token');

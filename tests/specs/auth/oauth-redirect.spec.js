@@ -71,13 +71,11 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     const authorizeRequest = await authorizeRequestPromise;
     expect(authorizeRequest.url()).toContain(`client_id=${FORUM_CLIENT_ID}`);
 
-    // First-time grants now use an explicit consent page.
-    await page.getByRole('button', { name: '允许' }).click();
-
     const callbackRequest = await callbackRequestPromise;
     const finalUrl = callbackRequest.url();
     expect(finalUrl).toContain('code=');
     expect(finalUrl).toContain('state=');
+    await expect(page.getByRole('button', { name: '允许' })).toHaveCount(0);
   });
 
   test('带 OAuth 参数的登录页应展示授权上下文并保留注册跳转参数', async ({ page }) => {
@@ -112,9 +110,9 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     });
     expect(reg.status()).toBe(201);
 
-    // Note: uses `redirect=` instead of `redirect_uri=`
-    const loginUrl = `/login?redirect=${encodeURIComponent(FORUM_CALLBACK)}&client_id=${FORUM_CLIENT_ID}&state=%2F`;
-    await page.goto(loginUrl);
+    // Exercise the forum's actual SPA entry and its historical `redirect` key.
+    const authorizeUrl = `/authorize?redirect=${encodeURIComponent(FORUM_CALLBACK)}&client_id=${FORUM_CLIENT_ID}&state=%2F`;
+    await page.goto(authorizeUrl);
     await page.waitForSelector('#login-form', { timeout: 5000 });
 
     const callbackRequestPromise = page.waitForRequest(request =>
@@ -126,11 +124,40 @@ test.describe('OAuth 登录后跳转回原页面', () => {
     await page.fill('#password', 'TestPass123');
     await page.click('#login-form button[type="submit"]');
 
-    await page.getByRole('button', { name: '允许' }).click();
-
     const callbackRequest = await callbackRequestPromise;
     const finalUrl = callbackRequest.url();
     expect(finalUrl).toContain('code=');
     expect(finalUrl).toContain('state=');
+  });
+
+  test('OAuth 注册后默认完成论坛授权并自动返回论坛', async ({ page }) => {
+    const testUser = `oauth_register_${Date.now()}`;
+    const testEmail = `${testUser}@test.com`;
+    const authorizeUrl = `/authorize?redirect=${encodeURIComponent(FORUM_CALLBACK)}&client_id=${FORUM_CLIENT_ID}&state=register-state`;
+
+    await page.goto(authorizeUrl);
+    await page.waitForSelector('#login-form', { timeout: 5000 });
+    await page.getByRole('link', { name: '没有账号？注册' }).click();
+    await page.waitForSelector('#register-form', { timeout: 5000 });
+    await page.fill('#username', testUser);
+    await page.fill('#email', testEmail);
+    await page.fill('#password', 'TestPass123');
+    await page.click('[data-testid="register-send-code"]');
+    await page.waitForFunction(() => {
+      const input = document.querySelector('[data-testid="register-email-code"]');
+      return input && input.value.length === 6;
+    }, { timeout: 5000 });
+
+    const callbackRequestPromise = page.waitForRequest(request =>
+      request.url().startsWith(FORUM_CALLBACK) && request.url().includes('code='),
+      { timeout: 20000 }
+    );
+    await page.click('#register-form button[type="submit"]');
+
+    const callbackRequest = await callbackRequestPromise;
+    const callbackUrl = new URL(callbackRequest.url());
+    expect(callbackUrl.searchParams.get('state')).toBe('register-state');
+    expect(callbackUrl.searchParams.get('code')).toBeTruthy();
+    await expect(page.getByRole('button', { name: '允许' })).toHaveCount(0);
   });
 });

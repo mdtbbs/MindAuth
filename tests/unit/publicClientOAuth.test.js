@@ -22,8 +22,10 @@ test('redirect matching permits only a registered exact redirect or a loopback r
 });
 
 test('requested scopes cannot exceed the approved scope set', () => {
-  const client = { approved_scopes: JSON.stringify(['openid', 'profile', 'forum.read']) };
+  const client = { approved_scopes: JSON.stringify(['openid', 'profile', 'forum.read', 'game_content.saves.read']) };
   assert.deepEqual(issuer._requestedScopes('openid forum.read', client), ['openid', 'forum.read']);
+  assert.deepEqual(issuer._requestedScopes('game_content.saves.read', client), ['game_content.saves.read']);
+  assert.throws(() => issuer._requestedScopes('game_content.saves.write', client), (error) => error.error === 'invalid_scope');
   assert.throws(() => issuer._requestedScopes('openid message.write', client), (error) => error.error === 'invalid_scope');
 });
 
@@ -63,6 +65,50 @@ test('previously granted scopes skip consent while newly requested scopes are id
     assert.deepEqual(additional.previousScopes, ['profile', 'forum.read']);
     assert.deepEqual(additional.newScopes, ['message.read']);
     assert.equal(storedCodeCount, 1, 'the preview does not issue an authorization code');
+  } finally {
+    pool.execute = originalExecute;
+    tokenStore.storeAuthCode = originalStoreAuthCode;
+    sessionManager.authenticateUserSession = originalAuthenticate;
+  }
+});
+
+test('first-party forum authorization grants approved scopes without a consent decision', async () => {
+  const originalExecute = pool.execute;
+  const originalStoreAuthCode = tokenStore.storeAuthCode;
+  const originalAuthenticate = sessionManager.authenticateUserSession;
+  const client = {
+    id: 9, client_id: 'forum', name: 'MindFourm', client_type: 'confidential',
+    party_type: 'first_party', status: 'approved', owner_user_id: null,
+    redirect_uri: 'http://localhost:4000/api/auth/callback',
+    approved_scopes: ['openid', 'profile', 'email'],
+  };
+  let storedCodeCount = 0;
+  let writtenAuthorization;
+  try {
+    pool.execute = async (sql, params = []) => {
+      if (sql.startsWith('SELECT * FROM clients')) return [[client]];
+      if (sql.startsWith('SELECT redirect_uri')) return [[]];
+      if (sql.startsWith('SELECT scope FROM authorizations')) return [[]];
+      if (sql.includes('INSERT INTO authorizations')) writtenAuthorization = params;
+      return [{ insertId: 1 }];
+    };
+    tokenStore.storeAuthCode = async () => { storedCodeCount++; };
+    sessionManager.authenticateUserSession = async () => ({ user: { id: 42 } });
+
+    const common = {
+      clientId: 'forum', redirectUri: client.redirect_uri, state: 'forum-login',
+      scope: 'openid profile email', sessionToken: 'session-token', ipAddress: '127.0.0.1',
+    };
+    const preview = await issuer.authorize({ ...common, previewOnly: true });
+    assert.equal(preview.consentRequired, false, 'the consent page should auto-continue for the forum');
+
+    const result = await issuer.authorize(common);
+    const destination = new URL(result.redirectTo);
+    assert.equal(destination.origin + destination.pathname, client.redirect_uri);
+    assert.equal(destination.searchParams.get('state'), 'forum-login');
+    assert.ok(destination.searchParams.get('code'));
+    assert.equal(storedCodeCount, 1);
+    assert.equal(writtenAuthorization[2], 'openid profile email');
   } finally {
     pool.execute = originalExecute;
     tokenStore.storeAuthCode = originalStoreAuthCode;

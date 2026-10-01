@@ -53,7 +53,7 @@ Content-Type: application/json
 
 ## Scopes
 
-应用只能请求自己在开发者中心勾选的 scopes；修改权限立即生效，并撤销现有 token 以应用新权限。用户首次授权或新增 scope 时会看到确认页；已授予的相同权限不重复询问。`message.read` 和 `message.write` 会显示“敏感权限”，但不触发人工审核。当前 scope：
+应用只能请求自己在开发者中心勾选并获批的 scopes；修改权限会撤销现有 token 以应用新权限。用户首次授权或新增 scope 时会看到确认页；已授予的相同权限不重复询问。`message.*`、社交/联机 scope 和 `game_content.saves.*` 会显示“敏感权限”。当前 scope：
 
 | Scope | 用户可见含义 |
 |---|---|
@@ -64,6 +64,13 @@ Content-Type: application/json
 | `resource.read` / `resource.download` / `resource.upload` | 浏览 / 下载 / 申请上传资源 |
 | `notification.read` | 读取和标记通知 |
 | `message.read` / `message.write` | 读取 / 发送私信 |
+| `friends.read` / `presence.read` / `presence.write` | 查看好友和在线状态 / 更新在线状态 |
+| `multiplayer.read` / `multiplayer.write` | 查看联机会话 / 使用联机功能 |
+| `game_content.saves.read` | 读取游戏云存档 |
+| `game_content.saves.write` | 创建或更新游戏云存档 |
+| `game_content.saves.delete` | 删除游戏云存档 |
+
+Cloud Saves scope 需要在 Public OAuth client 的请求与批准权限中明确包含。`/api/native/*` 是独立的官方登录路径：它不接受用户选择 scope；新 Native 登录会带上固定的三个 Cloud Saves scope，已有会话刷新时继续使用 refresh token 中存储的旧 scope。
 
 邮箱 scope 是可选兼容项。用户首次通过 Public Client 使用 MDTBBS 时只需授权 `profile`，无需同时授权 `email`。
 

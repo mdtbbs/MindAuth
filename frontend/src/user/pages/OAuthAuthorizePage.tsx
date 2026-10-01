@@ -24,6 +24,7 @@ const SCOPE_ICONS: Record<string, string> = {
   openid: '◉', profile: '👤', email: '✉️', 'forum.read': '💬', 'forum.write': '✍️',
   'resource.read': '🗂️', 'resource.download': '⬇️', 'resource.upload': '⬆️',
   'notification.read': '🔔', 'message.read': '📨', 'message.write': '✉️',
+  'game_content.saves.read': '☁️', 'game_content.saves.write': '☁️', 'game_content.saves.delete': '☁️',
 };
 
 export function OAuthAuthorizePage() {

@@ -15,6 +15,9 @@ const SCOPE_DESCRIPTIONS = Object.freeze({
   'presence.write': { name: '更新在线状态', description: '允许此应用更新你的在线状态和 Rich Activity。', sensitive: true },
   'multiplayer.read': { name: '查看联机会话', description: '允许此应用查看有权访问的联机会话、Peer 和连接候选。', sensitive: true },
   'multiplayer.write': { name: '使用联机功能', description: '允许此应用创建或加入联机会话、邀请好友并申请官方中继凭证。', sensitive: true },
+  'game_content.saves.read': { name: '读取游戏云存档', description: '允许此应用读取你在 MDTBBS 中保存的游戏云存档。', sensitive: true },
+  'game_content.saves.write': { name: '写入游戏云存档', description: '允许此应用以你的身份创建或更新游戏云存档。', sensitive: true },
+  'game_content.saves.delete': { name: '删除游戏云存档', description: '允许此应用删除你在 MDTBBS 中保存的游戏云存档。', sensitive: true },
 });
 
 const VALID_SCOPES = Object.freeze(Object.keys(SCOPE_DESCRIPTIONS));

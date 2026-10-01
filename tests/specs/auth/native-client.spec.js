@@ -25,7 +25,7 @@ test('official Mindustry Mod logs in without CSRF, rotates tokens, reads minimal
   });
   expect(loginResponse.status()).toBe(200);
   const login = await loginResponse.json();
-  expect(login).toMatchObject({ success: true, token_type: 'Bearer', expires_in: 3600, scope: 'openid profile game_content' });
+  expect(login).toMatchObject({ success: true, token_type: 'Bearer', expires_in: 3600, scope: 'openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete' });
   expect(login.access_token).toBeTruthy();
   expect(login.refresh_token).toBeTruthy();
 
@@ -42,6 +42,7 @@ test('official Mindustry Mod logs in without CSRF, rotates tokens, reads minimal
   expect(refreshResponse.status()).toBe(200);
   const rotated = await refreshResponse.json();
   expect(rotated.refresh_token).not.toBe(login.refresh_token);
+  expect(rotated.scope).toBe(login.scope);
   expect(rotated.access_token).toBeTruthy();
 
   const logout = await request.post('/api/native/logout', { headers: { Authorization: `Bearer ${rotated.access_token}` } });

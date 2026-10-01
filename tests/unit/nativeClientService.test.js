@@ -37,6 +37,10 @@ test('only configured official client can create a password device session', asy
   assert.equal(result.success, true);
   assert.equal(issued[0].accessClientId, 'forum');
   assert.equal(issued[0].nativeSessionId, 42);
+  assert.deepEqual(issued[0].scope.split(' ').filter(scope => scope.startsWith('game_content.saves.')), [
+    'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete',
+  ]);
+  assert.equal(result.scope, 'openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete');
   const loginLog = calls.find(c => c.sql.startsWith('INSERT INTO login_logs'));
   assert.deepEqual(loginLog.params.slice(3), ['native', OFFICIAL_CLIENT_ID, deviceId, 'Mindustry Linux']);
   assert.equal(JSON.stringify(calls).includes('secret'), false);

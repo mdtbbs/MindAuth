@@ -70,7 +70,7 @@ OAuth 2.0 / OIDC 全部业务逻辑：授权码签发、令牌交换、刷新轮
 
 依赖：`tokenStore`、`sessionManager`；MySQL `clients`、`refresh_tokens`、`authorizations`、`users`、`login_logs`、`user_fields`/`user_field_values`；utils `crypto`、`token`、`datetime`、`phone`。
 
-约束：PKCE 只接受 `S256`；client_secret 先按 `client_id` 取行再 `timingSafeCompare`（避免 SQL 等值比较时序泄漏）；refresh token SHA-256 哈希落库，轮换在事务行锁内完成。OAuth refresh 重放维持原 user/client 撤销策略；Native refresh 重放只撤销关联 native session。OAuth scope 白名单为 `openid profile email`；Native 另用 `openid profile game_content`，不改变 OIDC Discovery 的标准 grant 列表；授权码 5min、access token 1h、refresh token 30 天。
+约束：PKCE 只接受 `S256`；client_secret 先按 `client_id` 取行再 `timingSafeCompare`（避免 SQL 等值比较时序泄漏）；refresh token SHA-256 哈希落库，轮换在事务行锁内完成。OAuth refresh 重放维持原 user/client 撤销策略；Native refresh 重放只撤销关联 native session。OAuth scope 白名单由 `src/modules/oauth/scopes.js` 维护；官方 Native 新登录固定使用 `openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete`，refresh rotation 保留已存 scope，所以旧 Native 会话不会自动继承这些权限；授权码 5min、access token 1h、refresh token 30 天。
 
 ### tokenStore（`src/modules/oauth/tokenStore.js`）
 

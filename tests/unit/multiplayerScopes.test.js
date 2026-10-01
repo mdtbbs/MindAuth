@@ -2,9 +2,10 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { SCOPE_DESCRIPTIONS, VALID_SCOPES, normalizeScopes } = require('../../src/modules/oauth/scopes');
 
-describe('MDTBBS LanLink social and multiplayer OAuth scopes', () => {
+describe('MDTBBS social, multiplayer, and cloud save OAuth scopes', () => {
   const requested = [
     'friends.read', 'presence.read', 'presence.write', 'multiplayer.read', 'multiplayer.write',
+    'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete',
   ];
 
   it('registers each scope as an explicit sensitive consent permission', () => {
@@ -20,8 +21,8 @@ describe('MDTBBS LanLink social and multiplayer OAuth scopes', () => {
     for (const scope of ['profile', 'forum.read', 'forum.write', 'resource.read', 'resource.download', 'resource.upload', 'notification.read']) {
       assert.ok(VALID_SCOPES.includes(scope), `${scope} should remain valid`);
     }
-    assert.deepEqual(normalizeScopes('profile friends.read presence.write multiplayer.write unknown'),
-      ['profile', 'friends.read', 'presence.write', 'multiplayer.write']);
+    assert.deepEqual(normalizeScopes('profile friends.read presence.write multiplayer.write game_content.saves.read unknown'),
+      ['profile', 'friends.read', 'presence.write', 'multiplayer.write', 'game_content.saves.read']);
   });
 
   it('keeps Native password login on its fixed legacy scope set', () => {

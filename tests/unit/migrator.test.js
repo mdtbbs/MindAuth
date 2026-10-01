@@ -73,3 +73,13 @@ test('discoverMigrations: returns migrations in numeric order', () => {
     assert.ok(migrations[i].version > migrations[i - 1].version);
   }
 });
+
+test('forum first-party migration recognizes the production callback and only confidential approved clients', () => {
+  const migration = discoverMigrations().find(({ version }) => version === 17);
+  assert.ok(migration, 'migration 017 must be discovered for production upgrades');
+  const sql = require('fs').readFileSync(migration.file, 'utf8');
+  assert.match(sql, /https:\/\/mdtbbs\.cn\/api\/auth\/callback/);
+  assert.match(sql, /c\.client_type\s*=\s*'confidential'/i);
+  assert.match(sql, /c\.status\s*=\s*'approved'/i);
+  assert.match(sql, /c\.client_id\s*=\s*'forum'/i);
+});

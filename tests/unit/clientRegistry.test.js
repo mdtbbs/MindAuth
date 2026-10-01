@@ -65,10 +65,10 @@ test('validates a self-service public application and rejects scope/redirect esc
   const valid = validateApplication({
     name: 'Desktop Client', description: 'Desktop community client', website_url: 'https://client.example.org',
     redirect_uris: ['com.example.client:/oauth2redirect', 'http://127.0.0.1:0/callback'],
-    requested_scopes: ['openid', 'profile', 'forum.read'],
+    requested_scopes: ['openid', 'profile', 'forum.read', 'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete'],
   });
   assert.equal(valid.name, 'Desktop Client');
-  assert.deepEqual(valid.requestedScopes, ['openid', 'profile', 'forum.read']);
+  assert.deepEqual(valid.requestedScopes, ['openid', 'profile', 'forum.read', 'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete']);
   assert.equal(validateApplication({
     name: 'Local App', description: 'Local development client', website_url: 'http://localhost:3000',
     redirect_uris: ['http://localhost:0/callback'], requested_scopes: ['profile'],

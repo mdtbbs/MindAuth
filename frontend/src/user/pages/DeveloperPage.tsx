@@ -23,6 +23,9 @@ const SCOPE_OPTIONS = [
   ['presence.write', 'developer.scope.presenceWrite', 'developer.scope.presenceWriteHelp'],
   ['multiplayer.read', 'developer.scope.multiplayerRead', 'developer.scope.multiplayerReadHelp'],
   ['multiplayer.write', 'developer.scope.multiplayerWrite', 'developer.scope.multiplayerWriteHelp'],
+  ['game_content.saves.read', 'developer.scope.gameContentSavesRead', 'developer.scope.gameContentSavesReadHelp'],
+  ['game_content.saves.write', 'developer.scope.gameContentSavesWrite', 'developer.scope.gameContentSavesWriteHelp'],
+  ['game_content.saves.delete', 'developer.scope.gameContentSavesDelete', 'developer.scope.gameContentSavesDeleteHelp'],
   ['openid', 'developer.scope.openid', 'developer.scope.openidHelp'],
   ['email', 'developer.scope.email', 'developer.scope.emailHelp'],
 ] as const;
@@ -225,6 +228,7 @@ export function DeveloperPage() {
 
 function ScopeOptions({ scopes, setScopes }: { scopes: string[]; setScopes: Dispatch<SetStateAction<string[]>> }) {
   const { t } = useI18n();
+  return <fieldset className="stack developer-scope-options"><legend className="field__label">{t('developer.allowedScopes')}</legend>{SCOPE_OPTIONS.map(([scope, labelKey, helpKey]) => <label className="cluster developer-scope-option" key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={event => setScopes(current => event.target.checked ? [...current, scope] : current.filter(item => item !== scope))} /><span><strong>{t(labelKey)}</strong>{['message.read', 'message.write', 'friends.read', 'presence.read', 'presence.write', 'multiplayer.read', 'multiplayer.write', 'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete'].includes(scope) ? <span className="public-scope-sensitive">{t('developer.sensitive')}</span> : null}<small>{scope} · {t(helpKey)}</small></span></label>)}</fieldset>;
 }
 
 function ApplicationForm({

@@ -17,6 +17,28 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 - CSRF：`/token` `/refresh` `/introspect` `/revoke` `/verify` 在豁免名单中；`DELETE /authorizations/:client_id` **需要** `X-CSRF-Token`。
 - 速率限制（按 IP）：`/authorize` `/token` `/refresh` `/introspect` `/revoke` 各 60 次/分钟；`/userinfo` `/user` `/verify` 共享 30 次/分钟（`ratelimit:verify_api`）。
 
+### MindFourm Social / Multiplayer scopes
+
+| Scope | 授权页含义 | Forum 能力 |
+|---|---|---|
+| `friends.read` | 查看好友 | 好友、好友请求、屏蔽列表与 Realtime 用户流 |
+| `presence.read` | 查看在线状态 | 按用户隐私设置读取 Presence、Activity 和好友聚合 |
+| `presence.write` | 更新在线状态 | 创建多客户端 Presence Connection、心跳、Rich Activity 与隐私设置 |
+| `multiplayer.read` | 查看联机会话 | 读取可见 Session、Peer、Candidate 和能力 |
+| `multiplayer.write` | 使用联机功能 | 创建/加入 Session、Candidate 信令、Invite、Join Request、Join Intent 和官方 Relay 请求 |
+
+这 5 个权限均为 sensitive consent scope；应用必须逐项请求，授权后 Forum 仍会执行 Scope、Block、Privacy、Friend、Session 和资源状态策略。Developer Application 还要单独申请 Presence/Multiplayer/Join Intent 客户端能力；相应写 scope 未被管理员批准时，MindAuth 不允许批准对应客户端能力。管理员重新审核已启用应用时，Capabilities 会重置为未批准。
+
+### MDTBBS Cloud Saves scopes
+
+| Scope | 授权页含义 | Forum 能力 |
+|---|---|---|
+| `game_content.saves.read` | 读取游戏云存档 | 读取当前账户的游戏云存档 |
+| `game_content.saves.write` | 写入游戏云存档 | 创建或更新当前账户的游戏云存档 |
+| `game_content.saves.delete` | 删除游戏云存档 | 删除当前账户的游戏云存档 |
+
+这 3 个权限均会在 OAuth 授权页标记为敏感权限。Public OAuth client 必须逐项申请并经管理员批准；官方 `/api/native/*` 登录是独立的固定权限流程，新登录签发 `openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete`，不接收用户选择的 scope。Native refresh rotation 保留 refresh token 中原有的 scope，因此旧会话不会自动获得新增权限。
+
 ---
 
 ## GET /api/authorize
@@ -50,7 +72,7 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `invalid_scope` | scope 不在系统支持列表或不属于该客户端配置范围 |
 | `server_error` | 未捕获异常 |
 
-**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。用户已授予本次全部 scopes 时不重复显示同意页；新增 scope 时只突出显示尚未授予的权限。授权 scope 写回现有 `authorizations` 记录。
+**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。MindAuth 将 `party_type=first_party` 的官方客户端视为账号自有登录流程，按客户端已批准的 scope 自动授权并记录授权范围，不显示同意页；第三方客户端在用户尚未授予请求 scope 时显示同意页，已授予的 scope 不重复确认，新增 scope 时只突出显示新增权限。授权 scope 写回现有 `authorizations` 记录。
 
 用户界面语言解析顺序为 `ui_locales`、URL 显式语言、账户 `preferred_locale`、MindAuth locale cookie、`Accept-Language`、Client ecosystem 默认值，最后回退到 English。MDTBBS Client 默认 `zh-CN`；`mindustry-club` Client 默认 `en`。登录后的账户语言选择会保存到 `PUT /api/account/preferences` 的 `preferred_locale`。
 
@@ -256,7 +278,7 @@ OIDC Discovery 1.0 / RFC 8414 元数据端点（定义于 `src/app.js`）。无�
   "introspection_endpoint": "{baseUrl}/api/introspect",
   "response_types_supported": ["code"],
   "subject_types_supported": ["public"],
-  "scopes_supported": ["openid", "profile", "email", "forum.read", "forum.write", "resource.read", "resource.download", "resource.upload", "notification.read", "message.read", "message.write"],
+  "scopes_supported": ["openid", "profile", "email", "forum.read", "forum.write", "resource.read", "resource.download", "resource.upload", "notification.read", "message.read", "message.write", "friends.read", "presence.read", "presence.write", "multiplayer.read", "multiplayer.write", "game_content.saves.read", "game_content.saves.write", "game_content.saves.delete"],
   "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
   "code_challenge_methods_supported": ["S256"],
   "grant_types_supported": ["authorization_code", "refresh_token"]

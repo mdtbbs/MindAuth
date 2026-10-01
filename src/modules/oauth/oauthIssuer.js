@@ -393,7 +393,10 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
   );
   const previouslyGranted = new Set(String(authorizationRows[0]?.scope || '').split(/\s+/).filter(Boolean));
   const newScopes = requested.filter(item => !previouslyGranted.has(item));
-  const missingConsent = newScopes.length > 0;
+  // MDTBBS first-party clients are part of the account's own login flow. Keep
+  // their authorization seamless while still recording the requested scopes
+  // below; third-party clients must obtain explicit consent for new scopes.
+  const missingConsent = clientData.party_type !== 'first_party' && newScopes.length > 0;
   let developerName = null;
   if (clientData.owner_user_id) {
     const [ownerRows] = await pool.execute('SELECT username FROM users WHERE id = ? LIMIT 1', [clientData.owner_user_id]);
