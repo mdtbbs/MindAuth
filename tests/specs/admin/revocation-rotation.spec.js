@@ -128,6 +128,7 @@ test.describe('Admin revoke authorization cascades token revocation', () => {
     // Old refresh_token must now fail with invalid_grant
     await clearRateLimits(request);
     const refreshRes = await request.post('/api/refresh', {
+      headers: { 'Idempotency-Key': 'oauth-revocation-check-00000001' },
       data: {
         refresh_token: tokenData.refresh_token,
         client_id: CLIENT_ID,

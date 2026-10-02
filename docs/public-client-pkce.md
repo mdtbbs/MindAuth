@@ -83,9 +83,16 @@ Access token 一小时有效；refresh token 轮换并检测重放。新客户�
 ```http
 POST {issuer}/api/token
 Content-Type: application/json
+Idempotency-Key: 4d633f08-cc7e-4cb2-9e76-3b7767989ff8
 
 {"grant_type":"refresh_token","client_id":"PUBLIC_CLIENT_ID","refresh_token":"CURRENT_REFRESH_TOKEN"}
 ```
+
+### 跨启动保持登录
+
+若产品希望用户不必每次打开应用都登录，应持久保存 refresh token，并在应用启动时先静默刷新，再调用需要登录的 API。短期 access token 留在内存中即可。优先使用操作系统提供的凭据存储；如果目标平台没有可用凭据库，只能保存到应用私有的本地数据中，并限制文件访问权限。不得把 token 写入日志、普通诊断信息或可同步的公开配置。
+
+MindAuth 每次刷新都会同时返回新的 access token 和 refresh token，并立即废止旧 refresh token。每个 refresh 请求都必须带 `Idempotency-Key`（16–255 个可见 ASCII 字符）；缺少 key 时服务端在读取令牌前返回 `400 invalid_request`，不会消费或撤销该 refresh token。旧客户端必须升级。客户端应串行刷新，在发送请求前为这次尝试生成并持久保存一个唯一的 key，并在成功后原子保存新 refresh token、清除待处理的 key。若超时或收到服务端错误，结果可能未知：10 分钟内使用**原 refresh token 和同一个 key**重试，不要生成新 key。服务端会在短期窗口内返回同一组令牌，`expires_in` 会更新为 access token 的剩余寿命。不同 key 重用已轮换的令牌会被视为重放并撤销该用户对该客户端的全部 refresh token。用户退出或收到 `invalid_grant` 时清除本地凭据。Refresh token 默认 30 天过期，成功刷新会续期。
 
 旧 `/api/refresh` 保持兼容。Public Client 撤销自身令牌：
 

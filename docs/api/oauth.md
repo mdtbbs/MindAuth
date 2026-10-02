@@ -92,6 +92,8 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `client_secret` | Confidential 必填 | Public Client 不拥有 secret，也不能伪造形式 secret |
 | `code_verifier` | Public 必填 | 必须匹配授权时的 S256 challenge |
 
+每个 refresh grant 都必须在 HTTP header 中发送唯一的 `Idempotency-Key`（16–255 个可见 ASCII 字符；建议使用随机 UUID 或密码学安全随机字节）。同一刷新尝试遇到超时或 5xx 时，10 分钟内用相同 key 和原 refresh token 重试；新一轮刷新必须使用新 key。授权码交换不使用此 header。缺少或格式错误的 key 会在读取/轮换 refresh token 前返回 HTTP 400 `invalid_request`，不会消耗或撤销请求中的 refresh token；旧客户端必须升级后再刷新。
+
 **成功响应**（注意：**无** `success` 字段、**无** `user` 对象——用户信息请另调 `/api/userinfo`）：
 
 ```json
@@ -107,17 +109,18 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | error 码 | HTTP | 触发条件 |
 |------|------|------|
 | `unsupported_grant_type` | 400 | grant_type 不受支持；或存储的 code_challenge_method 非 S256 |
-| `invalid_request` | 400 | 缺当前 grant 必需参数；Public Client 缺 code_verifier |
+| `invalid_request` | 400 | 缺当前 grant 必需参数；Public Client 缺 code_verifier；refresh grant 缺少或格式错误的 Idempotency-Key |
 | `invalid_client` | 401 | client_id / Confidential secret 无效，或 Client 未批准/已停用 |
 | `invalid_grant` | 401 | code 无效/过期/已使用；code 与 client_id 不匹配；redirect_uri 不匹配；code_verifier 校验失败；授权用户不存在 |
+| `temporarily_unavailable` | 503 | 幂等恢复加密配置缺失，或 access token Redis 写入失败；带 key 的客户端可用原 token/key 重试 |
 
-**特殊行为**：access_token 存 Redis（1h TTL，带 user/client 索引集）；refresh_token 存 MySQL（SHA-256 哈希，30 天）。
+**特殊行为**：access_token 存 Redis（1h TTL，带 user/client 索引集）；refresh_token 存 MySQL（SHA-256 哈希，30 天）。使用 Idempotency-Key 的刷新会将短期恢复响应以 `SECRETS_ENCRYPTION_KEY` 加密后保存在已轮换的 refresh-token 行上；10 分钟恢复窗口结束后不再返回缓存结果，过期密文由定时清理任务删除（默认每小时运行）。
 
 ---
 
 ## POST /api/refresh（兼容路径）
 
-旧版刷新端点，仍调用相同的 refresh rotation 实现。新客户端应 POST `/api/token` 并使用 `grant_type=refresh_token`。Confidential Client 提供 secret；Public Client 只需 `client_id`。
+旧版刷新端点仍调用相同的 refresh rotation 实现，也必须提供 `Idempotency-Key` header。新客户端应 POST `/api/token` 并使用 `grant_type=refresh_token`。Confidential Client 提供 secret；Public Client 只需 `client_id`。
 
 > **兼容提示：** `/api/refresh` 不会立即删除，但新 SDK 应使用标准 `/api/token`。
 
@@ -133,14 +136,16 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | error 码 | HTTP | 触发条件 |
 |------|------|------|
 | `unsupported_grant_type` | 400 | grant_type 缺失或非 `refresh_token` |
-| `invalid_request` | 400 | 缺必需参数 |
+| `invalid_request` | 400 | 缺必需参数；缺少或格式错误的 Idempotency-Key。此错误发生在读取 refresh token 前，不会消费或撤销该令牌 |
 | `invalid_client` | 401 | 客户端凭证无效 |
 | `invalid_grant` | 401 | token 不存在/已撤销/已过期，或用户不存在 |
+| `temporarily_unavailable` | 503 | 幂等恢复加密配置缺失，或 access token Redis 写入失败 |
 
 **特殊行为**：
 
 - **轮换（rotation）**：每次刷新旧 token 立即 `revoked=1` 并签发新 refresh_token，在 MySQL 事务内以 `SELECT … FOR UPDATE` 保证原子性，防并发重复兑换。
-- **Replay 检测**：重放已撤销的 refresh_token 会触发告警并返回 `401 invalid_grant`。当前事务在错误时回滚，因此不会联动撤销该 user/client 对的其他 refresh_token；不要依赖重放触发全量吊销。怀疑泄漏时应显式撤销用户对该客户端的授权。
+- **结果恢复**：相同 refresh token 与相同 Idempotency-Key 在 10 分钟内重试时返回同一组 access/refresh token；`expires_in` 会按该 access token 的原始过期时刻重新计算。恢复前会确认新 refresh token、授权、scope、用户和客户端仍有效。恢复记录包含 bearer token，使用 `SECRETS_ENCRYPTION_KEY` 做 AES-256-GCM 加密并定时清除。
+- **Replay 检测**：缺少 key 的请求在读取令牌前返回 `400 invalid_request`，不触发撤销；已轮换令牌被不同 key 重放或在 10 分钟窗口外重放时会触发告警、撤销该 user/client 对的全部 refresh token，并返回 `401 invalid_grant`。匹配 key 仍在窗口内、但新 refresh token 或授权已失效时只返回 `invalid_grant`，不会恢复旧结果。怀疑泄漏时也可显式撤销客户端授权。
 
 ---
 

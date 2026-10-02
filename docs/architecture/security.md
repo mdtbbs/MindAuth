@@ -42,12 +42,15 @@ Cookie 属性：用户 `session` httpOnly + 生产 secure + SameSite=Lax；`csrf
 
 Native `client_id` 白名单取自 `native_auth_clients`，仅启用 `mdtbbs-mindustry-mod`。它是公开分发 public client，不含 client secret；client_id、device_id 和 device_name 均不证明客户端或用户身份。Native 登录仍走共享 `passwordLogin`，包含同样的用户名/邮箱解析、封禁、锁定、Redis `login_fail:{userId}:{ip}`、用户审计和账号锁定通知。登录另有 `ratelimit:native_login` IP 限额及按 client + 登录标识 SHA-256 的 Redis 计数（TTL 300 秒），随机更换 device_id 不会绕过账号计数。
 
+Native `/api/native/refresh` 必须提供 `Idempotency-Key`；缺少或格式错误时在读取 refresh token 前返回 `400 INVALID_REQUEST`，不会消费或撤销该 token。恢复窗口为 10 分钟，响应密文与消费的旧 refresh-token row 在同一 MySQL 事务中写入。恢复时会重新检查后继 refresh token、用户、Native client、token audience、device_id 和 `native_client_sessions` 状态，并用 access token 的原始到期时刻计算 Redis 剩余 TTL。相同 key 只恢复同一设备会话当前仍有效的 token；后继 token 或会话已失效时不会返回旧凭据。已轮换 token 被不同 key 或在窗口外重放仍撤销该 Native 设备会话及其 refresh-token family，不影响其他设备。Native 刷新不改变 OAuth `/api/token` 与 `/api/refresh` 的客户端 family 撤销规则。
+
 ## 令牌安全
 
 - **哈希至 rest**：access token 存 Redis 键 `accesstoken:{sha256}`；refresh token 在 MySQL 中存 SHA-256（migration 002 对存量数据执行 `SHA2(token,256)` 一次性哈希）；密码重置/邮箱验证 token 存 `reset:{sha256}` / `verify:{sha256}`，raw 值仅出现在邮件链接中（见 [token.js](../../src/utils/token.js) `hashToken`）。
 - **授权码单次消费**：`consumeAuthCode` 用 Redis `GETDEL` 原子读删，5 分钟 TTL，杜绝并发重放。
 - **PKCE**：仅支持 S256（`plain` 拒绝）；客户端可配置 `require_pkce` 强制要求。
 - **refresh token 重放检测**：refresh 在事务 + 行锁中轮换；若检测到已被消费的 token 被重用，撤销该 user+client 的**全部** refresh token（视为泄漏）。
+- **刷新结果恢复**：刷新必须携带 `Idempotency-Key`，缺 key 在读取令牌前返回 `400 invalid_request`，不消耗令牌；带 key 的刷新会将 access/refresh token 响应短期 AES-256-GCM 加密保存在已消费 token 行上。相同 key 重试会恢复相同令牌，`expires_in` 按原过期时刻重新计算。只有新 refresh token、授权、scope、用户和客户端仍有效时才能恢复；同 key 窗口内若后续 token 已失效则拒绝恢复，已轮换 token 被不同 key 或窗口外重放仍触发上述全 family 撤销。10 分钟窗口结束后不再恢复，过期密文由默认每小时运行的清理任务删除；加密使用现有 `SECRETS_ENCRYPTION_KEY`。
 - **客户端绑定**：`/introspect` 与 `/revoke` 校验 token 归属请求方 `client_id`，一个客户端无法探测或撤销他人的令牌；`exchangeCode` 校验授权码与 `client_id` 匹配。
 - 撤销授权时经 `accesstokens_by_userclient:{userId}:{clientId}` 索引集合精准清除 access token，无需 SCAN。
 

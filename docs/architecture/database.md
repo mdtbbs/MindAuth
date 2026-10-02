@@ -30,6 +30,7 @@ MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承
 | [`016_developer_application_review.sql`](../../src/db/migrations/016_developer_application_review.sql) | 增加应用审核备注，以及开发者申请/创建时间、授权创建时间、登录 IP、用户审计、封禁、锁定和 Native 活动会话索引；复用 011 已有的 owner/status 索引 |
 | [`017_mark_official_forum_client.sql`](../../src/db/migrations/017_mark_official_forum_client.sql) | 将官方论坛 `https://mdtbbs.cn/api/auth/callback` 对应的已批准 Confidential Client（含旧 `forum` ID）标记为 first-party，登录时可无确认页授权 |
 | [`019_multiplayer_application_metadata.sql`](../../src/db/migrations/019_multiplayer_application_metadata.sql) | OAuth `clients` 增加应用图标、启动 URI 模板与审核标记，以及 Presence/Multiplayer/Join Intent 的开发者申请和管理员批准字段；新旧应用默认能力关闭 |
+| [`021_oauth_refresh_idempotency.sql`](../../src/db/migrations/021_oauth_refresh_idempotency.sql) | `refresh_tokens` 增加短期 refresh 结果恢复字段：key 哈希、AES-256-GCM 密文、10 分钟过期时间和对应 access-token 哈希 |
 
 ## MySQL 表
 
@@ -63,7 +64,7 @@ MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承
 |----|------|-------------|
 | `clients` | OAuth 应用注册 | `client_id`（UNIQUE，软删除后不复用）、`client_secret`（Confidential Client 哈希存储；Public Client 为 NULL）、`client_type`、`party_type`、`status`、`owner_user_id`、`requested_scopes`、`approved_scopes`、`admin_review_note`、`redirect_uri`、`require_pkce`；019 增加 `application_icon_url`、`launch_uri_template`/`launch_uri_approved` 与 `supports_{presence,multiplayer,join_intent}_{requested/approved}`。无 OAuth 资源外键 |
 | `authorizations` | 用户对客户端的授权记录 | `(user_id, client_id)` UNIQUE；`scope`、`last_used_at`。`client_id` 为字符串关联 `clients.client_id`（无外键约束） |
-| `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销；009 增加 nullable `native_session_id` 关联单设备 Native family |
+| `refresh_tokens` | 长效刷新令牌 | `token`（UNIQUE，SHA-256 哈希存储）、`scope`、`expires_at`、`revoked`；按 `(user_id, client_id)` 与 `(user_id, client_id, revoked)` 建索引供批量吊销；009 增加 nullable `native_session_id` 关联单设备 Native family；021 增加 10 分钟 OAuth refresh 幂等恢复记录，响应密文由 `SECRETS_ENCRYPTION_KEY` 加密 |
 
 ### 审计日志
 

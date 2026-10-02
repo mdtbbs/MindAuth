@@ -198,7 +198,12 @@ router.post('/token', tokenLimiter, async (req, res) => {
         redirectUri: req.body.redirect_uri, codeVerifier: code_verifier });
     } else if (grant_type === 'refresh_token') {
       if (!req.body.refresh_token || !client_id) return oauthError(res, 400, 'invalid_request', '缺少必需参数');
-      result = await oauthIssuer.refresh({ refreshToken: req.body.refresh_token, clientId: client_id, clientSecret: client_secret });
+      result = await oauthIssuer.refresh({
+        refreshToken: req.body.refresh_token,
+        clientId: client_id,
+        clientSecret: client_secret,
+        idempotencyKey: req.get('Idempotency-Key'),
+      });
     } else {
       return oauthError(res, 400, 'unsupported_grant_type', '不支持的 grant_type');
     }
@@ -226,6 +231,7 @@ router.post('/refresh', refreshLimiter, async (req, res) => {
       refreshToken: refresh_token,
       clientId: client_id,
       clientSecret: client_secret,
+      idempotencyKey: req.get('Idempotency-Key'),
     });
 
     res.json(result);

@@ -37,6 +37,7 @@ test('official Mindustry Mod logs in without CSRF, rotates tokens, reads minimal
   expect(me.user).not.toHaveProperty('phone');
 
   const refreshResponse = await request.post('/api/native/refresh', {
+    headers: { 'Idempotency-Key': 'native-client-refresh-000000000001' },
     data: { client_id: 'mdtbbs-mindustry-mod', refresh_token: login.refresh_token, device_id: deviceId },
   });
   expect(refreshResponse.status()).toBe(200);
@@ -56,10 +57,12 @@ test('official Mindustry Mod logs in without CSRF, rotates tokens, reads minimal
   expect(replayLogin.status()).toBe(200);
   const replayTokens = await replayLogin.json();
   const replayRotation = await request.post('/api/native/refresh', {
+    headers: { 'Idempotency-Key': 'native-client-replay-000000000001' },
     data: { client_id: 'mdtbbs-mindustry-mod', refresh_token: replayTokens.refresh_token, device_id: 'a1a1a1a1-8d14-4a53-8c11-123456789abc' },
   });
   expect(replayRotation.status()).toBe(200);
   const replayed = await request.post('/api/native/refresh', {
+    headers: { 'Idempotency-Key': 'native-client-replay-000000000002' },
     data: { client_id: 'mdtbbs-mindustry-mod', refresh_token: replayTokens.refresh_token, device_id: 'a1a1a1a1-8d14-4a53-8c11-123456789abc' },
   });
   expect(replayed.status()).toBe(401);

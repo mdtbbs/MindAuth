@@ -14,10 +14,19 @@ function sendError(res, err) {
     return res.status(err.status).json({ success: false, code: err.code, message: err.message });
   }
   if (err?.name === 'OAuthError') {
-    return res.status(err.status === 400 ? 401 : err.status).json({
+    const isRetryable = err.error === 'temporarily_unavailable' || err.status >= 500;
+    const code = err.error === 'invalid_grant'
+      ? 'INVALID_REFRESH_TOKEN'
+      : err.error === 'invalid_request'
+        ? 'INVALID_REQUEST'
+        : isRetryable
+          ? 'TEMPORARILY_UNAVAILABLE'
+          : 'SESSION_REVOKED';
+    return res.status(err.status).json({
       success: false,
-      code: err.error === 'invalid_grant' ? 'INVALID_REFRESH_TOKEN' : 'SESSION_REVOKED',
-      message: '凭据无效、已过期或已撤销',
+      code,
+      message: isRetryable ? err.errorDescription || '认证服务暂不可用，请稍后使用相同 Idempotency-Key 重试' : err.errorDescription || '凭据无效、已过期或已撤销',
+      ...(isRetryable ? { retryable: true } : {}),
     });
   }
   console.error('[NativeClient] request failed:', err);
@@ -43,6 +52,7 @@ router.post('/refresh', refreshLimiter, async (req, res) => {
   try {
     const result = await nativeClient.refresh({
       clientId: req.body?.client_id, refreshToken: req.body?.refresh_token, deviceId: req.body?.device_id,
+      idempotencyKey: req.get('Idempotency-Key'),
     });
     res.json(result);
   } catch (err) { sendError(res, err); }

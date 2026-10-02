@@ -258,6 +258,7 @@ test.describe('POST /api/refresh — response shape', () => {
 
     // Refresh
     const refreshRes = await request.post('/api/refresh', {
+      headers: { 'Idempotency-Key': 'oauth-contract-success-00000001' },
       data: {
         refresh_token: tokenData.refresh_token,
         client_id: CLIENT_ID,
@@ -272,7 +273,8 @@ test.describe('POST /api/refresh — response shape', () => {
     expect(refreshData).toHaveProperty('access_token');
     expect(refreshData).toHaveProperty('token_type', 'Bearer');
     expect(refreshData).toHaveProperty('refresh_token');
-    expect(refreshData).toHaveProperty('expires_in', 3600);
+    expect(refreshData.expires_in).toBeGreaterThan(0);
+    expect(refreshData.expires_in).toBeLessThanOrEqual(3600);
     expect(refreshData).toHaveProperty('scope');
 
     // Refresh token rotation: new refresh token should differ from old
@@ -283,6 +285,7 @@ test.describe('POST /api/refresh — response shape', () => {
 
   test('invalid refresh_token returns invalid_grant error', async ({ request }) => {
     const res = await request.post('/api/refresh', {
+      headers: { 'Idempotency-Key': 'oauth-contract-invalid-0000001' },
       data: {
         refresh_token: 'invalid_token',
         client_id: CLIENT_ID,
@@ -318,6 +321,7 @@ test.describe('POST /api/refresh — response shape', () => {
 
     // First refresh succeeds
     const refreshRes = await request.post('/api/refresh', {
+      headers: { 'Idempotency-Key': 'oauth-contract-replay-0000001' },
       data: {
         refresh_token: tokenData.refresh_token,
         client_id: CLIENT_ID,
@@ -329,6 +333,7 @@ test.describe('POST /api/refresh — response shape', () => {
 
     // Replay of old (now revoked) refresh token should fail
     const replayRes = await request.post('/api/refresh', {
+      headers: { 'Idempotency-Key': 'oauth-contract-replay-0000002' },
       data: {
         refresh_token: tokenData.refresh_token,
         client_id: CLIENT_ID,

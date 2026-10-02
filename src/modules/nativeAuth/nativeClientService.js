@@ -106,13 +106,13 @@ function createNativeClientService({ pool = defaultPool, redis = defaultRedis, a
     return { ...tokens, success: true };
   }
 
-  async function refresh({ clientId, refreshToken, deviceId }) {
+  async function refresh({ clientId, refreshToken, deviceId, idempotencyKey }) {
     const config = await getConfig(clientId);
     validateDevice(deviceId);
     if (typeof refreshToken !== 'string' || refreshToken.length < 32 || refreshToken.length > 512) {
       throw new NativeClientError('INVALID_REFRESH_TOKEN', 401, 'refresh_token 无效或已过期');
     }
-    return issuer.refreshNative({ refreshToken, clientId, accessClientId: config.token_audience_client_id, deviceId });
+    return issuer.refreshNative({ refreshToken, clientId, accessClientId: config.token_audience_client_id, deviceId, idempotencyKey });
   }
 
   async function logout({ accessToken, userId, clientId, refreshToken, deviceId }) {

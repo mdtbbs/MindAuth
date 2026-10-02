@@ -123,6 +123,7 @@ test.describe('OAuth Authorization Code Flow', () => {
 
     // Step 6: 刷新 token
     const refreshRes = await page.request.post('/api/refresh', {
+      headers: { 'Idempotency-Key': 'oauth-flow-refresh-000000000001' },
       data: {
         refresh_token: tokenData.refresh_token,
         client_id: CLIENT_ID,

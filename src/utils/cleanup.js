@@ -19,6 +19,16 @@ async function cleanupExpiredData() {
   try {
     // Clean expired refresh_tokens (MySQL table)
     const [result] = await pool.execute('DELETE FROM refresh_tokens WHERE expires_at < ?', [now]);
+    const [refreshRecoveryResult] = await pool.execute(
+      `UPDATE refresh_tokens
+       SET refresh_idempotency_key_hash = NULL,
+           refresh_idempotency_response = NULL,
+           refresh_idempotency_expires_at_ms = NULL,
+           refresh_idempotency_access_token_hash = NULL
+       WHERE refresh_idempotency_expires_at_ms IS NOT NULL
+         AND refresh_idempotency_expires_at_ms <= ?`,
+      [Date.now()]
+    );
     const [configRows] = await pool.execute(
       'SELECT value FROM system_config WHERE `key` = ? LIMIT 1',
       ['sms_audit_retention_days']
@@ -66,7 +76,7 @@ async function cleanupExpiredData() {
       [auditCutoff]
     );
 
-    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${regCodeResult.affectedRows} registration_codes, ${userAuditResult.affectedRows} user_audit_logs from MySQL`);
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, cleared ${refreshRecoveryResult.affectedRows} expired refresh recovery responses, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${regCodeResult.affectedRows} registration_codes, ${userAuditResult.affectedRows} user_audit_logs from MySQL`);
 
     // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
     // are stored in Redis and cleaned automatically via TTL

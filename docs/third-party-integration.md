@@ -9,7 +9,7 @@
 - 服务端网站可使用 Confidential Client + PKCE S256，`client_secret` 只留在后端。
 - 公开二进制或浏览器 bundle 使用开发者中心即时启用的 Public Client。手机号已验证的用户可以自助创建；Public Client 直接以 `client_id` + authorization code + verifier 调 `/api/token`，无 `client_secret`。
 - MindAuth 发布 OIDC Discovery 元数据和 UserInfo，但**不签发 ID Token，也不提供 JWKS**。需要验证签名 ID Token 的 OIDC 客户端不能直接使用当前契约；登录后应由后端调用 UserInfo，并以 `issuer + sub` 作为外部用户标识。
-- `/api/native/*` 与 `/api/v1/native/*` 是预先登记的第一方客户端接口，不是第三方 OAuth 接口。其他应用不得收集 MindAuth 密码或调用 Native Password Login。
+- `/api/native/*` 与 `/api/v1/native/*` 是预先登记的第一方客户端接口，不是第三方 OAuth 接口。其他应用不得收集 MindAuth 密码或调用 Native Password Login。官方 Mod 的 `/api/native/refresh` 必须提供 `Idempotency-Key`，其设备会话重放与恢复规则见 [认证 API 参考](api/auth.md)。
 - RFC 8628 Device Flow 保持可用，验证页为 React 路由 `/device`；设备码、授权与轮询接口见 [OAuth API 参考](api/oauth.md)。
 - MDTBBS 好友 Presence 与 Multiplayer API 使用 `friends.read`、`presence.read`、`presence.write`、`multiplayer.read`、`multiplayer.write`；这些是敏感权限。Public Client 自助创建后进入审核。使用 Presence/Multiplayer 的应用还要申报并获批客户端能力，Launcher URI 仅在 `supports_join_intent` 与启动 URI 模板都审核通过后公开。字段与流程见[开发者应用目录 API](api/developer-applications.md)。
 - MDTBBS 游戏云存档 API 使用 `game_content.saves.read`、`game_content.saves.write` 和 `game_content.saves.delete`。第三方 OAuth 应用需逐项申请并由管理员批准。官方 Mindustry Mod 的新 Native 登录会固定签发这三个 scope；登录请求不能自行选择 scope，已有 Native 会话刷新时仍保留其原始 scope。
@@ -180,7 +180,7 @@ app.get('/oauth/callback', async (req, res, next) => {
 ### 刷新与撤销
 
 - access token 默认有效 1 小时；refresh token 默认有效 30 天。新客户端在 `POST {issuer}/api/token` 使用 `grant_type: "refresh_token"`；旧 `POST {issuer}/api/refresh` 保持兼容。Public Client 只发送 `client_id` 与 `refresh_token`，Confidential Client 还发送 `client_secret`。
-- 每次刷新都会轮换 refresh token。必须原子替换并保存新 token，旧 token 立即失效；重放旧 token 会返回 `invalid_grant`。若怀疑凭证泄漏，请在 MindAuth 撤销该客户端授权，不要假设重放会自动撤销同一用户的其他令牌。
+- 每次刷新都会轮换 refresh token，并且必须发送唯一的 `Idempotency-Key`（16–255 个可见 ASCII 字符，建议随机 UUID 或密码学安全随机字节），成功后原子保存新 token；超时或 5xx 时结果可能未知，应在 10 分钟内用同一个 key 和原 refresh token 重试。重试会返回相同的 access/refresh token，`expires_in` 表示原 access token 的剩余寿命。缺少或格式错误的 key 会在读取 refresh token 前返回 `400 invalid_request`，不消费或撤销该令牌；旧客户端必须先升级。已轮换 token 被不同 key 或窗口外重放会返回 `invalid_grant` 并撤销该 user/client 对的全部 refresh token；若新 refresh token 或授权已失效，同 key 重试也会返回 `invalid_grant`，但不会恢复旧结果。怀疑凭证泄漏时也可显式撤销客户端授权。
 - Public Client 可用 `client_id` 调用 `POST {issuer}/api/revoke` 撤销属于自己的 token。`/api/introspect` 仅供 Confidential Resource Server 使用。完整请求和响应见 [OAuth / OIDC API 参考](api/oauth.md)。
 - MindAuth 的浏览器退出不会自动清除第三方应用的本地 session。第三方需自行结束本地 session；若保存了 OAuth token，也应按产品退出策略撤销它们。
 

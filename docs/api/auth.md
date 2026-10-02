@@ -133,7 +133,9 @@ QQ 继续使用既有 `/api/auth/qq`、`/api/auth/qq/callback` 与 `/api/auth/qq
 
 #### `POST /api/native/refresh`
 
-JSON 请求：`{ "client_id": "mdtbbs-mindustry-mod", "refresh_token": "…", "device_id": "…" }`。每次成功返回新 access/refresh token，旧 refresh token 立即作废；重放已轮换 token 会撤销该设备会话。
+JSON 请求：`{ "client_id": "mdtbbs-mindustry-mod", "refresh_token": "…", "device_id": "…" }`。每次成功返回新 access/refresh token，旧 refresh token 立即作废。每次刷新都必须携带唯一的 `Idempotency-Key` 请求头（16–255 个可见 ASCII 字符，建议随机 UUID 或密码学安全随机字节），客户端应在发送请求前持久保存 key，并在成功保存新 refresh token 后再清除待处理 key。若超时或收到 5xx，可在 10 分钟内用**原 refresh token 和同一个 key**重试；只要新 refresh token 和 Native 设备会话仍有效，服务端会恢复同一组 token，`expires_in` 则更新为原 access token 的剩余寿命。
+
+缺少或格式错误的 key 会在读取 refresh token 前返回 `400 INVALID_REQUEST`，不消费或撤销 refresh token；旧客户端必须升级后才能刷新。已轮换的 refresh token 被不同 key 重放或在 10 分钟后重放，会撤销该 Native 设备会话及其 token family。若用相同 key 重试时新 refresh token 或设备会话已失效，服务端不会返回缓存凭据，也不会因此额外撤销其他会话，响应 `401 INVALID_REFRESH_TOKEN`。若恢复加密配置或 Redis 暂时不可用，会收到 `503 TEMPORARILY_UNAVAILABLE` 和 `retryable: true`，应保留原 refresh token 与 key 后重试。
 
 #### `POST /api/native/logout`
 

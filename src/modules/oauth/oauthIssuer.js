@@ -30,7 +30,10 @@ const crypto = require('crypto');
 const { pool, transaction } = require('../../db');
 const { timingSafeCompare } = require('../../utils/crypto');
 const { generateShortToken, generateToken } = require('../../utils/token');
-const { hashClientSecret, isHashedClientSecret } = require('../../utils/secrets');
+const {
+  hashClientSecret, isHashedClientSecret, encryptSecret, decryptSecret,
+  getEncryptionKey, isEncryptedSecret,
+} = require('../../utils/secrets');
 const { formatMySQLDateTime, formatMySQLDateTimeFromMs } = require('../../utils/datetime');
 const { maskPhone } = require('../../utils/phone');
 const { forumProfileUrl } = require('../../utils/forumProfileUrl');
@@ -42,6 +45,7 @@ const { VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes } = require('./scope
 
 const ACCESS_TOKEN_EXPIRY_MS = 60 * 60 * 1000;   // 1 hour
 const ACCESS_TOKEN_TTL_S = 3600;                  // 1 hour (Redis TTL)
+const REFRESH_IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000;
 const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTH_CODE_TTL_S = 300;                      // 5 minutes
 const LEGACY_DEFAULT_SCOPES = ['openid', 'profile', 'email'];
@@ -97,6 +101,31 @@ function hashRefreshToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken)).digest('hex');
 }
 
+function validateRefreshIdempotencyKey(value) {
+  if (value === undefined || value === null || value === '') {
+    throw new OAuthError(400, 'invalid_request', '刷新请求必须包含 Idempotency-Key 请求头');
+  }
+  if (typeof value !== 'string' || !/^[\x21-\x7e]{16,255}$/.test(value)) {
+    throw new OAuthError(400, 'invalid_request', 'Idempotency-Key 必须包含 16 到 255 个可见 ASCII 字符');
+  }
+  return value;
+}
+
+function hashRefreshIdempotencyKey(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function clearRefreshRecoveryColumns() {
+  return `refresh_idempotency_key_hash = NULL,
+          refresh_idempotency_response = NULL,
+          refresh_idempotency_expires_at_ms = NULL,
+          refresh_idempotency_access_token_hash = NULL`;
+}
+
+function remainingAccessTokenTtlSeconds(expiresAtMs) {
+  return Math.min(ACCESS_TOKEN_TTL_S, Math.floor((Number(expiresAtMs) - Date.now()) / 1000));
+}
+
 async function assertUserNotBanned(userId) {
   const [rows] = await pool.execute('SELECT ban_status FROM users WHERE id = ?', [userId]);
   if (!rows[0] || rows[0].ban_status === 'banned') {
@@ -139,51 +168,237 @@ function issueNativeTokens({ userId, clientId, accessClientId = clientId, native
   })();
 }
 
-async function refreshNative({ refreshToken, clientId, accessClientId = clientId, deviceId }) {
+async function refreshNative({ refreshToken, clientId, accessClientId = clientId, deviceId, idempotencyKey: rawIdempotencyKey }) {
+  const idempotencyKey = validateRefreshIdempotencyKey(rawIdempotencyKey);
+  const idempotencyKeyHash = hashRefreshIdempotencyKey(idempotencyKey);
+  try {
+    if (!getEncryptionKey()) throw new Error('SECRETS_ENCRYPTION_KEY is not configured');
+  } catch {
+    throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+  }
+
   let outcome;
+  let resultEnvelope;
   await transaction(async (conn) => {
     const [rows] = await conn.execute('SELECT * FROM refresh_tokens WHERE token = ? FOR UPDATE', [hashRefreshToken(refreshToken)]);
     const row = rows[0];
     if (!row || row.client_id !== clientId || !row.native_session_id) { outcome = { error: 'INVALID' }; return; }
+
     const [sessions] = await conn.execute('SELECT * FROM native_client_sessions WHERE id = ? FOR UPDATE', [row.native_session_id]);
     const session = sessions[0];
-    if (!session || session.client_id !== clientId || session.device_id !== deviceId || session.revoked_at) { outcome = { error: 'INVALID' }; return; }
-    if (row.revoked) { outcome = { replaySessionId: session.id }; return; }
+    if (!session || session.client_id !== clientId || session.device_id !== deviceId || session.revoked_at) {
+      outcome = { error: 'INVALID' };
+      return;
+    }
+
+    if (row.revoked) {
+      const sameKey = idempotencyKeyHash
+        && row.refresh_idempotency_key_hash
+        && timingSafeCompare(String(row.refresh_idempotency_key_hash), idempotencyKeyHash);
+      const recoveryExpiresAtMs = Number(row.refresh_idempotency_expires_at_ms || 0);
+
+      if (sameKey && recoveryExpiresAtMs > Date.now()) {
+        if (!row.refresh_idempotency_response) {
+          outcome = { unrecoverableRetry: true };
+          return;
+        }
+
+        let cached;
+        try {
+          if (!isEncryptedSecret(row.refresh_idempotency_response)) throw new Error('Recovery response is not encrypted');
+          cached = JSON.parse(decryptSecret(row.refresh_idempotency_response));
+        } catch {
+          outcome = { recoveryUnavailable: true };
+          return;
+        }
+
+        const cachedResponse = cached?.response;
+        const accessTokenData = cached?.accessTokenData;
+        const accessTokenExpiresAtMs = Number(cached?.accessTokenExpiresAtMs || 0);
+        const expectedAccessHash = typeof cachedResponse?.access_token === 'string'
+          ? hashRefreshToken(cachedResponse.access_token)
+          : '';
+        const expectedRefreshHash = typeof cachedResponse?.refresh_token === 'string'
+          ? hashRefreshToken(cachedResponse.refresh_token)
+          : '';
+        const cachedShapeValid = cached?.version === 1
+          && cached?.flow === 'native'
+          && cached?.oldRefreshTokenHash === row.token
+          && cached?.clientId === clientId
+          && cached?.deviceId === deviceId
+          && Number(cached?.nativeSessionId) === Number(session.id)
+          && typeof cachedResponse?.access_token === 'string'
+          && cachedResponse.access_token.length > 0
+          && typeof cachedResponse?.refresh_token === 'string'
+          && cachedResponse.refresh_token.length > 0
+          && cached?.refreshTokenHash === expectedRefreshHash
+          && cachedResponse?.token_type === 'Bearer'
+          && Number.isFinite(accessTokenExpiresAtMs)
+          && accessTokenExpiresAtMs > Date.now()
+          && Number(accessTokenData?.user_id) === Number(row.user_id)
+          && accessTokenData?.client_id === accessClientId
+          && accessTokenData?.native_session_id != null
+          && Number(accessTokenData.native_session_id) === Number(session.id)
+          && accessTokenData?.token_type === 'Bearer'
+          && accessTokenData?.scope === cachedResponse?.scope
+          && String(row.refresh_idempotency_access_token_hash || '') === expectedAccessHash;
+
+        if (!cachedShapeValid) {
+          outcome = { recoveryUnavailable: true };
+          return;
+        }
+
+        const [activeRows] = await conn.execute(`
+          SELECT next_token.id, next_token.scope AS next_scope,
+                 sessions.device_id, sessions.revoked_at,
+                 users.ban_status,
+                 native_auth_clients.enabled,
+                 native_auth_clients.token_audience_client_id
+          FROM refresh_tokens AS next_token
+          JOIN native_client_sessions AS sessions
+            ON sessions.id = next_token.native_session_id
+          JOIN users ON users.id = next_token.user_id
+          JOIN native_auth_clients ON native_auth_clients.client_id = next_token.client_id
+          WHERE next_token.token = ?
+            AND next_token.user_id = ?
+            AND next_token.client_id = ?
+            AND next_token.native_session_id = ?
+            AND next_token.revoked = 0
+            AND next_token.expires_at > NOW()
+            AND sessions.device_id = ?
+            AND sessions.revoked_at IS NULL
+            AND native_auth_clients.enabled = 1
+          FOR UPDATE
+        `, [expectedRefreshHash, row.user_id, clientId, session.id, deviceId]);
+        const active = activeRows[0];
+        const sessionStillAllowed = active
+          && active.device_id === deviceId
+          && !active.revoked_at
+          && active.enabled === 1
+          && active.token_audience_client_id === accessClientId
+          && active.ban_status !== 'banned';
+        const nextScopeMatches = active
+          && String(active.next_scope || 'openid profile game_content') === cachedResponse.scope;
+
+        if (sessionStillAllowed && nextScopeMatches) {
+          resultEnvelope = cached;
+          outcome = { recovered: true, userId: row.user_id, sessionId: session.id };
+          return;
+        }
+
+        // This was the same attempt, but its successor token or device session
+        // has since been revoked. Do not restore the cached credentials.
+        outcome = { unrecoverableRetry: true };
+        return;
+      }
+
+      outcome = { replaySessionId: session.id };
+      return;
+    }
+
     if (new Date(row.expires_at) <= new Date()) { outcome = { error: 'INVALID' }; return; }
     const [users] = await conn.execute('SELECT id, ban_status FROM users WHERE id = ? LIMIT 1', [row.user_id]);
     const user = users[0];
     if (!user || user.ban_status === 'banned') { outcome = { error: 'INVALID' }; return; }
-    const nextRefresh = generateToken();
-    const expiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
-    await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [row.id]);
+
+    const nowMs = Date.now();
+    const scope = row.scope || 'openid profile game_content';
+    const response = {
+      access_token: generateToken(),
+      token_type: 'Bearer',
+      refresh_token: generateToken(),
+      expires_in: ACCESS_TOKEN_TTL_S,
+      scope,
+    };
+    const accessTokenData = {
+      user_id: user.id,
+      client_id: accessClientId,
+      scope,
+      token_type: 'Bearer',
+      native_session_id: session.id,
+    };
+    const expiresAt = formatMySQLDateTimeFromMs(nowMs + REFRESH_TOKEN_EXPIRY_MS);
+
     await conn.execute(
       'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at, native_session_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [user.id, clientId, hashRefreshToken(nextRefresh), row.scope || 'openid profile game_content', expiresAt, session.id]
+      [user.id, clientId, hashRefreshToken(response.refresh_token), scope, expiresAt, session.id]
     );
+    if (idempotencyKeyHash) {
+      const encryptedResponse = encryptSecret(JSON.stringify({
+        version: 1,
+        flow: 'native',
+        oldRefreshTokenHash: row.token,
+        refreshTokenHash: hashRefreshToken(response.refresh_token),
+        clientId,
+        deviceId,
+        nativeSessionId: session.id,
+        response,
+        accessTokenData,
+        accessTokenExpiresAtMs: nowMs + ACCESS_TOKEN_EXPIRY_MS,
+      }));
+      await conn.execute(
+        `UPDATE refresh_tokens SET revoked = 1,
+           refresh_idempotency_key_hash = ?,
+           refresh_idempotency_response = ?,
+           refresh_idempotency_expires_at_ms = ?,
+           refresh_idempotency_access_token_hash = ?
+         WHERE id = ?`,
+        [
+          idempotencyKeyHash,
+          encryptedResponse,
+          nowMs + REFRESH_IDEMPOTENCY_WINDOW_MS,
+          hashRefreshToken(response.access_token),
+          row.id,
+        ]
+      );
+    } else {
+      await conn.execute(
+        `UPDATE refresh_tokens SET revoked = 1, ${clearRefreshRecoveryColumns()} WHERE id = ?`,
+        [row.id]
+      );
+    }
     await conn.execute('UPDATE native_client_sessions SET last_active_at = NOW() WHERE id = ?', [session.id]);
-    outcome = { userId: user.id, sessionId: session.id, scope: row.scope || 'openid profile game_content', refreshToken: nextRefresh };
+    resultEnvelope = {
+      response,
+      accessTokenData,
+      accessTokenExpiresAtMs: nowMs + ACCESS_TOKEN_EXPIRY_MS,
+    };
+    outcome = { userId: user.id, sessionId: session.id };
   });
 
   if (outcome?.replaySessionId) {
     await revokeNativeSession(outcome.replaySessionId);
     throw new OAuthError(401, 'invalid_grant', '无效或已撤销的 refresh_token');
   }
-  if (!outcome?.userId) throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
-  const accessToken = generateToken();
+  if (outcome?.recoveryUnavailable) {
+    throw new OAuthError(503, 'temporarily_unavailable', '刷新结果暂时无法恢复，请稍后使用相同 Idempotency-Key 重试');
+  }
+  if (outcome?.unrecoverableRetry || !outcome?.userId) {
+    throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
+  }
+
+  const remainingTtl = remainingAccessTokenTtlSeconds(resultEnvelope.accessTokenExpiresAtMs);
+  if (remainingTtl <= 0) throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
   try {
-    await tokenStore.storeAccessToken(accessToken, {
-      user_id: outcome.userId, client_id: accessClientId, scope: outcome.scope, token_type: 'Bearer', native_session_id: outcome.sessionId,
-    }, ACCESS_TOKEN_TTL_S);
-  } catch (err) {
-    await revokeNativeSession(outcome.sessionId).catch(() => {});
+    await tokenStore.storeAccessToken(resultEnvelope.response.access_token, resultEnvelope.accessTokenData, remainingTtl);
+  } catch {
+    // Preserve legacy replay containment for unkeyed callers. Keyed attempts
+    // keep their encrypted result so the same request can recover it.
+    if (!idempotencyKeyHash) await revokeNativeSession(outcome.sessionId).catch(() => {});
     throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
   }
-  return { access_token: accessToken, token_type: 'Bearer', refresh_token: outcome.refreshToken, expires_in: ACCESS_TOKEN_TTL_S, scope: outcome.scope };
+
+  const responseExpiresIn = remainingAccessTokenTtlSeconds(resultEnvelope.accessTokenExpiresAtMs);
+  if (responseExpiresIn <= 0) {
+    await tokenStore.revokeAccessToken(resultEnvelope.response.access_token).catch(() => {});
+    throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
+  }
+  return { ...resultEnvelope.response, expires_in: responseExpiresIn };
 }
 
 async function revokeNativeSession(sessionId) {
   await pool.execute('UPDATE native_client_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = ?', [sessionId]);
-  await pool.execute('UPDATE refresh_tokens SET revoked = 1 WHERE native_session_id = ?', [sessionId]);
+  await pool.execute(`UPDATE refresh_tokens SET revoked = 1, ${clearRefreshRecoveryColumns()} WHERE native_session_id = ?`, [sessionId]);
   await tokenStore.revokeAccessTokensForNativeSession(sessionId);
 }
 
@@ -595,17 +810,29 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
  * @param {string} params.refreshToken
  * @param {string} params.clientId
  * @param {string} params.clientSecret
+ * @param {string} params.idempotencyKey - Required per-attempt HTTP Idempotency-Key
  * @returns {Promise<{ access_token: string, refresh_token: string, token_type: string, expires_in: number, scope: string }>}
  */
-async function refresh({ refreshToken, clientId, clientSecret }) {
+async function refresh({ refreshToken, clientId, clientSecret, idempotencyKey: rawIdempotencyKey }) {
+  // Reject a missing or invalid key before client lookup or token access, so
+  // callers cannot consume a refresh token without a recoverable request ID.
+  const idempotencyKey = validateRefreshIdempotencyKey(rawIdempotencyKey);
+  const idempotencyKeyHash = hashRefreshIdempotencyKey(idempotencyKey);
+
   // 1. Verify client credentials
   const clientData = await verifyClient(clientId, clientSecret, { allowPublic: true });
+
+  // Do not consume a refresh token if recovery encryption is unavailable.
+  try {
+    if (!getEncryptionKey()) throw new Error('SECRETS_ENCRYPTION_KEY is not configured');
+  } catch {
+    throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+  }
 
   // 2. Atomically rotate the refresh token via MySQL transaction
   let storedToken;
   let user;
-  let newRefreshToken;
-  let newRefreshExpiresAt;
+  let resultEnvelope;
 
   try {
     await transaction(async (conn) => {
@@ -617,15 +844,115 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
       `, [hashRefreshToken(refreshToken), clientId]);
       const row = tokenRows[0];
 
-      if (!row) {
-        throw new Error('TOKEN_NOT_FOUND');
-      }
+      if (!row) throw new Error('TOKEN_NOT_FOUND');
 
-      // Replay attack detection: if already revoked, flag the user/client pair
+      // A cached result is recoverable only when the same key is reused,
+      // the short recovery window is open, and every issued credential is
+      // still authorized. Any other replay revokes the full user/client family.
       if (row.revoked === 1 || row.revoked === true) {
+        const sameKey = idempotencyKeyHash
+          && row.refresh_idempotency_key_hash
+          && timingSafeCompare(String(row.refresh_idempotency_key_hash), idempotencyKeyHash);
+        const recoveryExpiresAtMs = Number(row.refresh_idempotency_expires_at_ms || 0);
+
+        if (sameKey && recoveryExpiresAtMs > Date.now()) {
+          if (!row.refresh_idempotency_response) {
+            storedToken = { unrecoverableRetry: true };
+            return;
+          }
+
+          let cached;
+          try {
+            if (!isEncryptedSecret(row.refresh_idempotency_response)) throw new Error('Recovery response is not encrypted');
+            cached = JSON.parse(decryptSecret(row.refresh_idempotency_response));
+          } catch {
+            storedToken = { recoveryUnavailable: true };
+            return;
+          }
+
+          const cachedResponse = cached?.response;
+          const accessTokenExpiresAtMs = Number(cached?.accessTokenExpiresAtMs || 0);
+          const accessTokenData = cached?.accessTokenData;
+          const expectedAccessHash = typeof cachedResponse?.access_token === 'string'
+            ? hashRefreshToken(cachedResponse.access_token)
+            : '';
+          const expectedRefreshHash = typeof cachedResponse?.refresh_token === 'string'
+            ? hashRefreshToken(cachedResponse.refresh_token)
+            : '';
+          const cachedScope = typeof cachedResponse?.scope === 'string'
+            ? cachedResponse.scope.split(/\s+/).filter(Boolean)
+            : [];
+          const cachedShapeValid = cached?.version === 1
+            && cached?.oldRefreshTokenHash === row.token
+            && cached?.clientId === clientId
+            && typeof cachedResponse?.access_token === 'string'
+            && cachedResponse.access_token.length > 0
+            && typeof cachedResponse?.refresh_token === 'string'
+            && cachedResponse.refresh_token.length > 0
+            && cached?.refreshTokenHash === expectedRefreshHash
+            && String(cachedResponse?.token_type || '') === 'Bearer'
+            && Number.isFinite(accessTokenExpiresAtMs)
+            && accessTokenExpiresAtMs > Date.now()
+            && accessTokenData?.token_type === 'Bearer'
+            && Number(accessTokenData?.user_id) === Number(row.user_id)
+            && accessTokenData?.client_id === clientId
+            && accessTokenData?.scope === cachedResponse?.scope
+            && String(row.refresh_idempotency_access_token_hash || '') === expectedAccessHash
+            && cachedScope.length > 0;
+
+          if (!cachedShapeValid) {
+            storedToken = { recoveryUnavailable: true };
+            return;
+          }
+
+          const [activeRows] = await conn.execute(`
+            SELECT next_token.id, next_token.scope AS next_scope,
+                   users.ban_status, clients.status AS client_status,
+                   clients.client_type, clients.party_type, clients.approved_scopes,
+                   authorizations.scope AS authorized_scope
+            FROM refresh_tokens AS next_token
+            JOIN users ON users.id = next_token.user_id
+            JOIN clients ON clients.client_id = next_token.client_id
+            JOIN authorizations
+              ON authorizations.user_id = next_token.user_id
+             AND authorizations.client_id = next_token.client_id
+            WHERE next_token.token = ?
+              AND next_token.user_id = ?
+              AND next_token.client_id = ?
+              AND next_token.revoked = 0
+              AND next_token.expires_at > NOW()
+            FOR UPDATE
+          `, [expectedRefreshHash, row.user_id, clientId]);
+          const active = activeRows[0];
+          const approvedScopes = active
+            ? normalizeScopes(active.approved_scopes, LEGACY_DEFAULT_SCOPES)
+            : [];
+          const authorizedScopes = active
+            ? String(active.authorized_scope || '').split(/\s+/).filter(Boolean)
+            : [];
+          const scopesRemainAllowed = cachedScope.every(scope => approvedScopes.includes(scope) && authorizedScopes.includes(scope));
+          const nextScopeMatches = String(active?.next_scope || 'openid profile email') === cachedResponse.scope;
+          const clientStillMatches = active
+            && (active.client_status == null || active.client_status === 'approved')
+            && (active.client_type || 'confidential') === accessTokenData.client_type
+            && (active.party_type || 'first_party') === accessTokenData.party_type;
+
+          if (active && active.ban_status !== 'banned' && clientStillMatches && scopesRemainAllowed && nextScopeMatches) {
+            resultEnvelope = cached;
+            storedToken = { recovered: true };
+            return;
+          }
+
+          // The matching retry is no longer recoverable because its next
+          // token or authorization has changed; do not return stale tokens.
+          storedToken = { unrecoverableRetry: true };
+          return;
+        }
+
         console.warn(`Replay attack detected for user ${row.user_id}, client ${clientId}`);
         await conn.execute(
-          'UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND client_id = ?',
+          `UPDATE refresh_tokens SET revoked = 1, ${clearRefreshRecoveryColumns()}
+           WHERE user_id = ? AND client_id = ?`,
           [row.user_id, clientId]
         );
         storedToken = { replay: true };
@@ -633,11 +960,7 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
       }
 
       // Check expiry
-      if (new Date(row.expires_at) <= new Date()) {
-        throw new Error('TOKEN_EXPIRED');
-      }
-
-      storedToken = row;
+      if (new Date(row.expires_at) <= new Date()) throw new Error('TOKEN_EXPIRED');
 
       // Get user info (within transaction for consistency)
       const [userRows] = await conn.execute(
@@ -645,23 +968,70 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
         [row.user_id]
       );
       user = userRows[0];
-      if (!user) {
-        throw new Error('USER_NOT_FOUND');
-      }
-      if (user.ban_status === 'banned') {
-        throw new Error('USER_BANNED');
+      if (!user) throw new Error('USER_NOT_FOUND');
+      if (user.ban_status === 'banned') throw new Error('USER_BANNED');
+
+      const effectiveScope = row.scope || 'openid profile email';
+      const approvedScopes = normalizeScopes(clientData.approved_scopes, LEGACY_DEFAULT_SCOPES);
+      if (effectiveScope.split(/\s+/).some(scope => !approvedScopes.includes(scope))) {
+        throw new Error('USER_SCOPE_CHANGED');
       }
 
-      // Generate new tokens (rotation)
-      newRefreshToken = generateToken();
-      newRefreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
+      // Generate the complete result before committing, so a response lost
+      // after rotation can be reproduced from the old token row.
+      const nowMs = Date.now();
+      const accessTokenExpiresAtMs = nowMs + ACCESS_TOKEN_EXPIRY_MS;
+      const response = {
+        access_token: generateToken(),
+        token_type: 'Bearer',
+        refresh_token: generateToken(),
+        expires_in: ACCESS_TOKEN_EXPIRY_MS / 1000,
+        scope: effectiveScope,
+      };
+      const accessTokenData = {
+        user_id: user.id,
+        client_id: clientId,
+        scope: effectiveScope,
+        token_type: 'Bearer',
+        client_type: clientData.client_type || 'confidential',
+        party_type: clientData.party_type || 'first_party',
+      };
+      const nextRefreshExpiresAt = formatMySQLDateTimeFromMs(nowMs + REFRESH_TOKEN_EXPIRY_MS);
 
-      // Revoke old refresh token and create new one atomically
-      await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [row.id]);
       await conn.execute(
         'INSERT INTO refresh_tokens (user_id, client_id, token, scope, expires_at) VALUES (?, ?, ?, ?, ?)',
-        [user.id, clientId, hashRefreshToken(newRefreshToken), storedToken.scope || 'openid profile email', newRefreshExpiresAt]
+        [user.id, clientId, hashRefreshToken(response.refresh_token), effectiveScope, nextRefreshExpiresAt]
       );
+
+      if (idempotencyKeyHash) {
+        const recoveryExpiresAtMs = nowMs + REFRESH_IDEMPOTENCY_WINDOW_MS;
+        const encryptedResponse = encryptSecret(JSON.stringify({
+          version: 1,
+          oldRefreshTokenHash: row.token,
+          refreshTokenHash: hashRefreshToken(response.refresh_token),
+          clientId,
+          response,
+          accessTokenData,
+          accessTokenExpiresAtMs,
+        }));
+        await conn.execute(
+          `UPDATE refresh_tokens SET revoked = 1,
+             refresh_idempotency_key_hash = ?,
+             refresh_idempotency_response = ?,
+             refresh_idempotency_expires_at_ms = ?,
+             refresh_idempotency_access_token_hash = ?
+           WHERE id = ?`,
+          [idempotencyKeyHash, encryptedResponse, recoveryExpiresAtMs, hashRefreshToken(response.access_token), row.id]
+        );
+      } else {
+        await conn.execute(
+          `UPDATE refresh_tokens SET revoked = 1, ${clearRefreshRecoveryColumns()} WHERE id = ?`,
+          [row.id]
+        );
+      }
+
+      resultEnvelope = { response, accessTokenData, accessTokenExpiresAtMs };
+      storedToken = row;
     });
   } catch (txErr) {
     if (txErr.message === 'TOKEN_NOT_FOUND' || txErr.message === 'TOKEN_REVOKED' || txErr.message === 'TOKEN_EXPIRED') {
@@ -670,35 +1040,43 @@ async function refresh({ refreshToken, clientId, clientSecret }) {
     if (txErr.message === 'USER_NOT_FOUND' || txErr.message === 'USER_BANNED') {
       throw new OAuthError(401, 'invalid_grant', txErr.message === 'USER_BANNED' ? '用户已被封禁' : '用户不存在');
     }
+    if (txErr.message === 'USER_SCOPE_CHANGED') {
+      throw new OAuthError(401, 'invalid_grant', '此客户端的授权 scope 已变更');
+    }
     throw txErr;
   }
 
+  if (storedToken?.recoveryUnavailable) {
+    throw new OAuthError(503, 'temporarily_unavailable', '刷新结果暂时无法恢复，请稍后使用相同 Idempotency-Key 重试');
+  }
+  if (storedToken?.unrecoverableRetry) {
+    throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
+  }
   if (storedToken?.replay) throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
-  if (storedToken?.scope && storedToken.scope.split(/\s+/).some(value => !normalizeScopes(clientData.approved_scopes, LEGACY_DEFAULT_SCOPES).includes(value))) {
-    throw new OAuthError(401, 'invalid_grant', '此客户端的授权 scope 已变更');
+
+  const remainingTtl = remainingAccessTokenTtlSeconds(resultEnvelope.accessTokenExpiresAtMs);
+  if (remainingTtl <= 0) {
+    throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
   }
 
-  // 3. Store access token in Redis (outside transaction — Redis is not transactional with MySQL)
-  const accessToken = generateToken();
-  const effectiveScope = storedToken.scope || 'openid profile email';
+  // Redis is not transactional with MySQL. On a failure, an Idempotency-Key
+  // retry can re-store this exact access token with only its original TTL left.
+  try {
+    await tokenStore.storeAccessToken(
+      resultEnvelope.response.access_token,
+      resultEnvelope.accessTokenData,
+      remainingTtl
+    );
+  } catch {
+    throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+  }
 
-  await tokenStore.storeAccessToken(accessToken, {
-    user_id: user.id,
-    client_id: clientId,
-    scope: effectiveScope,
-    token_type: 'Bearer',
-    client_type: clientData.client_type || 'confidential',
-    party_type: clientData.party_type || 'first_party',
-  }, ACCESS_TOKEN_TTL_S);
-
-  // 4. Return RFC 6749 compliant response
-  return {
-    access_token: accessToken,
-    token_type: 'Bearer',
-    refresh_token: newRefreshToken,
-    expires_in: ACCESS_TOKEN_EXPIRY_MS / 1000,
-    scope: effectiveScope,
-  };
+  const responseExpiresIn = remainingAccessTokenTtlSeconds(resultEnvelope.accessTokenExpiresAtMs);
+  if (responseExpiresIn <= 0) {
+    await tokenStore.revokeAccessToken(resultEnvelope.response.access_token).catch(() => {});
+    throw new OAuthError(401, 'invalid_grant', '无效或已过期的 refresh_token');
+  }
+  return { ...resultEnvelope.response, expires_in: responseExpiresIn };
 }
 
 // ─── Token Introspection (RFC 7662) ──────────────────────────
@@ -799,6 +1177,15 @@ async function revoke({ token, tokenTypeHint, clientId, clientSecret }) {
   const accessTokenData = await tokenStore.getAccessToken(token);
   if (accessTokenData) {
     if (accessTokenData.client_id === clientId) {
+      // A rotated response cache must not resurrect an access token that the
+      // client explicitly revoked while its refresh retry window is open.
+      await pool.execute(
+        `UPDATE refresh_tokens
+         SET refresh_idempotency_response = NULL,
+             refresh_idempotency_access_token_hash = NULL
+         WHERE refresh_idempotency_access_token_hash = ? AND client_id = ?`,
+        [hashRefreshToken(token), clientId]
+      );
       await tokenStore.revokeAccessToken(token);
     }
     // Per RFC 7009 always return success, even when we decline to revoke
@@ -807,7 +1194,8 @@ async function revoke({ token, tokenTypeHint, clientId, clientSecret }) {
 
   // 3. Try to revoke refresh token (MySQL, stored hashed)
   await pool.execute(
-    'UPDATE refresh_tokens SET revoked = 1 WHERE token = ? AND client_id = ?',
+    `UPDATE refresh_tokens SET revoked = 1, ${clearRefreshRecoveryColumns()}
+     WHERE token = ? AND client_id = ?`,
     [hashRefreshToken(token), clientId]
   );
 

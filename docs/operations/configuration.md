@@ -170,3 +170,5 @@ GitHub 只申请 `read:user`，Discord 只申请 `identify`，均不申请邮箱
 > 敏感配置说明：数据库中的 SMTP 密码和阿里云 `AccessKeySecret` 使用
 > AES-256-GCM 加密，密钥由 `SECRETS_ENCRYPTION_KEY` 提供。升级时启动迁移会
 > 转换旧明文值，生产环境必须配置该密钥。
+>
+> OAuth 刷新幂等恢复响应也使用此密钥短期加密保存。密钥轮换会使仍在 10 分钟恢复窗口内的缓存响应无法解密；轮换前应等待恢复记录过期。
