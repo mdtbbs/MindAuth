@@ -103,7 +103,7 @@ function hashRefreshToken(rawToken) {
 
 function validateRefreshIdempotencyKey(value) {
   if (value === undefined || value === null || value === '') {
-    throw new OAuthError(400, 'invalid_request', '刷新请求必须包含 Idempotency-Key 请求头');
+    return null;
   }
   if (typeof value !== 'string' || !/^[\x21-\x7e]{16,255}$/.test(value)) {
     throw new OAuthError(400, 'invalid_request', 'Idempotency-Key 必须包含 16 到 255 个可见 ASCII 字符');
@@ -170,11 +170,13 @@ function issueNativeTokens({ userId, clientId, accessClientId = clientId, native
 
 async function refreshNative({ refreshToken, clientId, accessClientId = clientId, deviceId, idempotencyKey: rawIdempotencyKey }) {
   const idempotencyKey = validateRefreshIdempotencyKey(rawIdempotencyKey);
-  const idempotencyKeyHash = hashRefreshIdempotencyKey(idempotencyKey);
-  try {
-    if (!getEncryptionKey()) throw new Error('SECRETS_ENCRYPTION_KEY is not configured');
-  } catch {
-    throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+  const idempotencyKeyHash = idempotencyKey ? hashRefreshIdempotencyKey(idempotencyKey) : null;
+  if (idempotencyKeyHash) {
+    try {
+      if (!getEncryptionKey()) throw new Error('SECRETS_ENCRYPTION_KEY is not configured');
+    } catch {
+      throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+    }
   }
 
   let outcome;
@@ -810,23 +812,24 @@ async function exchangeCode({ code, clientId, clientSecret, redirectUri, codeVer
  * @param {string} params.refreshToken
  * @param {string} params.clientId
  * @param {string} params.clientSecret
- * @param {string} params.idempotencyKey - Required per-attempt HTTP Idempotency-Key
+ * @param {string} [params.idempotencyKey] - Optional per-attempt HTTP Idempotency-Key; enables safe result recovery
  * @returns {Promise<{ access_token: string, refresh_token: string, token_type: string, expires_in: number, scope: string }>}
  */
 async function refresh({ refreshToken, clientId, clientSecret, idempotencyKey: rawIdempotencyKey }) {
-  // Reject a missing or invalid key before client lookup or token access, so
-  // callers cannot consume a refresh token without a recoverable request ID.
   const idempotencyKey = validateRefreshIdempotencyKey(rawIdempotencyKey);
-  const idempotencyKeyHash = hashRefreshIdempotencyKey(idempotencyKey);
+  const idempotencyKeyHash = idempotencyKey ? hashRefreshIdempotencyKey(idempotencyKey) : null;
 
   // 1. Verify client credentials
   const clientData = await verifyClient(clientId, clientSecret, { allowPublic: true });
 
-  // Do not consume a refresh token if recovery encryption is unavailable.
-  try {
-    if (!getEncryptionKey()) throw new Error('SECRETS_ENCRYPTION_KEY is not configured');
-  } catch {
-    throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+  // Keyed retries need encrypted short-lived recovery. Unkeyed legacy clients
+  // keep the original single-use refresh behavior without this dependency.
+  if (idempotencyKeyHash) {
+    try {
+      if (!getEncryptionKey()) throw new Error('SECRETS_ENCRYPTION_KEY is not configured');
+    } catch {
+      throw new OAuthError(503, 'temporarily_unavailable', '认证服务暂不可用');
+    }
   }
 
   // 2. Atomically rotate the refresh token via MySQL transaction
