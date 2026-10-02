@@ -121,7 +121,7 @@ test('Public Client refresh rotates tokens and replay revokes the refresh-token 
     execute: async (sql) => {
       if (/SELECT \* FROM clients/.test(sql)) return [[publicClient()]];
       if (/SELECT \* FROM refresh_tokens/.test(sql)) return [[{ id: 1, user_id: 4, client_id: 'public-app', revoked: 1, expires_at: new Date(Date.now() + 60_000), scope: 'openid forum.read' }]];
-      if (/UPDATE refresh_tokens SET revoked = 1 WHERE user_id/.test(sql)) familyRevoked = true;
+      if (/UPDATE refresh_tokens SET revoked = 1/.test(sql) && /WHERE user_id = \? AND client_id = \?/.test(sql)) familyRevoked = true;
       return [{ affectedRows: 1 }];
     },
   };
