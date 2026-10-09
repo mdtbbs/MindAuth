@@ -15,7 +15,7 @@ MindAuth 是面向公网的 OAuth 2.0 SSO 认证服务，本文档面向后端�
 | CSRF | 签名双提交 Cookie | [csrf.js](../../src/middleware/csrf.js) |
 | 暴力破解 | 分端点限流 + 递进式临时锁定 | [rateLimit.js](../../src/middleware/rateLimit.js)、auth.js |
 | IP 伪造 | `trust proxy=false` + 显式可信代理白名单 | [request.js](../../src/utils/request.js) |
-| SSRF（redirect_uri） | 私网地址拦截 | [clientRegistry.js](../../src/modules/admin/clientRegistry.js) |
+| OAuth 回调开放重定向 | 回调地址登记与精确匹配；Public Client 使用 PKCE S256 | [clientRegistry.js](../../src/modules/admin/clientRegistry.js)、[oauthIssuer.js](../../src/modules/oauth/oauthIssuer.js) |
 | 令牌泄漏/重放 | 授权码原子单次消费、refresh token 轮换 + 重放检测、PKCE S256 | [oauthIssuer.js](../../src/modules/oauth/oauthIssuer.js)、[tokenStore.js](../../src/modules/oauth/tokenStore.js) |
 | Native 设备 token 被撤销后重用 | OAuth access-token store + `native_client_sessions` 状态检查；refresh 重放撤销单设备 family | `nativeClientService.js`、`oauthIssuer.js` |
 

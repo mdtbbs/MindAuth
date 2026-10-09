@@ -47,16 +47,14 @@ function validateRedirectUri(uri) {
   if (url.username || url.password || url.hash) return { valid: false, error: '回调地址不能包含用户凭证或 fragment' };
 
   if (url.protocol === 'https:') {
-    if (isPrivateOrInternalHost(url.hostname)) return { valid: false, error: 'HTTPS 回调地址不能使用内部网络地址' };
     return { valid: true, redirect_type: 'web' };
   }
 
   const host = url.hostname.toLowerCase();
   if (url.protocol === 'http:') {
     if (LOOPBACK_HOSTS.has(host)) return { valid: true, redirect_type: 'loopback' };
-    if (isPrivateOrInternalHost(host)) return { valid: false, error: '回调地址不能使用内部网络地址或 localhost' };
-    // Retain existing public HTTP clients. New third-party applications should
-    // use HTTPS; localhost is accepted only as an explicit loopback literal.
+    // HTTP callbacks may target internal networks. Public third-party
+    // applications apply a narrower HTTP policy in validateApplication.
     return { valid: true, redirect_type: 'web' };
   }
 
@@ -71,14 +69,10 @@ function validateRedirectUri(uri) {
   return { valid: true, redirect_type: 'custom_scheme' };
 }
 
-function validateManagedRedirectUri(uri, client = null) {
-  const validation = validateRedirectUri(uri);
-  if (!validation.valid) return validation;
-  const supportsLoopback = client?.client_type === 'public' && client?.party_type === 'third_party';
-  if (validation.redirect_type === 'loopback' && !supportsLoopback) {
-    return { valid: false, error: '回调地址不能使用内部网络地址或 localhost' };
-  }
-  return validation;
+function validateManagedRedirectUri(uri) {
+  // Registered callback scope is governed by exact URI matching at
+  // authorization time.
+  return validateRedirectUri(uri);
 }
 
 function parseScopes(value, fallback = []) {
@@ -253,7 +247,7 @@ async function updateClient(id, data, actor) {
     clientId = client.client_id;
     if (uris) {
       for (const uri of uris) {
-        const validation = validateManagedRedirectUri(uri, client);
+        const validation = validateManagedRedirectUri(uri);
         if (!validation.valid) throw new Error(validation.error);
       }
     }
@@ -404,8 +398,9 @@ function validateApplication(data) {
     const result = validateRedirectUri(uri);
     if (!result.valid) throw new Error(result.error);
     const parsed = new URL(uri);
-    if (parsed.protocol === 'http:' && !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
-      throw new Error('第三方应用的 HTTP 回调仅允许 localhost 或 loopback 地址');
+    if (parsed.protocol === 'http:' && !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())
+      && !isPrivateOrInternalHost(parsed.hostname)) {
+      throw new Error('第三方应用的 HTTP 回调仅允许内部网络或 localhost 地址');
     }
   }
   const requestedScopes = parseScopes(data.requested_scopes);

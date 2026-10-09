@@ -48,7 +48,7 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | 参数（query） | 必填 | 说明 |
 |------|------|------|
 | `client_id` | 是 | 应用标识 |
-| `redirect_uri` | 是 | 必须匹配应用已注册的一个 URI。HTTPS 和自定义 scheme 精确匹配；loopback 允许 `localhost`、`127.0.0.1`、`[::1]`，注册端口 `0` 时可匹配该主机上的随机运行时端口 |
+| `redirect_uri` | 是 | 必须匹配应用已注册的一个 URI。HTTPS、自定义 scheme 和内网地址精确匹配；loopback 允许 `localhost`、`127.0.0.1`、`[::1]`，注册端口 `0` 时可匹配该主机上的随机运行时端口 |
 | `state` | Public 必填 | 防 CSRF 随机串，原样附加到回调 |
 | `scope` | 否 | 空格分隔，必须同时属于系统 scope 与该应用在开发者中心配置的 scope；缺省使用应用配置的全部 scope |
 | `response_type` | 否 | 若提供必须为 `code` |

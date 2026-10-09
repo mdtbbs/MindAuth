@@ -409,7 +409,7 @@ test.describe('IP ban management — CRUD contract', () => {
 // ─────────────────────────────────────────────────────────────
 // Redirect URI validation in client management
 // ─────────────────────────────────────────────────────────────
-test.describe('Redirect URI rejection — client create and update', () => {
+test.describe('Redirect URI registration — client create and update', () => {
   let adminCookieHeader;
   let adminCsrfToken;
   const createdClientIds = [];
@@ -458,49 +458,62 @@ test.describe('Redirect URI rejection — client create and update', () => {
     });
   }
 
-  test('rejects localhost redirect_uri on create', async ({ request }) => {
+  async function trackCreatedClient(request, clientId) {
+    const listRes = await request.get('/api/admin/clients', {
+      headers: { cookie: adminCookieHeader }
+    });
+    const listBody = await listRes.json();
+    const client = listBody.clients.find(item => item.client_id === clientId);
+    if (client) createdClientIds.push(client.id);
+  }
+
+  test('accepts localhost redirect_uri on create', async ({ request }) => {
     const res = await adminPost(request, '/api/admin/clients', {
-      name: 'SSRF Test',
+      name: 'Local Callback Test',
       redirect_uri: 'http://localhost:3000/callback'
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(201);
     const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.message).toContain('内部网络');
+    expect(body.success).toBe(true);
+    await trackCreatedClient(request, body.client_id);
   });
 
-  test('rejects 127.0.0.1 redirect_uri on create', async ({ request }) => {
+  test('accepts 127.0.0.1 redirect_uri on create', async ({ request }) => {
     const res = await adminPost(request, '/api/admin/clients', {
-      name: 'SSRF Test 2',
+      name: 'Loopback Callback Test',
       redirect_uri: 'http://127.0.0.1:3000/callback'
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(201);
     const body = await res.json();
-    expect(body.message).toContain('内部网络');
+    expect(body.success).toBe(true);
+    await trackCreatedClient(request, body.client_id);
   });
 
-  test('rejects private IP 10.x redirect_uri on create', async ({ request }) => {
+  test('accepts private IP 10.x redirect_uri on create', async ({ request }) => {
     const res = await adminPost(request, '/api/admin/clients', {
-      name: 'SSRF Test 3',
+      name: 'Private Callback Test 10',
       redirect_uri: 'http://10.0.0.1/callback'
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(201);
+    await trackCreatedClient(request, (await res.json()).client_id);
   });
 
-  test('rejects private IP 172.16.x redirect_uri on create', async ({ request }) => {
+  test('accepts private IP 172.16.x redirect_uri on create', async ({ request }) => {
     const res = await adminPost(request, '/api/admin/clients', {
-      name: 'SSRF Test 4',
+      name: 'Private Callback Test 172',
       redirect_uri: 'http://172.16.0.1/callback'
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(201);
+    await trackCreatedClient(request, (await res.json()).client_id);
   });
 
-  test('rejects private IP 192.168.x redirect_uri on create', async ({ request }) => {
+  test('accepts private IP 192.168.x redirect_uri on create', async ({ request }) => {
     const res = await adminPost(request, '/api/admin/clients', {
-      name: 'SSRF Test 5',
+      name: 'Private Callback Test 192',
       redirect_uri: 'http://192.168.1.1/callback'
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(201);
+    await trackCreatedClient(request, (await res.json()).client_id);
   });
 
   test('rejects invalid URL format on create', async ({ request }) => {
@@ -531,10 +544,10 @@ test.describe('Redirect URI rejection — client create and update', () => {
     expect(body.success).toBe(true);
     expect(body).toHaveProperty('client_id');
     expect(body).toHaveProperty('client_secret');
-    createdClientIds.push(body.client_id);
+    await trackCreatedClient(request, body.client_id);
   });
 
-  test('rejects localhost redirect_uri on update', async ({ request }) => {
+  test('accepts localhost redirect_uri on update', async ({ request }) => {
     // First create a valid client
     const createRes = await adminPost(request, '/api/admin/clients', {
       name: 'Update Test',
@@ -542,10 +555,9 @@ test.describe('Redirect URI rejection — client create and update', () => {
     });
     expect(createRes.status()).toBe(201);
     const { client_id } = await createRes.json();
-    createdClientIds.push(client_id);
+    await trackCreatedClient(request, client_id);
 
-    // Now try to update with localhost
-    // We need the numeric ID, not client_id. Let's list clients to find it.
+    // Resolve the numeric ID, then update the callback to localhost.
     const listRes = await request.get('/api/admin/clients', {
       headers: { cookie: adminCookieHeader }
     });
@@ -557,19 +569,18 @@ test.describe('Redirect URI rejection — client create and update', () => {
       name: 'Update Test',
       redirect_uri: 'http://localhost:3000/callback'
     });
-    expect(updateRes.status()).toBe(400);
-    const body = await updateRes.json();
-    expect(body.message).toContain('内部网络');
+    expect(updateRes.status()).toBe(200);
+    expect((await updateRes.json()).success).toBe(true);
   });
 
-  test('rejects private IP redirect_uri on update', async ({ request }) => {
+  test('accepts private IP redirect_uri on update', async ({ request }) => {
     // Create valid client
     const createRes = await adminPost(request, '/api/admin/clients', {
       name: 'Update Test 2',
       redirect_uri: 'https://example.com/callback'
     });
     const { client_id } = await createRes.json();
-    createdClientIds.push(client_id);
+    await trackCreatedClient(request, client_id);
 
     const listRes = await request.get('/api/admin/clients', {
       headers: { cookie: adminCookieHeader }
@@ -581,6 +592,7 @@ test.describe('Redirect URI rejection — client create and update', () => {
       name: 'Update Test 2',
       redirect_uri: 'http://10.0.0.5/callback'
     });
-    expect(updateRes.status()).toBe(400);
+    expect(updateRes.status()).toBe(200);
+    expect((await updateRes.json()).success).toBe(true);
   });
 });

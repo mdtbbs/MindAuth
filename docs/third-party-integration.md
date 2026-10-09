@@ -16,7 +16,7 @@
 
 ## 1. 注册 OAuth 应用
 
-Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助创建后进入管理员审核；服务端校验 HTTPS、localhost/loopback、自定义 scheme 和 scope 白名单。详见 [PKCE 指南](public-client-pkce.md) 与[开发者应用目录 API](api/developer-applications.md)。
+Confidential Client 由 MindAuth 管理员创建。Public Client 在 MindAuth 开发者中心自助创建后进入管理员审核；服务端校验 HTTPS、内网或 localhost HTTP、自定义 scheme 和 scope 白名单。回调不会由 MindAuth 服务端主动请求，授权时仍须与已登记 URI 精确匹配。详见 [PKCE 指南](public-client-pkce.md) 与[开发者应用目录 API](api/developer-applications.md)。
 
 取得以下配置后，将密钥放在服务端密钥管理或环境变量中：
 

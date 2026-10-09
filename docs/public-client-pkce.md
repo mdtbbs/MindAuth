@@ -14,9 +14,9 @@
 
 ## Redirect URI 规则
 
-- Web callback 使用 HTTPS，URI 必须完全匹配注册值。
+- 面向公网的 Web callback 使用 HTTPS；内网服务或本机开发回调可使用 HTTP。URI 必须完全匹配注册值。
 - 原生应用可登记自定义 scheme，例如 `com.example.launcher:/oauth2redirect`；必须用应用专属 scheme，不要使用 `http`、`https`、`javascript`、`file`、`intent` 等保留协议。
-- 桌面 loopback 使用 `http://127.0.0.1:0/oauth/callback`、`http://[::1]:0/oauth/callback` 或 `http://localhost:0/oauth/callback` 注册。运行时绑定随机端口后，request URI 必须保持同一主机、path 和 query。LAN、私网地址和任意内网目标不属于 loopback callback。
+- 桌面 loopback 可登记 `http://127.0.0.1:0/oauth/callback`、`http://[::1]:0/oauth/callback` 或 `http://localhost:0/oauth/callback`。运行时绑定随机端口后，request URI 必须保持同一主机、path 和 query。其他 LAN/私网回调也可登记；它们必须与请求中的 URI 完全一致，只有 loopback 注册端口 `0` 支持运行时随机端口匹配。
 - callback 不允许 userinfo 或 fragment。不得使用 wildcard。
 
 ## PKCE 登录

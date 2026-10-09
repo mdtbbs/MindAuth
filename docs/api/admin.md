@@ -94,7 +94,7 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 
 **`client_secret` 仅在创建响应中返回一次**；`GET /clients` 列表不回显 secret，之后无法再次查询。如需更换可调用 `POST /api/admin/clients/:id/rotate-secret`（管理 SPA 的 Clients 页提供「轮换密钥」按钮，复用一次性 secret 展示对话框）——新 secret 同样只在轮换响应中回显一次。
 
-`redirect_uri` 校验（`validateRedirectUri`）：必须是合法 URL、协议限 `http`/`https`，且禁止内网/本机地址（localhost、`127.0.0.1`、`*.local`、RFC1918 私网段、链路本地 169.254.x.x、云元数据地址等），否则 400 返回具体原因。所有变更写入 `client.*` 审计记录。
+`redirect_uri` 校验（`validateRedirectUri`）：必须是合法 HTTP/HTTPS URL 或安全自定义 scheme，拒绝用户凭证和 fragment；内网、本机与 localhost 回调允许登记。授权请求中的回调仍须与登记值精确匹配（仅 loopback 注册端口 `0` 支持随机运行时端口）。所有变更写入 `client.*` 审计记录。
 
 ## IP 封禁（ipBans.js）
 

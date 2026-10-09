@@ -1,7 +1,6 @@
 /**
- * Unit tests for clientRegistry.validateRedirectUri — the SSRF guard that
- * blocks OAuth redirect URIs pointing at localhost, private ranges, or cloud
- * metadata endpoints. Pure function; no DB/Redis required.
+ * Unit tests for clientRegistry.validateRedirectUri. Pure function; no
+ * DB/Redis required.
  */
 
 const { test } = require('node:test');
@@ -33,7 +32,7 @@ test('rejects non-http(s) protocols', () => {
   assert.equal(validateRedirectUri('javascript:alert(1)').valid, false);
 });
 
-test('allows only explicit loopback literals for native application redirects', () => {
+test('accepts loopback and internal-network HTTP(S) redirect URIs', () => {
   for (const uri of [
     'http://127.0.0.1:0/callback',
     'http://127.0.0.1:49152/callback',
@@ -41,14 +40,12 @@ test('allows only explicit loopback literals for native application redirects', 
     'http://[::1]:49152/callback',
     'http://localhost:0/callback',
     'http://localhost:49152/callback',
-  ]) assert.equal(validateRedirectUri(uri).valid, true, `${uri} must be accepted`);
-
-  for (const uri of [
     'http://0.0.0.0/cb',
+    'http://192.168.1.2/cb',
+    'http://10.0.0.1/cb',
     'https://api.localhost/cb',
-  ]) {
-    assert.equal(validateRedirectUri(uri).valid, false, `${uri} must be blocked`);
-  }
+    'https://service.internal/cb',
+  ]) assert.equal(validateRedirectUri(uri).valid, true, `${uri} must be accepted`);
 });
 
 test('accepts valid custom application schemes and rejects dangerous schemes', () => {
@@ -71,10 +68,10 @@ test('validates a self-service public application and rejects scope/redirect esc
   assert.deepEqual(valid.requestedScopes, ['openid', 'profile', 'forum.read', 'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete']);
   assert.equal(validateApplication({
     name: 'Local App', description: 'Local development client', website_url: 'http://localhost:3000',
-    redirect_uris: ['http://localhost:0/callback'], requested_scopes: ['profile'],
+    redirect_uris: ['http://localhost:0/callback', 'http://192.168.1.2/callback', 'https://service.internal/callback'],
+    requested_scopes: ['profile'],
   }).websiteUrl, 'http://localhost:3000');
   assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['https://client.example.org/cb'], requested_scopes: ['openid', 'admin'] }));
-  assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['http://192.168.1.2/cb'], requested_scopes: ['openid'] }));
   assert.throws(() => validateApplication({ name: 'Bad', description: 'No public HTTP callback', redirect_uris: ['http://example.org/cb'], requested_scopes: ['openid'] }));
   assert.throws(() => validateApplication({ name: 'Bad', description: '', redirect_uris: ['https://client.example.org/cb'], requested_scopes: ['openid'] }));
   assert.throws(() => validateApplication({ name: 'Bad', redirect_uris: ['https://client.example.org/cb'], requested_scopes: 'openid profile' }));
@@ -297,14 +294,14 @@ test('soft-deletes owner applications, removes grants, and invalidates access to
   }
 });
 
-test('blocks RFC1918 private ranges (SSRF)', () => {
+test('accepts RFC1918 private ranges as registered redirect URIs', () => {
   for (const uri of [
     'http://10.0.0.5/cb',
     'http://172.16.4.9/cb',
     'http://172.31.255.1/cb',
     'http://192.168.1.100/cb',
   ]) {
-    assert.equal(validateRedirectUri(uri).valid, false, `${uri} must be blocked`);
+    assert.equal(validateRedirectUri(uri).valid, true, `${uri} must be accepted`);
   }
 });
 
@@ -314,12 +311,12 @@ test('allows public IPs adjacent to private ranges', () => {
   assert.equal(validateRedirectUri('http://11.0.0.1/cb').valid, true);
 });
 
-test('blocks link-local and cloud metadata endpoints (SSRF)', () => {
+test('accepts link-local and cloud metadata callback URI registration', () => {
   for (const uri of [
     'http://169.254.169.254/latest/meta-data',
     'http://metadata.google.internal/computeMetadata/v1',
     'http://169.254.1.1/cb',
   ]) {
-    assert.equal(validateRedirectUri(uri).valid, false, `${uri} must be blocked`);
+    assert.equal(validateRedirectUri(uri).valid, true, `${uri} must be accepted`);
   }
 });

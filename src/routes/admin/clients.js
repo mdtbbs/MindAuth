@@ -121,7 +121,7 @@ router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async 
     const current = await clientRegistry.getClient(parseInt(id, 10));
     if (!current) return res.status(404).json({ success: false, message: '客户端不存在' });
     for (const uri of uris) {
-      const validation = clientRegistry.validateManagedRedirectUri(uri, current);
+      const validation = clientRegistry.validateManagedRedirectUri(uri);
       if (!validation.valid) return res.status(400).json({ success: false, message: validation.error });
     }
 

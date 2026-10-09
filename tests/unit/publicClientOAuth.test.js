@@ -13,11 +13,13 @@ test('PKCE S256 matches the RFC 7636 verifier/challenge vector', () => {
   assert.equal(issuer._verifyPkce('wrong-verifier', 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM'), false);
 });
 
-test('redirect matching permits only a registered exact redirect or a loopback random port', () => {
+test('redirect matching requires an exact registration except for a loopback random port', () => {
   assert.equal(issuer._redirectUriMatches('com.example.client:/oauth2redirect', 'com.example.client:/oauth2redirect'), true);
   assert.equal(issuer._redirectUriMatches('com.example.client:/other', 'com.example.client:/oauth2redirect'), false);
   assert.equal(issuer._redirectUriMatches('http://127.0.0.1:51321/callback', 'http://127.0.0.1:0/callback'), true);
   assert.equal(issuer._redirectUriMatches('http://192.168.1.20:51321/callback', 'http://127.0.0.1:0/callback'), false);
+  assert.equal(issuer._redirectUriMatches('http://192.168.1.20/callback', 'http://192.168.1.20/callback'), true);
+  assert.equal(issuer._redirectUriMatches('http://192.168.1.21/callback', 'http://192.168.1.20/callback'), false);
   assert.equal(issuer._redirectUriMatches('http://127.0.0.1:51321/other', 'http://127.0.0.1:0/callback'), false);
 });
 

@@ -11,7 +11,7 @@
 - 新应用类型固定为 `public` / `third_party`，`client_secret` 为 `NULL`，并强制 PKCE S256；创建后进入 `pending`，由管理员审核后启用。
 - 每个应用有明确的 `ecosystem`：`mdtbbs`、`mindustry-club` 或 `global`。省略时兼容默认 `mdtbbs`。迁移 `018_international_locales_and_ecosystems.sql` 将既有客户端设为 `mdtbbs`，保持旧资格策略。
 - 应用使用 Authorization Code Flow；Public Client 不支持客户端密钥、implicit flow 或 password grant。
-- 新第三方应用只允许 HTTPS、明确的 loopback HTTP（含端口 `0`）或安全自定义 scheme 回调。HTTPS 和回调地址会拒绝用户凭证、fragment、内网地址及危险协议。
+- 新第三方应用允许 HTTPS、内网或 localhost HTTP、loopback 随机端口和安全自定义 scheme 回调；公网 HTTP 仍不允许。回调地址拒绝用户凭证、fragment 和危险协议，并在授权时与登记值精确匹配。
 - 更新 scopes 会同步更新应用允许的 scopes，并撤销该应用现存的 refresh/access token；用户下次授权时按新增 scope 重新确认。
 - 游戏云存档使用 `game_content.saves.read`、`game_content.saves.write`、`game_content.saves.delete` 三个独立敏感权限；Public OAuth 应用需逐项申请并由管理员批准。官方 Native 登录单独使用固定 scope：新登录会获得这三个权限，旧会话刷新时仍保留原有 scope。
 - Presence/Multiplayer 客户端须申报 `supports_presence`、`supports_multiplayer` 和/或 `supports_join_intent`。审核能力要求同时批准匹配的 `presence.write` 或 `multiplayer.write`。应用名称、图标与开发者身份由 MindAuth 目录提供；客户端不能从 Rich Activity 自行指定这些资料。
@@ -83,7 +83,7 @@ Content-Type: application/json
 }
 ```
 
-`website_url` 可省略或为 `null`；如果填写，只接受 HTTPS 或 localhost/loopback HTTP。`application_icon_url` 仅接受公开 HTTPS。`launch_uri_template` 必须只有一个 `{intent_id}` 占位符。Join Intent 能力要求申请 `multiplayer.write` 和 URI 模板；Presence 与 Multiplayer 能力分别要求 `presence.write`、`multiplayer.write`。名称、简介和至少一个 Redirect URI 必填，最多 20 个 URI。scope 必须是系统支持项，且至少选择一个。
+`website_url` 可省略或为 `null`；如果填写，只接受 HTTPS 或 localhost/loopback HTTP。`application_icon_url` 仅接受公开 HTTPS。`launch_uri_template` 必须只有一个 `{intent_id}` 占位符。Join Intent 能力要求申请 `multiplayer.write` 和 URI 模板；Presence 与 Multiplayer 能力分别要求 `presence.write`、`multiplayer.write`。名称、简介和至少一个 Redirect URI 必填，最多 20 个 URI。内网或 localhost 的 HTTP 回调允许登记，授权请求必须精确匹配登记 URI；scope 必须是系统支持项，且至少选择一个。
 
 成功返回 `201`：
 
