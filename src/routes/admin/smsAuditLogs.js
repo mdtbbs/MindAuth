@@ -134,7 +134,7 @@ router.get('/sms-audit-logs', requireAdmin, requireAdminPermission('sms_audit.re
       LEFT JOIN users u ON u.id = s.user_id
       ${filters.where}
       ORDER BY s.created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
+      LIMIT ? OFFSET ?
     `;
     const countSql = `
       SELECT COUNT(*) as count
@@ -142,7 +142,7 @@ router.get('/sms-audit-logs', requireAdmin, requireAdminPermission('sms_audit.re
       ${filters.where}
     `;
 
-    const [rows] = await pool.execute(selectSql, filters.params);
+    const [rows] = await pool.execute(selectSql, [...filters.params, limit, offset]);
     const [countRows] = await pool.execute(countSql, filters.countParams);
     const total = countRows[0]?.count || 0;
 
