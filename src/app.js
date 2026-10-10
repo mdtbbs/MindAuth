@@ -153,13 +153,17 @@ function createApp(deps = {}) {
     '/robots.txt',
     '/docs.html',
   ]);
+  // 独立静态页的自有样式/脚本（不经过 Vite 构建，见 public/standalone.css 注释）。
+  const LEGACY_ASSETS = new Set(['/standalone.css', '/standalone.js']);
   app.use((req, res, next) => {
-    if (req.method === 'GET' && LEGACY_FILES.has(req.path)) {
-      const filePath = path.join(PUBLIC_DIR, req.path);
-      res.sendFile(filePath);
-    } else {
-      next();
+    if (req.method !== 'GET') return next();
+    if (LEGACY_FILES.has(req.path)) {
+      return res.sendFile(path.join(PUBLIC_DIR, req.path));
     }
+    if (LEGACY_ASSETS.has(req.path)) {
+      return res.sendFile(path.join(PUBLIC_DIR, req.path), { maxAge: '1h' });
+    }
+    next();
   });
 
   // 2. User uploads — safe cache (1 day), no immutable flag.

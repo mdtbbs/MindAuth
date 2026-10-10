@@ -137,7 +137,8 @@ test.describe('OAuth 登录后跳转回原页面', () => {
 
     await page.goto(authorizeUrl);
     await page.waitForSelector('#login-form', { timeout: 5000 });
-    await page.getByRole('link', { name: '没有账号？注册' }).click();
+    // 文案已改为 i18n 模板（'没有账号？' + '注册'），渲染时中间带空格，旧的连写匹配不到
+    await page.getByRole('link', { name: /没有账号？\s*注册/ }).click();
     await page.waitForSelector('#register-form', { timeout: 5000 });
     await page.fill('#username', testUser);
     await page.fill('#email', testEmail);

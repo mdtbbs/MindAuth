@@ -108,7 +108,7 @@ img {
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: #b91c1c;
+  background: var(--color-error-hover);
 }
 
 .btn--ghost {
@@ -1021,4 +1021,44 @@ img {
   .spinner {
     animation-duration: 1.2s;
   }
+}
+
+/* ─── 主题切换按钮（用户端 / 管理端共用，与论坛头部按钮一致） ────── */
+.theme-toggle {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    color var(--duration-fast) var(--ease-default);
+}
+
+.theme-toggle:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.theme-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

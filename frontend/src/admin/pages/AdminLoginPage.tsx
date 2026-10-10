@@ -4,6 +4,7 @@ import { useToast } from '@/shared/ToastProvider';
 import { Card, CardTitle } from '@/shared/Card';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
+import { ThemeToggle } from '@/shared/ThemeToggle';
 
 interface AdminLoginPageProps {
   onLoginSuccess: () => void;
@@ -79,8 +80,9 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
   const displayError = error || authError || '';
 
   return (
-    <div className="page--auth">
-      <Card padding="lg">
+    <div className="page--auth admin-login">
+      <ThemeToggle className="admin-login__theme" label="切换深浅色主题" />
+      <Card padding="lg" className="admin-login__card">
         <CardTitle>
           {mode === 'login' ? '管理员登录' : '创建管理员账号'}
         </CardTitle>

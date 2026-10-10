@@ -2,6 +2,7 @@ import { type ReactNode, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAdminAuth } from '../AdminAuthProvider';
 import { Button } from '@/shared/Button';
+import { ThemeToggle } from '@/shared/ThemeToggle';
 
 interface AdminShellProps { children: ReactNode }
 interface NavItem { id: string; label: string; permission: string; icon: string }
@@ -80,6 +81,7 @@ export function AdminShell({ children }: AdminShellProps) {
           </section>)}
         </nav>
         <div className="admin-sidebar__footer">
+          <div className="admin-sidebar__toolbar"><ThemeToggle label="切换深浅色主题" /></div>
           <div className="admin-profile"><span className="admin-profile__avatar">{admin?.username?.slice(0, 1).toUpperCase() || 'A'}</span><span className="admin-profile__meta"><strong>{admin?.username}</strong><small>{admin?.role}</small></span></div>
           <Button variant="ghost" size="sm" fullWidth onClick={handleLogout}>退出登录</Button>
         </div>
