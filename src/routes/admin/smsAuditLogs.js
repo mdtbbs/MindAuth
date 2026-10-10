@@ -142,7 +142,9 @@ router.get('/sms-audit-logs', requireAdmin, requireAdminPermission('sms_audit.re
       ${filters.where}
     `;
 
-    const [rows] = await pool.execute(selectSql, [...filters.params, limit, offset]);
+    // pool.query (not execute): MySQL 8 rejects numeric LIMIT/OFFSET as
+    // prepared-statement params (ER_WRONG_ARGUMENTS); same pattern as ipBans.js
+    const [rows] = await pool.query(selectSql, [...filters.params, limit, offset]);
     const [countRows] = await pool.execute(countSql, filters.countParams);
     const total = countRows[0]?.count || 0;
 

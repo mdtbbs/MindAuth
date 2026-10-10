@@ -63,7 +63,9 @@ async function logUserAudit({ user_id, action, ip_address, user_agent, details }
  * Returns up to `limit` most recent events.
  */
 async function getUserAuditLogs(userId, limit = 50) {
-  const [rows] = await pool.execute(
+  // pool.query (not execute): MySQL 8 rejects numeric LIMIT/OFFSET as
+  // prepared-statement params (ER_WRONG_ARGUMENTS); same pattern as ipBans.js
+  const [rows] = await pool.query(
     'SELECT id, action, ip_address, user_agent, details, created_at FROM user_audit_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
     [userId, limit]
   );
