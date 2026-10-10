@@ -5,15 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>授权失败 - MindAuth</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/shared-styles/variables.css">
-  <link rel="stylesheet" href="/shared-styles/components.css">
-  <link rel="stylesheet" href="/shared-styles/utilities.css">
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/standalone.css">
+  <script src="/standalone.js"></script>
+    <script>
+      // 与用户中心共用 localStorage 键 `theme`（同 MDTBBS 论坛），避免深色用户白屏闪烁
+      (function () {
+        try {
+          var theme = localStorage.getItem('theme');
+          if (theme === 'dark' || theme === 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+        } catch (e) {}
+      })();
+    </script>
 </head>
 <body>
   <div class="bg-pattern"></div>
-  <button class="theme-toggle" onclick="togglePageTheme()" title="切换主题">
-    <span id="theme-icon">☾</span>
+  <button class="theme-toggle" id="theme-toggle" title="切换主题">
+    <span id="theme-icon" aria-hidden="true">☾</span>
   </button>
 
   <main class="error-page-shell">
@@ -38,20 +47,6 @@
       server_error: ['服务器错误', '授权服务暂时无法完成请求。']
     };
 
-    function initTheme() {
-      const saved = localStorage.getItem('theme') || 'light';
-      document.documentElement.setAttribute('data-theme', saved);
-      document.getElementById('theme-icon').textContent = saved === 'dark' ? '☀' : '☾';
-    }
-
-    function togglePageTheme() {
-      const current = document.documentElement.getAttribute('data-theme') || 'light';
-      const next = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      localStorage.setItem('theme', next);
-      document.getElementById('theme-icon').textContent = next === 'dark' ? '☀' : '☾';
-    }
-
     function goBack() {
       if (document.referrer) {
         window.history.back();
@@ -60,7 +55,6 @@
       }
     }
 
-    initTheme();
     const params = new URLSearchParams(window.location.search);
     const error = params.get('error') || 'oauth_error';
     const description = params.get('description');

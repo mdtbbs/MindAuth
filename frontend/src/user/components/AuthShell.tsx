@@ -5,6 +5,7 @@ import api from '@/api/client';
 import { LegalFooter } from '@/user/components/LegalFooter';
 import { useSearchParams } from 'react-router-dom';
 import { LocaleSwitcher, useI18n } from '@/i18n/I18nProvider';
+import { ThemeToggle } from '@/shared/ThemeToggle';
 
 interface AuthShellProps {
   title: string;
@@ -61,7 +62,7 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
             <span className="auth-brand__divider" aria-hidden="true" />
             <span className="auth-brand__section">{t('brand.account')}</span>
           </Link>
-          <div className="cluster"><LocaleSwitcher /><a className="auth-shell__back" href={backHref}>{t('brand.back')}</a></div>
+          <div className="cluster"><LocaleSwitcher /><ThemeToggle label={t('shell.themeToggle')} /><a className="auth-shell__back" href={backHref}>{t('brand.back')}</a></div>
         </div>
       </header>
 

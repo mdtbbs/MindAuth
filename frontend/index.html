@@ -5,6 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MDTBBS | 用户中心</title>
     <link rel="icon" type="image/svg+xml" href="/account-logo.svg" />
+    <!--
+      主题引导：在 CSS/React 之前落 data-theme，避免深色用户看到白屏闪烁。
+      与 MDTBBS 论坛共用 localStorage 键 `theme`；未手动选择时跟随系统偏好。
+    -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('theme');
+          if (theme === 'dark' || theme === 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script>
+      (function () {
+        try {
+          var dark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+            (!document.documentElement.hasAttribute('data-theme') &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.style.backgroundColor = dark ? '#0b1220' : '#f5f9ff';
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

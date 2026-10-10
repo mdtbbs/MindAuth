@@ -4,6 +4,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { LoadingState } from '@/shared/LoadingState';
 import { LocaleSwitcher, useI18n } from '@/i18n/I18nProvider';
+import { ThemeToggle } from '@/shared/ThemeToggle';
 
 type AccountNavItem = { key: string; href: string };
 type AccountNavGroup = { labelKey?: string; items: AccountNavItem[] };
@@ -145,6 +146,7 @@ export function AccountShell({ title, description, children }: AccountShellProps
           </Link>
           <div className="account-header-actions">
             <LocaleSwitcher />
+            <ThemeToggle label={t('shell.themeToggle')} />
             <a className="account-help-link" href="/docs.html">{t('shell.help')}</a>
             {user ? (
               <details className="account-user-menu">
