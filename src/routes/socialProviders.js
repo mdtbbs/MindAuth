@@ -218,8 +218,8 @@ router.post('/complete', socialRegisterRateLimiter, async (req, res) => {
     const challengeRequired = await challengeManager.isChallengeRequired();
     if (challengeRequired && !challengeId) return res.status(400).json({ success: false, code: 'CHALLENGE_REQUIRED' });
     if (challengeId) {
-      const csrfToken = req.cookies.csrf_token || 'anonymous';
-      const result = await challengeManager.verifyForRegistration(csrfToken, challengeId, challengeAnswer);
+      const challengeSessionId = challengeManager.resolveSessionId(req, res);
+      const result = await challengeManager.verifyForRegistration(challengeSessionId, challengeId, challengeAnswer);
       if (!result.success) return res.status(400).json({ success: false, code: result.code || 'CHALLENGE_FAILED' });
     }
     const emailDecision = await emailPolicy.checkEmail(email, { purpose: 'register', ipAddress: getClientIp(req) });

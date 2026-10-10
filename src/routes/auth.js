@@ -171,8 +171,8 @@ router.post('/register', registerRateLimiter, async (req, res) => {
 
   // Verify challenge question if enabled
   if (challenge_id) {
-    const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const challengeResult = await challengeManager.verifyForRegistration(csrfToken, challenge_id, challenge_answer);
+    const challengeSessionId = challengeManager.resolveSessionId(req, res);
+    const challengeResult = await challengeManager.verifyForRegistration(challengeSessionId, challenge_id, challenge_answer);
     if (!challengeResult.success) {
       const messageMap = {
         CHALLENGE_EXPIRED: '验证已过期，请刷新获取新题',
