@@ -10,6 +10,18 @@ const { getClientIp } = require('../../utils/request');
 // abuse as a spam relay / SMS cost drain even by authenticated admins
 const testEmailLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 10 * 60 * 1000, keyPrefix: 'ratelimit:admin_test_email' });
 const testSmsLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 10 * 60 * 1000, keyPrefix: 'ratelimit:admin_test_sms' });
+const MAINLAND_CHINA_PHONE_RE = /^1[3-9]\d{9}$/;
+
+function validateTestSmsPhone(req, res, next) {
+  const phone = String(req.body?.phone || '').trim();
+  if (!MAINLAND_CHINA_PHONE_RE.test(phone)) {
+    return res.status(400).json({ success: false, message: '请输入有效的 11 位中国大陆手机号' });
+  }
+
+  req.testSmsPhone = phone;
+  next();
+}
+
 const config = require('../../config');
 const runtimeConfig = require('../../modules/config/runtimeConfig');
 const auditWriter = require('../../modules/audit/auditWriter');
@@ -357,14 +369,9 @@ router.put('/sms-config', requireAdmin, requireAdminPermission('sms_config.write
 });
 
 // POST /test-sms - Send test SMS
-router.post('/test-sms', requireAdmin, requireAdminPermission('sms_config.write'), testSmsLimiter, async (req, res) => {
+router.post('/test-sms', requireAdmin, requireAdminPermission('sms_config.write'), validateTestSmsPhone, testSmsLimiter, async (req, res) => {
   try {
-    const phone = String(req.body?.phone || '').trim();
-
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
-      return res.status(400).json({ success: false, message: '请输入有效的 11 位中国大陆手机号' });
-    }
-
+    const { testSmsPhone: phone } = req;
     const { sendSmsCode } = require('../../utils/aliyunSms');
     const result = await sendSmsCode(phone);
 
