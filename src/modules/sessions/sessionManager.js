@@ -81,8 +81,14 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
   const cachePayload = { ...userRows[0], session_id: sessionId, session_expires_at: expiresAt.toISOString() };
   await client.setEx(`session:${tokenHash}`, SESSION_CACHE_TTL, JSON.stringify(cachePayload));
 
-  // 4. Add to per-user index set (for bulk invalidation without SCAN)
-  await client.sAdd(`sessions_by_user:${userId}`, String(sessionId));
+  // 4. Add to per-user index set (for bulk invalidation without SCAN).
+  //    The set is pruned by revokeAllUserSessions, but give it a TTL as a
+  //    backstop so a crash between writes cannot leave it growing forever.
+  const indexKey = `sessions_by_user:${userId}`;
+  await client.sAdd(indexKey, String(sessionId));
+  // TTL outlives the session itself (30 days) by one cache window, so the
+  // set is always available while any of its sessions can still be revoked.
+  await client.expire(indexKey, Math.ceil(SESSION_LIFETIME_MS / 1000) + SESSION_CACHE_TTL).catch(() => {});
 
   return { token: rawToken, expiresAt, sessionId };
 }

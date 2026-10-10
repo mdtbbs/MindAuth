@@ -36,6 +36,11 @@ const { getClientIp } = require('../utils/request');
 const CODE_TTL = 300; // 5 minutes
 const MAX_VERIFY_FAILURES = 5;
 const EMAIL_COOLDOWN_MS = 60 * 1000; // 1 minute per-email cooldown
+// Bounds the *volume* sent to one address. The 1-minute cooldown only caps
+// the burst rate: an attacker rotating IPs (and deliberately failing SMTP to
+// reset the cooldown) could still send ~60 mails/hour to a chosen address.
+const EMAIL_HOURLY_MAX = 5;
+const EMAIL_HOURLY_WINDOW_SECONDS = 3600;
 const isProduction = process.env.NODE_ENV === 'production';
 
 // Per-IP rate limit (3 per 10 min) — matches config.rateLimit.registerSendCode.
@@ -44,6 +49,7 @@ const sendIpLimiter = createRateLimiter(config.rateLimit.registerSendCode);
 // Per-email cooldown: stored in Redis with a dedicated key namespace.
 // Ensures the same address cannot be spammed even from different IPs.
 const EMAIL_COOLDOWN_PREFIX = 'register_email_cooldown:';
+const EMAIL_HOURLY_PREFIX = 'register_email_hourly:';
 
 function emailKey(email) {
   return hashToken(email.toLowerCase().trim());
@@ -117,6 +123,25 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
         code: 'EMAIL_COOLDOWN',
         retry_after_seconds: waitSec,
         message: `发送过于频繁，请${waitSec}秒后重试`,
+      });
+    }
+
+    // 2b. Per-email hourly quota. Counted before generating a code so a
+    //     burst of requests cannot slip through on cooldown resets.
+    const hourlyKey = `${EMAIL_HOURLY_PREFIX}${emailKey(email)}`;
+    let hourlyCount;
+    try {
+      hourlyCount = await client.incr(hourlyKey);
+      if (hourlyCount === 1) await client.expire(hourlyKey, EMAIL_HOURLY_WINDOW_SECONDS);
+    } catch {
+      hourlyCount = 1; // Redis down: the per-IP limiter still applies
+    }
+    if (hourlyCount > EMAIL_HOURLY_MAX) {
+      return res.status(429).json({
+        success: false,
+        code: 'EMAIL_HOURLY_LIMIT',
+        retry_after_seconds: EMAIL_HOURLY_WINDOW_SECONDS,
+        message: '该邮箱请求验证码过于频繁，请稍后再试',
       });
     }
 
