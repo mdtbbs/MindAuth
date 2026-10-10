@@ -237,3 +237,26 @@
 @media (max-width: 640px) {
   .admin-content .rtable { width: 100%; min-width: 0; }
 }
+
+/* ── 管理员登录页：居中卡片 + 主题切换（对齐论坛登录观感） ── */
+.admin-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.admin-login__theme {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+}
+
+.admin-login__card {
+  width: min(100%, 26rem);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-login__card .card__title {
+  font-size: var(--text-xl);
+}

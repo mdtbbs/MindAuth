@@ -117,6 +117,15 @@
   --auth-grid-line: rgba(47, 128, 237, 0.06);
   /* 自定义背景图上的可读性遮罩 */
   --auth-scrim: rgba(255, 255, 255, 0.18);
+  /* 认证页右侧社区插画配色（随主题变化，避免深色下过亮） */
+  --art-base: #d6e8ff;
+  --art-mid: #9fc7fb;
+  --art-deep: #5b9bea;
+  --art-face: #ffffff;
+  --art-side: #dcecff;
+  --art-left: #b6d5fc;
+  --art-line: #90baf0;
+  --art-rail: #ffffff;
 
   --max-width-content: 72rem;
   --max-width-auth: 76rem;
@@ -181,6 +190,14 @@
     --auth-bg: #0b1220;
     --auth-grid-line: rgba(148, 163, 184, 0.06);
     --auth-scrim: rgba(2, 6, 23, 0.45);
+    --art-base: #1b2b47;
+    --art-mid: #27466f;
+    --art-deep: #3772b5;
+    --art-face: #21334f;
+    --art-side: #1a2941;
+    --art-left: #223554;
+    --art-line: #3c5c88;
+    --art-rail: #2a3f60;
   }
 }
 
@@ -237,6 +254,14 @@
   --auth-bg: #0b1220;
   --auth-grid-line: rgba(148, 163, 184, 0.06);
   --auth-scrim: rgba(2, 6, 23, 0.45);
+    --art-base: #1b2b47;
+    --art-mid: #27466f;
+    --art-deep: #3772b5;
+    --art-face: #21334f;
+    --art-side: #1a2941;
+    --art-left: #223554;
+    --art-line: #3c5c88;
+    --art-rail: #2a3f60;
 }
 
 @media (prefers-reduced-motion: reduce) {
