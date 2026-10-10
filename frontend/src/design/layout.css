@@ -140,15 +140,19 @@
   min-height: 100dvh;
   background-color: var(--auth-bg);
   background-image:
-    linear-gradient(var(--auth-grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--auth-grid-line) 1px, transparent 1px);
-  background-size: 24px 24px;
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
 }
 
 .auth-shell {
   min-height: 100dvh;
-  --color-bg: var(--color-bg-subtle);
-  background: var(--color-bg);
+  background-color: var(--color-bg-subtle);
+  /* 与授权页右侧视觉面板同一套方格网格：整页打底，留白处才可见 */
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
   color: var(--color-text);
   display: flex;
   flex-direction: column;
@@ -165,9 +169,10 @@
 
 .auth-shell__header-inner {
   width: 100%;
-  max-width: 76rem;
+  /* 盒宽 = 内容宽 + 两侧 gutter，使品牌行与下方内容/页脚共用同一条左基线 */
+  max-width: calc(var(--max-width-auth) + 2 * var(--shell-gutter));
   margin-inline: auto;
-  padding-inline: 1.5rem;
+  padding-inline: var(--shell-gutter);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -235,7 +240,7 @@
 }
 
 .auth-shell__notice {
-  width: min(calc(100% - 3rem), 76rem);
+  width: min(calc(100% - 2 * var(--shell-gutter)), var(--max-width-auth));
   min-height: 2.75rem;
   margin: 1.25rem auto 0;
   padding: 0.65rem 0.9rem;
@@ -256,7 +261,7 @@
   display: inline-grid;
   place-items: center;
   border: 1px solid var(--color-primary);
-  border-radius: 50%;
+  border-radius: 0;
   color: var(--color-primary);
   font-size: 0.68rem;
   font-weight: 650;
@@ -270,7 +275,7 @@
 }
 
 .auth-shell__content {
-  width: min(100%, 68rem);
+  width: min(100%, var(--max-width-auth));
   margin-inline: auto;
   display: grid;
   grid-template-columns: minmax(20rem, 27rem) minmax(24rem, 1fr);
@@ -342,8 +347,30 @@
   flex-direction: column;
   justify-content: flex-start;
   padding: 2rem 2.1rem;
-  background: linear-gradient(135deg, var(--color-primary-soft) 0%, var(--color-bg-subtle) 100%);
+  background: linear-gradient(150deg, var(--color-primary-soft) 0%, var(--color-bg-elevated) 62%);
   border: 1px solid var(--color-border);
+}
+
+/* 面板内部再叠一层更淡的网格，和整页打底呼应（授权页背景的由来） */
+.auth-shell__promo::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  content: '';
+  pointer-events: none;
+}
+
+/* 顶部一条主色细线：面板的「标题栏」暗示，与卡片 3px 左条同源 */
+.auth-shell__promo::after {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-primary) 0%, transparent 72%);
+  content: '';
+  pointer-events: none;
 }
 
 .auth-shell__promo--club {
@@ -427,8 +454,17 @@
   height: auto;
 }
 
+.auth-promo__link {
+  text-decoration: none;
+}
+
+.auth-promo__link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .site-legal-footer {
-  width: min(calc(100% - 3rem), 76rem);
+  width: min(calc(100% - 2 * var(--shell-gutter)), var(--max-width-auth));
   margin: 0 auto;
   padding: 0.9rem 0 1.1rem;
   border-top: 1px solid var(--color-border-soft);
@@ -541,9 +577,8 @@
 
 .account-shell__header-inner {
   width: 100%;
-  max-width: var(--max-width-account);
-  margin-inline: auto;
-  padding: 0 var(--space-4);
+  /* 不居中：品牌与左侧栏、内容区共用一个左基线（宽屏下才不会整体右移） */
+  padding: 0 var(--shell-gutter);
   min-height: var(--header-height);
   display: flex;
   align-items: center;
@@ -581,9 +616,9 @@
 
 .account-shell__layout {
   display: grid;
-  grid-template-columns: minmax(13rem, var(--account-sidebar-width)) minmax(0, 1fr);
-  gap: var(--space-6);
-  align-items: start;
+  grid-template-columns: var(--account-sidebar-width) minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
 }
 
 .account-shell__sidebar {
@@ -1273,7 +1308,6 @@
 
   .auth-shell__panel .card {
     padding: 0 1.25rem 1.25rem;
-    border-radius: 3px;
     box-shadow: none;
   }
 

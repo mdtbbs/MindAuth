@@ -88,13 +88,16 @@
   --weight-semibold: 600;
   --weight-bold: 700;
 
-  /* 圆角对齐论坛（--radius:6px / --radius-sm:4px / 卡片 6px），弃用此前的 2-3px 方角 */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 6px;
-  --radius-xl: 10px;
-  --radius-2xl: 14px;
-  --radius-full: 9999px;
+  /* 圆角：论坛要求直角 0px —— 按钮/卡片/输入框/导航/浮层一律方角，
+     与论坛那条 `.btn,.card,.input,.toast,.theme-toggle{border-radius:0!important}` 对齐。
+     --radius-full 只留给头像、状态点、加载环这类「本来就是圆形」的元素，
+     不要用在按钮/标签/卡片上（那些已显式改为 0）。 */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-full: 9999px; /* 仅限「本来就是圆形」的元素：头像、状态点、加载环、logo 圆点 */
 
   --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
@@ -113,9 +116,14 @@
   --z-modal: 400;
   --z-toast: 500;
 
-  /* 认证页整屏背景：浅蓝方格网格（未配置自定义背景图时的默认打底） */
+  /* 外壳统一 gutter：页头 / 侧栏 / 内容共用同一条左基线（改这里即整站对齐）。
+     窄屏收窄，见文件末尾的 640px 断点。 */
+  --shell-gutter: 1.5rem;
+  /* 认证页整屏背景：浅蓝方格网格（未配置自定义背景图时的默认打底）。
+     这套「技术网格」同时用于账户中心与管理端内容区底色，保持同一视觉语言。 */
   --auth-bg: #f5f9ff;
-  --auth-grid-line: rgba(47, 128, 237, 0.06);
+  --grid-line: rgba(47, 128, 237, 0.06);
+  --grid-size: 24px;
   /* 自定义背景图上的可读性遮罩 */
   --auth-scrim: rgba(255, 255, 255, 0.18);
   /* 认证页右侧社区插画配色（随主题变化，避免深色下过亮） */
@@ -190,7 +198,7 @@
     --shadow-xl: 0 20px 45px rgba(0, 0, 0, 0.48);
 
     --auth-bg: #0b1220;
-    --auth-grid-line: rgba(148, 163, 184, 0.06);
+    --grid-line: rgba(148, 163, 184, 0.06);
     --auth-scrim: rgba(2, 6, 23, 0.45);
     --art-base: #1b2b47;
     --art-mid: #27466f;
@@ -255,7 +263,7 @@
   --shadow-xl: 0 20px 45px rgba(0, 0, 0, 0.48);
 
   --auth-bg: #0b1220;
-  --auth-grid-line: rgba(148, 163, 184, 0.06);
+  --grid-line: rgba(148, 163, 184, 0.06);
   --auth-scrim: rgba(2, 6, 23, 0.45);
     --art-base: #1b2b47;
     --art-mid: #27466f;
@@ -265,6 +273,13 @@
     --art-left: #223554;
     --art-line: #3c5c88;
     --art-rail: #2a3f60;
+}
+
+/* 外壳 gutter 随屏收窄：移动端页头/内容同一条线，不留 24px 空档 */
+@media (max-width: 640px) {
+  :root {
+    --shell-gutter: 1rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
