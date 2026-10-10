@@ -36,6 +36,9 @@ const { getClientIp } = require('../utils/request');
 const CODE_TTL = 300; // 5 minutes
 const MAX_VERIFY_FAILURES = 5;
 const EMAIL_COOLDOWN_MS = 60 * 1000; // 1 minute per-email cooldown
+// After a failed send the caller waits this long before retrying — long
+// enough that a failure loop cannot be used as an unbounded resend pump.
+const SMTP_FAILURE_COOLDOWN_SECONDS = 10;
 // Bounds the *volume* sent to one address. The 1-minute cooldown only caps
 // the burst rate: an attacker rotating IPs (and deliberately failing SMTP to
 // reset the cooldown) could still send ~60 mails/hour to a chosen address.
@@ -168,7 +171,12 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
       try {
         await pool.execute('DELETE FROM registration_email_codes WHERE email_hash = ?', [eHash]);
       } catch {}
-      await client.del(cooldownKey).catch(() => {});
+      // Shorten the cooldown instead of clearing it. Clearing it turned a
+      // deliberately-triggered SMTP failure into an unlimited resend loop
+      // (each attempt resets the wait), and the per-email hourly quota was
+      // the only thing backstopping that. A retry after 10 s still covers
+      // the legitimate "mail server hiccup" case.
+      await client.set(cooldownKey, '1', 'EX', SMTP_FAILURE_COOLDOWN_SECONDS).catch(() => {});
       if (sendErr.message && sendErr.message.includes('邮件服务未配置')) {
         return res.status(503).json({
           success: false,

@@ -31,6 +31,7 @@ const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
 const smsRoutes = require('./routes/sms');
 const challengeRoutes = require('./routes/challenge');
+const ipBanMatcher = require('./modules/security/ipBanMatcher');
 const sessionsRoutes = require('./routes/sessions');
 const notificationsRoutes = require('./routes/notifications');
 const registerEmailCodeRoutes = require('./routes/registerEmailCode');
@@ -258,6 +259,11 @@ function createApp(deps = {}) {
   app.get('/api/health', async (req, res) => {
     const isProduction = process.env.NODE_ENV === 'production';
 
+    // IP ban enforcement fails open on cache/DB errors by design, which also
+    // means bans silently stop applying. Surface that state here so it can be
+    // alerted on instead of living in a console line.
+    const banEnforcement = ipBanMatcher.getEnforcementStatus();
+
     // In production, return minimal health info
     if (isProduction) {
       let status = 'ok';
@@ -268,7 +274,11 @@ function createApp(deps = {}) {
         status = 'degraded';
         console.error('Health check error:', err.message);
       }
-      return res.status(status === 'ok' ? 200 : 503).json({ status });
+      if (banEnforcement.degraded) status = 'degraded';
+      return res.status(status === 'ok' ? 200 : 503).json({
+        status,
+        ...(banEnforcement.degraded ? { ip_ban_enforcement: 'degraded' } : {}),
+      });
     }
 
     // In development, return detailed health info but hide error details
@@ -279,6 +289,13 @@ function createApp(deps = {}) {
       version: config.server.version,
       services: {}
     };
+
+    if (banEnforcement.degraded) {
+      health.status = 'degraded';
+      health.services.ip_bans = `not enforced since ${banEnforcement.since}: ${banEnforcement.reason}`;
+    } else {
+      health.services.ip_bans = 'enforced';
+    }
 
     // Check MySQL database
     try {
