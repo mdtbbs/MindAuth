@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 const { pool, transaction, isDuplicateError } = require('../db');
 const { client } = require('../redis');
 const { hashToken } = require('../utils/token');
-const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
+const { isValidEmail, isValidUsername } = require('../utils/validation');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter, createClientAwareRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
@@ -16,6 +16,7 @@ const challengeManager = require('../modules/challenges/challengeManager');
 const notificationCenter = require('../modules/notifications/notificationCenter');
 const config = require('../config');
 const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
+const registrationPolicy = require('../modules/config/registrationPolicy');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const loginRateLimiter = createClientAwareRateLimiter(config.rateLimit.login);
@@ -130,6 +131,17 @@ async function removeCodeFromMysql(emailHash) {
 router.post('/register', registerRateLimiter, async (req, res) => {
   const { username, email, password, email_code, challenge_id, challenge_answer } = req.body;
 
+  // The admin settings switch actually gates the endpoint now. It used to be
+  // editable (and documented) but read by nothing — turning registration off
+  // had no effect at all.
+  if (!(await registrationPolicy.isRegistrationEnabled())) {
+    return res.status(403).json({
+      success: false,
+      code: 'REGISTRATION_DISABLED',
+      message: '当前已关闭新用户注册',
+    });
+  }
+
   if (!username || !email || !password || !email_code) {
     return res.status(400).json({
       success: false,
@@ -198,8 +210,11 @@ router.post('/register', registerRateLimiter, async (req, res) => {
     return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
   }
 
-  if (!isValidPassword(password)) {
-    return res.status(400).json({ success: false, message: getPasswordValidationError(password) || '密码不符合要求' });
+  // Password policy is admin-configurable (min length / complexity) on top of
+  // the non-negotiable floor enforced inside the policy module.
+  const passwordError = await registrationPolicy.validatePassword(password);
+  if (passwordError) {
+    return res.status(400).json({ success: false, message: passwordError });
   }
 
   // ── Email code verification ───────────────────────────────────
