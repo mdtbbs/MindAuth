@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import api from '@/api/client';
+import api, { ApiError } from '@/api/client';
 import { TextField } from '@/shared/TextField';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
@@ -19,7 +19,13 @@ export function ResetPasswordPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    if (!password || password.length < 8) {
+    if (
+      !password ||
+      password.length < 8 ||
+      !/[A-Z]/.test(password) ||
+      !/[a-z]/.test(password) ||
+      !/[0-9]/.test(password)
+    ) {
       setError(t('resetPassword.required'));
       return;
     }
@@ -34,8 +40,12 @@ export function ResetPasswordPage() {
     try {
       await api.post('/api/password/reset', { token, new_password: password });
       setSuccess(true);
-    } catch {
-      setError(t('resetPassword.failed'));
+    } catch (error) {
+      setError(
+        error instanceof ApiError && error.status !== undefined && error.status < 500
+          ? error.message
+          : t('resetPassword.failed'),
+      );
     } finally {
       setLoading(false);
     }

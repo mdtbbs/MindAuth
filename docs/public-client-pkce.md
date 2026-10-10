@@ -176,6 +176,8 @@ Use a JSON library to serialize the body in production. Desktop apps should bind
 
 MindAuth migration `013_seed_official_android_public_client.sql` registers the official MDTBBS Android app as the approved first-party Public Client `mdtbbs_android_public`, with `mdtbbs://oauth/callback` and the scopes used by the official app. The Android project uses that public ID by default. To use another registered public client in a build, set `mdtbbsOauthClientId` in Gradle properties; never add a client secret. Apply the MindAuth migrations before distributing an Android build that uses this flow. Existing installed Android versions continue to use the legacy compatibility endpoints.
 
+MindAuth migration `022_expand_official_lanlink_mod_scopes.sql` expands the approved `lanlink-mindustry-mod` public client for the integrated Mindustry Mod. It retains the dynamic loopback callback `http://127.0.0.1:0/oauth/callback` and adds the forum, resource, notification, friends, presence, and multiplayer scopes used by the Mod. The Mod binds an ephemeral port on `127.0.0.1`, opens the system browser, validates the one-time `state`, and exchanges the code with PKCE S256. The client has no secret. The shared client ID also lets LanLink exchange the short-lived MindAuth bearer for its own short-lived control-plane session. Apply the migration before distributing a Mod build that uses this login flow.
+
 ```kotlin
 val verifierBytes = ByteArray(32).also(SecureRandom()::nextBytes)
 val verifier = Base64.encodeToString(verifierBytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
