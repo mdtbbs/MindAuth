@@ -554,7 +554,8 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
   // 4. Verify redirect_uri matches a registered URI. Loopback clients may
   // register port 0 and bind a random runtime port on 127.0.0.1 or [::1].
   const redirectUris = await getRedirectUris(clientData);
-  if (!redirectUris.some(entry => redirectUriMatches(redirectUri, entry.redirect_uri))) {
+  const registeredRedirect = redirectUris.find(entry => redirectUriMatches(redirectUri, entry.redirect_uri));
+  if (!registeredRedirect) {
     throw new OAuthError(400, 'invalid_redirect', 'redirect_uri 不匹配', {
       error: 'invalid_redirect',
       description: 'redirect_uri 不匹配'
@@ -623,6 +624,7 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
     return {
       consentRequired: missingConsent,
       client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
+        application_icon_url: clientData.application_icon_url || null,
         website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type,
         ecosystem: clientData.ecosystem || 'mdtbbs',
         developer_name: developerName, owner_user_id: clientData.owner_user_id || null,
@@ -636,6 +638,7 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
     return {
       consentRequired: true,
       client: { client_id: clientData.client_id, name: clientData.name, description: clientData.description || null,
+        application_icon_url: clientData.application_icon_url || null,
         website_url: clientData.website_url || null, client_type: clientData.client_type, party_type: clientData.party_type,
         ecosystem: clientData.ecosystem || 'mdtbbs',
         developer_name: developerName, owner_user_id: clientData.owner_user_id || null,
@@ -681,21 +684,58 @@ async function authorize({ clientId, redirectUri, scope, state, codeChallenge, c
   const redirectTo = new URL(redirectUri);
   redirectTo.searchParams.set('code', code);
   if (state) redirectTo.searchParams.set('state', state);
-  return { redirectTo: redirectTo.toString() };
+  return {
+    redirectTo: redirectTo.toString(),
+    redirectType: registeredRedirect.redirect_type,
+    completion: {
+      userId: user.id,
+      account: {
+        display_name: user.display_name || user.username,
+        username: user.username,
+        avatar_url: user.avatar_url || null,
+      },
+      client: {
+        name: clientData.name,
+        application_icon_url: clientData.application_icon_url || null,
+        party_type: clientData.party_type || 'first_party',
+        ecosystem: clientData.ecosystem || 'mdtbbs',
+        developer_name: developerName,
+        developer_url: clientData.owner_user_id ? forumProfileUrl(clientData.owner_user_id) : null,
+      },
+      scopes: requested,
+    },
+  };
 }
 
 async function denyAuthorization({ clientId, redirectUri, state }) {
   if (!clientId || !redirectUri) throw new OAuthError(400, 'invalid_request', '缺少必需参数');
   const client = await lookupClient(clientId);
   const redirectUris = await getRedirectUris(client);
-  if (!redirectUris.some(entry => redirectUriMatches(redirectUri, entry.redirect_uri))) {
+  const registeredRedirect = redirectUris.find(entry => redirectUriMatches(redirectUri, entry.redirect_uri));
+  if (!registeredRedirect) {
     throw new OAuthError(400, 'invalid_redirect', 'redirect_uri 不匹配');
   }
   const destination = new URL(redirectUri);
   destination.searchParams.set('error', 'access_denied');
   destination.searchParams.set('error_description', '用户拒绝了授权请求');
   if (state) destination.searchParams.set('state', state);
-  return { redirectTo: destination.toString() };
+  let developerName = null;
+  if (client.owner_user_id) {
+    const [ownerRows] = await pool.execute('SELECT username FROM users WHERE id = ? LIMIT 1', [client.owner_user_id]);
+    developerName = ownerRows[0]?.username || null;
+  }
+  return {
+    redirectTo: destination.toString(),
+    redirectType: registeredRedirect.redirect_type,
+    client: {
+      name: client.name,
+      application_icon_url: client.application_icon_url || null,
+      party_type: client.party_type || 'first_party',
+      ecosystem: client.ecosystem || 'mdtbbs',
+      developer_name: developerName,
+      developer_url: client.owner_user_id ? forumProfileUrl(client.owner_user_id) : null,
+    },
+  };
 }
 
 // ─── Token Exchange ───────────────────────────────────────────

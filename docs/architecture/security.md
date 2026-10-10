@@ -19,6 +19,8 @@ MindAuth 是面向公网的 OAuth 2.0 SSO 认证服务，本文档面向后端�
 | 令牌泄漏/重放 | 授权码原子单次消费、refresh token 轮换 + 重放检测、PKCE S256 | [oauthIssuer.js](../../src/modules/oauth/oauthIssuer.js)、[tokenStore.js](../../src/modules/oauth/tokenStore.js) |
 | Native 设备 token 被撤销后重用 | OAuth access-token store + `native_client_sessions` 状态检查；refresh 重放撤销单设备 family | `nativeClientService.js`、`oauthIssuer.js` |
 
+Native custom-scheme 完成页使用 32-byte 随机 handoff ticket；只把 ticket 的 SHA-256 作为 Redis key，5 分钟 TTL 与 authorization code 一致。ticket 绑定已认证账户，详情请求带 session/CSRF；页面 URL fragment 立即清除，HTML DOM 不包含 authorization code。只有服务端完成原有 client/redirect URI/PKCE/state 校验后才创建 ticket，返回接口忽略浏览器提交的目标地址，只返回该 ticket 对应的已登记 custom-scheme callback。HTTPS 与 loopback 仍直接 redirect。
+
 ## 密码与凭据
 
 - 注册与改密使用 `bcrypt.hash(password, 12)`（cost=12）；登录用 `bcrypt.compare` 验证，天然兼容旧 cost=10 哈希。

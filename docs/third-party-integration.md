@@ -42,12 +42,14 @@ Confidential Client 可配置 `require_pkce`。Public Client 强制要求 PKCE�
 
 1. 客户端创建不可预测的 `state` 和 PKCE `code_verifier`。服务端应用可把它们保存在与浏览器会话绑定的服务端 session；Public Client 应在客户端内存或受保护存储中保管 verifier。
 2. 计算 `code_challenge = BASE64URL(SHA256(code_verifier))`，将浏览器重定向到 `/api/authorize`。
-3. MindAuth 要求用户登录后，把浏览器重定向到注册的回调地址，并附上一次性 `code` 和原样返回的 `state`。回调地址已有的查询参数会保留。
+3. MindAuth 要求用户登录后，把浏览器重定向到注册的回调地址，并附上一次性 `code` 和原样返回的 `state`。回调地址已有的查询参数会保留。HTTPS 与 localhost loopback 继续直接跳转；登记为 custom scheme 的 Native App 会先显示 MindAuth 授权完成页，再尝试打开同一个注册回调。客户端收到的 OAuth 参数不变。
 4. 客户端校验 `state`，然后把 `code`、`client_id`、`redirect_uri` 和 `code_verifier` POST 到 `/api/token`。只有 Confidential Client 同时提交后端 secret。
 5. 客户端用返回的 `access_token` 调用 MindFourm `/api/v1/*`；服务端网站可继续调用 `/api/userinfo` 并建立本地 session。
 
 授权码有效期为 5 分钟且只能兑换一次。`state` 应当随机、单次使用，并在回调时与发起登录的服务端会话比对。
 第三方客户端首次请求或增加尚未授权的 scope 时，MindAuth 会显示授权确认页；已登记为 `first_party` 的官方账号客户端会自动授予该客户端已批准的请求 scope。
+
+custom-scheme 完成页的返回按钮由 MindAuth 按已登记的 callback 生成，不需要客户端增加新的 callback 或修改 PKCE/state 处理。浏览器禁止自动唤起时，用户可以在完成页再次打开客户端；客户端仍应按原流程验证 `state` 并兑换一次性授权码。
 
 ## 4. Node.js / Express Confidential Client 示例
 

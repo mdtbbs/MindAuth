@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import api, { ApiError } from '@/api/client';
@@ -12,6 +12,7 @@ type ConsentInfo = {
   consent_required: boolean;
   client: {
     client_id: string; name: string; description: string | null; website_url: string | null;
+    application_icon_url: string | null;
     client_type: string; party_type: string; developer_name: string | null;
     developer_url: string | null; owner_user_id: number | null;
   };
@@ -48,13 +49,19 @@ export function OAuthAuthorizePage() {
     return value;
   }, [request]);
   const [consent, setConsent] = useState<ConsentInfo | null>(null);
-  const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [clientIconFailed, setClientIconFailed] = useState(false);
+
+  const oauthErrorPath = useCallback((code: string, description: string) => {
+    const errorParams = new URLSearchParams({ error: code, description });
+    if (request.ui_locales) errorParams.set('ui_locales', request.ui_locales);
+    return `/oauth/error?${errorParams.toString()}`;
+  }, [request.ui_locales]);
 
   useEffect(() => {
     if (authLoading) return;
-      if (!request.client_id || !request.redirect_uri) {
-      setError(t('oauth.invalidConfiguration'));
+    if (!request.client_id || !request.redirect_uri) {
+      navigate(oauthErrorPath('invalid_request', t('oauth.invalidConfiguration')), { replace: true });
       return;
     }
     if (!user) {
@@ -70,23 +77,36 @@ export function OAuthAuthorizePage() {
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setError(reason instanceof ApiError && reason.status && reason.status < 500
-          ? t('oauth.invalidConfiguration')
-          : t('oauth.unavailable'));
+        if (reason instanceof ApiError && reason.status === 401) {
+          navigate(`/login?${query.toString()}`, { replace: true });
+          return;
+        }
+        const code = reason instanceof ApiError && reason.status && reason.status < 500
+          ? reason.code || 'invalid_request'
+          : 'server_error';
+        const description = reason instanceof ApiError ? reason.message : t('oauth.unavailable');
+        navigate(oauthErrorPath(code, description), { replace: true });
       });
     return () => { active = false; };
-  }, [authLoading, user, request.client_id, request.redirect_uri, query, navigate, t]);
+  }, [authLoading, user, request.client_id, request.redirect_uri, request.ui_locales, query, navigate, t, oauthErrorPath]);
+
+  useEffect(() => { setClientIconFailed(false); }, [consent?.client.client_id]);
 
   async function decide(decision: 'approve' | 'deny') {
-    setBusy(true); setError('');
+    setBusy(true);
     try {
       const response = await api.post<{ success: boolean; redirect_to: string }>('/api/authorize/consent', { ...request, decision });
       window.location.assign(response.redirect_to);
     } catch (reason: unknown) {
-      setError(reason instanceof ApiError && reason.status && reason.status < 500
-        ? t('oauth.invalidConfiguration')
-        : t('oauth.submitFailed'));
-      setBusy(false);
+      if (reason instanceof ApiError && reason.status === 401) {
+        navigate(`/login?${query.toString()}`, { replace: true });
+        return;
+      }
+      const code = reason instanceof ApiError && reason.status && reason.status < 500
+        ? reason.code || 'invalid_request'
+        : 'server_error';
+      const description = reason instanceof ApiError ? reason.message : t('oauth.submitFailed');
+      navigate(oauthErrorPath(code, description), { replace: true });
     }
   }
 
@@ -98,11 +118,12 @@ export function OAuthAuthorizePage() {
 
   return (
     <AuthShell title={t('oauth.title')} description={t('oauth.description')}>
-      {error ? <div className="status-badge status-badge--danger" role="alert">{error}</div> : null}
       {!consent ? <p className="section-description">{t('oauth.verifying')}</p> : (
         <div className="stack oauth-consent">
           <header className="oauth-consent__app">
-            <div className="public-app-avatar">{initials}</div>
+            <div className="public-app-avatar">{consent.client.application_icon_url && !clientIconFailed
+              ? <img className="oauth-consent__app-icon" src={consent.client.application_icon_url} alt="" onError={() => setClientIconFailed(true)} />
+              : initials}</div>
             <div><h2>{consent.client.name}</h2><span className={`public-app-label ${official ? 'public-app-label--official' : ''}`}>{official ? t('oauth.official') : t('oauth.thirdParty')}</span></div>
           </header>
           <p className="oauth-consent__developer">{consent.client.developer_name ? developerProfileUrl ? <a href={developerProfileUrl} target="_blank" rel="noreferrer">{t('oauth.developerBy', { name: consent.client.developer_name })}</a> : t('oauth.developerBy', { name: consent.client.developer_name }) : t('oauth.officialProvider')}</p>
@@ -114,7 +135,7 @@ export function OAuthAuthorizePage() {
               {scopesToShow.map((scope) => (
                 <li key={scope.name}>
                   <span className="oauth-scope-icon" aria-hidden="true">{SCOPE_ICONS[scope.name] || '•'}</span>
-                  <div><strong>{t(`oauth.scope.${scope.name}`) === `oauth.scope.${scope.name}` ? scope.name : t(`oauth.scope.${scope.name}`)}</strong>{scope.sensitive ? <span className="public-scope-sensitive">{t('oauth.sensitive')}</span> : null}<p>{t(`oauth.scopeDesc.${scope.name}`) === `oauth.scopeDesc.${scope.name}` ? scope.description : t(`oauth.scopeDesc.${scope.name}`)}</p><small>{scope.name}</small></div>
+                  <div><strong>{t(`oauth.scope.${scope.name}`) === `oauth.scope.${scope.name}` ? scope.description : t(`oauth.scope.${scope.name}`)}</strong>{scope.sensitive ? <span className="public-scope-sensitive">{t('oauth.sensitive')}</span> : null}{/(?:\.write|\.upload|\.delete)$/.test(scope.name) ? <span className="public-scope-write">{t('oauth.complete.canChange')}</span> : null}<p>{t(`oauth.scopeDesc.${scope.name}`) === `oauth.scopeDesc.${scope.name}` ? scope.description : t(`oauth.scopeDesc.${scope.name}`)}</p></div>
                 </li>
               ))}
             </ul>
@@ -127,6 +148,10 @@ export function OAuthAuthorizePage() {
               {consent.client.website_url ? <div><dt>{t('oauth.website')}</dt><dd><a href={consent.client.website_url} target="_blank" rel="noreferrer">{consent.client.website_url}</a></dd></div> : null}
               {consent.client.developer_name ? <div><dt>{t('oauth.developer')}</dt><dd>{consent.client.developer_name}</dd></div> : null}
             </dl>
+          </details>
+          <details className="oauth-scope-identifiers">
+            <summary>{t('oauth.complete.scopeIdentifiers')}</summary>
+            <ul>{scopesToShow.map((scope) => <li key={scope.name}><code>{scope.name}</code></li>)}</ul>
           </details>
           <p className="section-description">{t('oauth.revokeNotice')}</p>
           <div className="oauth-consent__actions">

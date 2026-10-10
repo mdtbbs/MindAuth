@@ -104,7 +104,7 @@ Browser
 ### Frontend (`frontend/`)
 
 React 18 + Vite + TypeScript. Two entry points:
-- `frontend/index.html` → User SPA (login, register, dashboard, account settings, OAuth authorize)
+- `frontend/index.html` → User SPA (login, register, dashboard, account settings, OAuth authorize/completion/error)
 - `frontend/admin.html` → Admin SPA (dashboard, users, clients, security, settings, logs)
 
 Build output: `dist/client/` (served by Express in production).
@@ -120,6 +120,7 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | `passwordLogin` | `auth/passwordLogin.js` | Shared username/email password validation, ban/lock checks, failure counter, notifications and audit for Web and Native password login |
 | `nativeClientService` | `nativeAuth/nativeClientService.js` | First-party `mdtbbs-mindustry-mod` device sessions, native token issue/refresh/logout/me |
 | `oauthIssuer` | `oauth/oauthIssuer.js` | `authorize`, `exchangeCode`, `refresh`, `introspect`, `revoke`, `userinfo`, `userByAccessToken`, `listAuthorizations`, `revokeAuthorization`, `verify` |
+| `completionStore` | `oauth/completionStore.js` | Short-lived, SHA-256-keyed Native OAuth completion tickets (5 min) |
 | `tokenStore` | `oauth/tokenStore.js` | `storeAuthCode`, `consumeAuthCode`, `storeAccessToken`, `getAccessToken`, `getAccessTokenTtl`, `revokeAccessToken`, `revokeAccessTokensForUserClient` |
 | `clientRegistry` | `admin/clientRegistry.js` | `createClient`, `updateClient`, `rotateSecret`, `deleteClient`, `listClients`, `getClient`, `validateRedirectUri` |
 | `challengeManager` | `challenges/challengeManager.js` | `getRandomChallenge`, `verifyChallengeAnswer`, `verifyForRegistration`, `isChallengeRequired`, `listChallenges`, `createChallenge`, `updateChallenge`, `deleteChallenge` |
@@ -155,6 +156,8 @@ Each module is the **single seam** for its domain. Routes call modules; modules 
 | Endpoint | Method | Description | Standard |
 |----------|--------|-------------|----------|
 | `/authorize` | GET | Authorization endpoint | RFC 6749 |
+| `/authorize/complete-info` | POST | Browser-only OAuth completion summary; short-lived ticket + signed-in session | Internal |
+| `/authorize/complete-return` | POST | Browser-only return to the already registered custom-scheme callback | Internal |
 | `/token` | POST | Token exchange | RFC 6749 |
 | `/refresh` | POST | Token refresh | RFC 6749 |
 | `/introspect` | POST | Token validation | RFC 7662 |
@@ -275,6 +278,7 @@ Migration `009_native_client_sessions.sql` adds the official Mindustry Mod clien
 | `session:{hash}` | 24h | User session cache |
 | `admin_session:{hash}` | 24h | Admin session |
 | `authcode:{code}` | 5min | OAuth authorization code |
+| `oauthcompletion:{sha256(ticket)}` | 5min | Session-bound Native OAuth completion metadata and validated return URI |
 | `accesstoken:{token}` | 1h | OAuth access token |
 | `verify:{sha256(token)}` | 1h | Email verification token (hashed at rest) |
 | `register_email_code:{sha256(email)}` | 5min | Pending registration email code payload: `{ email, codeHash, failures }`. Code itself is stored as SHA-256, never plaintext |
@@ -388,11 +392,13 @@ Migration `009_native_client_sessions.sql` adds the official Mindustry Mod clien
 ```
 1. Third-party → GET /api/authorize?client_id=X&redirect_uri=Y&state=Z
 2. Express serves React SPA → user logs in via React frontend
-3. oauthIssuer.authorize() generates auth_code → Redirect to redirect_uri?code=ABC
+3. oauthIssuer.authorize() generates auth_code → HTTPS and loopback callbacks keep the direct redirect; registered custom-scheme callbacks pass through the localized React completion page before the same callback is opened.
 4. Third-party backend → POST /api/token with code + client_secret
 5. oauthIssuer.exchangeCode() returns: { access_token, refresh_token, user info }
 6. Refresh: POST /api/refresh with refresh_token
 ```
+
+The custom-scheme completion ticket is opaque, session-bound, stored under a SHA-256 Redis key, and expires with the 5-minute authorization-code window. The UI never receives the code in its page URL or DOM; return is resolved on demand to the exact callback already validated by `oauthIssuer`. PKCE, `state`, and registered `redirect_uri` checks remain unchanged.
 
 ## Tests (`tests/`)
 

@@ -49,6 +49,8 @@ frontend/src/
 | `/reset-password` | `ResetPasswordPage.tsx` |
 | `/verify-email` | `VerifyEmailPage.tsx` |
 | `/authorize` | `OAuthAuthorizePage.tsx`（OAuth 授权确认） |
+| `/oauth/complete` | `OAuthCompletePage.tsx`（Native custom-scheme 登录/授权完成与返回应用） |
+| `/oauth/error` | `OAuthErrorPage.tsx`（面向普通用户的 OAuth 错误页，技术信息默认折叠） |
 | `/device`、`/oauth/device` | `DeviceAuthorizationPage.tsx`（RFC 8628 设备授权）|
 | `/apps`、`/apps/:clientId` | `PublicAppsPage.tsx`（公开应用目录与详情）|
 | `/dashboard` | `DashboardPage.tsx` |
@@ -72,7 +74,7 @@ frontend/src/
 - **SecurityPage** — 邮箱验证与更换、手机号绑定、密码、社交账号关联和账户删除。
 - **SessionsPage / ActivityPage / AuthorizationsPage / NotificationsPage** — 分别管理登录设备、登录记录、OAuth 授权和通知；撤销设备/应用授权、删除账户等操作由确认对话框保护。
 - **DeveloperPage** — 创建和管理即时可用的 Public Client，包括 Redirect URI、scope、使用汇总和软删除；接入文档仍链接到 MindAuth 与 MindFourm 各自的 API 文档。
-- **OAuthAuthorizePage / DeviceAuthorizationPage / PublicAppsPage** — 分别负责用户同意、React 设备授权和公开应用目录；权限使用中文描述，新 scope 同意时突出显示新增项目。
+- **OAuthAuthorizePage / OAuthCompletePage / OAuthErrorPage / DeviceAuthorizationPage / PublicAppsPage** — 分别负责用户同意、Native App 授权完成、OAuth 错误、React 设备授权和公开应用目录；权限说明来自现有 scope registry 与四语文案，协议级 scope 标识默认折叠。
 - **`AccountPageParts.tsx`** — section、设置行、空状态、加载错误、状态标签、日期和 User-Agent 展示 helpers。
 
 ## 用户端语言与品牌上下文
@@ -80,6 +82,8 @@ frontend/src/
 `main.tsx` 在用户 SPA 提供 `I18nProvider`。当前支持 `zh-CN`、`en`、`ru`、`ja`，locale 目录由 `i18n/catalogs.ts` 与按页面拆分的 `i18n/*Catalogs.ts` 维护。解析顺序为 OAuth `ui_locales` / 显式 `?lang=`、已登录用户 `preferred_locale`、`mindauth_locale` Cookie、`Accept-Language`，最后按 Client ecosystem 回退（MDTBBS 为简体中文，其他为英语）；用户切换语言会写 Cookie，并尝试保存账户偏好。页面同步设置 `<html lang>`。
 
 登录、注册、OAuth、设备授权、账户概览、资料、安全、会话、活动、通知、授权应用、公开应用目录、开发者应用管理和主要错误状态已接入四语文案。应用使用日期和数量按当前 locale 格式化。验证码、邮箱验证和密码重置邮件优先使用账户语言，其次使用请求的 `Accept-Language`，最后回退简体中文；密码、用户名、登录设备、登录锁定和封禁通知会按账户语言生成站内文案与邮件，其余自定义通知仍保留调用方提供的内容。邮件模板会对链接、验证码和动态通知内容进行 HTML 转义。手机号绑定仍可用于安全增强和 MDTBBS 开发者资格，不是 Mindustry Club 的通用账号前置条件。
+
+OAuth 完成页和 OAuth 错误页同样使用四语文案。完成页仅服务已登记的 custom-scheme 回调；随机 ticket 通过 URL fragment 交给 SPA 后立即移除，再用同源且带 CSRF 的短期请求读取摘要或请求客户端返回地址。
 
 语言覆盖仍在完善：部分服务端错误消息、未纳入模板的账户通知和管理 SPA 尚未全部本地化。`frontend/admin.html` 管理 SPA 当前仍以简体中文为主，尚无完整的英文切换；不能据此视为 Club 管理后台双语验收通过。
 

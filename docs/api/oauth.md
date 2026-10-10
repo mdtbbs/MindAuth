@@ -56,12 +56,13 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `code_challenge_method` | Public 必填 | 必须是 `S256`；不接受 `plain` |
 | `ui_locales` | 否 | 空格分隔的 BCP 47 locale 提示，例如 `ja`、`ru en`。MindAuth 将其保留到登录、注册和授权确认页面；支持 `zh-CN`、`en`、`ru`、`ja`，不支持的值会回退。 |
 
-**响应**（均为 302 重定向，无 JSON）：
+**响应**（授权端点为 302 重定向，无 JSON）：
 
-- 已登录：`{redirect_uri}?code={code}&state={state}`（保留 redirect_uri 原有 query）
+- 已登录且 callback 是 HTTPS 或 loopback：`{redirect_uri}?code={code}&state={state}`（保留 redirect_uri 原有 query）
+- 已登录且 callback 在 registry 中标记为 `custom_scheme`：先跳至 MindAuth `/oauth/complete` 展示成功或取消后的返回页；用户代理打开客户端时仍交付同一个注册 callback 和相同的 `code` / `state`
 - 未登录：`/#/login?redirect_uri=...&client_id=...&client_name=...&ui_locales=...`（携带原 OAuth 参数和生态标识，登录/注册后续跳）
 
-**错误形态**：所有校验错误重定向到**本站错误页** `/oauth-error.html?error={code}&description={desc}`，**不会**重定向到 redirect_uri（与 RFC 6749 §4.1.2.1 不同，避免开放重定向）。
+**错误形态**：所有校验错误重定向到本站 React 错误页 `/oauth/error?error={code}&description={desc}`，技术标识与描述默认折叠；**不会**重定向到未验证的 redirect_uri（与 RFC 6749 §4.1.2.1 不同，避免开放重定向）。
 
 | error 码 | 触发条件 |
 |------|------|
@@ -75,6 +76,8 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 **特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。MindAuth 将 `party_type=first_party` 的官方客户端视为账号自有登录流程，按客户端已批准的 scope 自动授权并记录授权范围，不显示同意页；第三方客户端在用户尚未授予请求 scope 时显示同意页，已授予的 scope 不重复确认，新增 scope 时只突出显示新增权限。授权 scope 写回现有 `authorizations` 记录。
 
 用户界面语言解析顺序为 `ui_locales`、URL 显式语言、账户 `preferred_locale`、MindAuth locale cookie、`Accept-Language`、Client ecosystem 默认值，最后回退到 English。MDTBBS Client 默认 `zh-CN`；`mindustry-club` Client 默认 `en`。登录后的账户语言选择会保存到 `PUT /api/account/preferences` 的 `preferred_locale`。
+
+浏览器专用的 `POST /api/authorize/complete-info` 与 `POST /api/authorize/complete-return` 只用于 `/oauth/complete` 页面，不属于第三方 OAuth API 契约。它们要求已登录 session 和 CSRF 校验，接收 5 分钟有效的随机 handoff ticket；ticket 绑定签发授权的账户。详情端点不返回 callback code；返回端点也只解析服务端保存的、已经通过注册匹配的 custom-scheme callback。HTTPS 与 loopback 不经过完成页。
 
 ---
 

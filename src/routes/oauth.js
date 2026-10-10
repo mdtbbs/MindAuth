@@ -17,6 +17,7 @@ const { getClientIp } = require('../utils/request');
 const oauthIssuer = require('../modules/oauth/oauthIssuer');
 const oauthMetrics = require('../modules/oauth/oauthMetrics');
 const tokenStore = require('../modules/oauth/tokenStore');
+const completionStore = require('../modules/oauth/completionStore');
 const { SCOPE_DESCRIPTIONS } = require('../modules/oauth/scopes');
 const { normalizeUiLocales, appendUiLocales } = require('../utils/locale');
 
@@ -32,6 +33,7 @@ const verifyEndpointLimiter = createRateLimiter({
 // Per-IP limiters for the OAuth protocol endpoints. Credentials/codes are
 // high-entropy so brute force is impractical, but these cap abuse and probing.
 const authorizeLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_authorize' });
+const completionLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_completion' });
 const tokenLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_token' });
 const refreshLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_refresh' });
 const introspectLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_introspect' });
@@ -82,15 +84,41 @@ function handleOAuthError(res, err, context) {
   return oauthError(res, 500, 'server_error', '服务器错误');
 }
 
+function oauthErrorLocation(error, description, uiLocales) {
+  const params = new URLSearchParams({ error, description });
+  appendUiLocales(params, uiLocales);
+  return `/oauth/error?${params.toString()}`;
+}
+
+function oauthCompletionLocation(ticket, uiLocales) {
+  const params = new URLSearchParams();
+  appendUiLocales(params, uiLocales);
+  const search = params.toString();
+  return `/oauth/complete${search ? `?${search}` : ''}#ticket=${encodeURIComponent(ticket)}`;
+}
+
+function setNoStoreHeaders(res) {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Referrer-Policy', 'no-referrer');
+}
+
+function accountDisplay(user) {
+  return {
+    display_name: user?.display_name || user?.username || '',
+    username: user?.username || '',
+    avatar_url: user?.avatar_url || null,
+  };
+}
+
 // GET /authorize - Authorization endpoint for third-party redirect
 router.get('/authorize', authorizeLimiter, async (req, res) => {
+  const uiLocales = normalizeUiLocales(req.query.ui_locales);
   try {
     const {
       redirect_uri, client_id, state, scope, response_type,
-      code_challenge, code_challenge_method, ui_locales
+      code_challenge, code_challenge_method
     } = req.query;
-    const uiLocales = normalizeUiLocales(ui_locales);
-
     const sessionToken = req.cookies.session || null;
     const ipAddress = getClientIp(req);
 
@@ -129,14 +157,26 @@ router.get('/authorize', authorizeLimiter, async (req, res) => {
       return res.redirect(`/authorize?${consentParams.toString()}`);
     }
 
+    if (result.redirectType === 'custom_scheme' && result.completion) {
+      const ticket = await completionStore.createCompletion({
+        status: 'success',
+        ...result.completion,
+        redirectTo: result.redirectTo,
+      });
+      setNoStoreHeaders(res);
+      return res.redirect(oauthCompletionLocation(ticket, uiLocales));
+    }
+
     res.redirect(result.redirectTo);
   } catch (err) {
     if (err instanceof oauthIssuer.OAuthError && err.errorPageParams) {
       const { error: e, description: d } = err.errorPageParams;
-      return res.redirect(`/oauth-error.html?error=${e}&description=${encodeURIComponent(d)}`);
+      res.locals.oauthErrorCode = e;
+      return res.redirect(oauthErrorLocation(e, d, uiLocales));
     }
     console.error('Authorize error:', err);
-    res.redirect(`/oauth-error.html?error=server_error&description=${encodeURIComponent('授权失败')}`);
+    res.locals.oauthErrorCode = 'server_error';
+    res.redirect(oauthErrorLocation('server_error', '授权失败', uiLocales));
   }
 });
 
@@ -164,9 +204,51 @@ router.get('/authorize/consent-info', requireAuth, async (req, res) => {
   }
 });
 
+// Browser-only handoff endpoints. The opaque ticket stays in the URL fragment
+// on the completion page; authorization codes are returned only on demand and
+// only through the registered custom-scheme redirect stored server-side.
+router.post('/authorize/complete-info', completionLimiter, requireAuth, async (req, res) => {
+  setNoStoreHeaders(res);
+  try {
+    const completion = await completionStore.getCompletion(req.body?.ticket);
+    if (!completion || completion.userId !== req.user.id) {
+      return res.status(410).json({ success: false, error: 'invalid_request', message: '授权完成页面已过期，请重新发起登录。' });
+    }
+
+    res.json({
+      success: true,
+      status: completion.status,
+      client: completion.client,
+      account: completion.account,
+      scopes: (completion.scopes || []).filter((name) => SCOPE_DESCRIPTIONS[name]).map((name) => ({
+        name,
+        ...SCOPE_DESCRIPTIONS[name],
+      })),
+    });
+  } catch (err) {
+    console.error('OAuth completion info error:', err);
+    res.status(503).json({ success: false, error: 'temporarily_unavailable' });
+  }
+});
+
+router.post('/authorize/complete-return', completionLimiter, requireAuth, async (req, res) => {
+  setNoStoreHeaders(res);
+  try {
+    const completion = await completionStore.getCompletion(req.body?.ticket);
+    if (!completion || completion.userId !== req.user.id || typeof completion.redirectTo !== 'string') {
+      return res.status(410).json({ success: false, error: 'invalid_request', message: '应用返回链接已过期，请重新发起登录。' });
+    }
+    res.json({ success: true, redirect_to: completion.redirectTo });
+  } catch (err) {
+    console.error('OAuth completion return error:', err);
+    res.status(503).json({ success: false, error: 'temporarily_unavailable' });
+  }
+});
+
 router.post('/authorize/consent', requireAuth, async (req, res) => {
   try {
     const { decision, redirect_uri, client_id, state, scope, response_type, code_challenge, code_challenge_method } = req.body || {};
+    const uiLocales = normalizeUiLocales(req.body?.ui_locales);
     let result;
     if (decision === 'deny') {
       result = await oauthIssuer.denyAuthorization({ clientId: client_id, redirectUri: redirect_uri, state });
@@ -181,6 +263,20 @@ router.post('/authorize/consent', requireAuth, async (req, res) => {
       return oauthError(res, 400, 'invalid_request', '授权决定无效');
     }
     if (!result.redirectTo) return oauthError(res, 400, 'invalid_request', '授权流程尚未完成');
+    if (result.redirectType === 'custom_scheme') {
+      const completion = decision === 'deny'
+        ? {
+          status: 'cancelled',
+          userId: req.user.id,
+          account: accountDisplay(req.user),
+          client: result.client,
+          scopes: [],
+        }
+        : { status: 'success', ...result.completion };
+      const ticket = await completionStore.createCompletion({ ...completion, redirectTo: result.redirectTo });
+      setNoStoreHeaders(res);
+      return res.json({ success: true, redirect_to: oauthCompletionLocation(ticket, uiLocales) });
+    }
     res.json({ success: true, redirect_to: result.redirectTo });
   } catch (err) {
     handleOAuthError(res, err, 'OAuth consent decision error');

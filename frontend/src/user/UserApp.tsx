@@ -5,6 +5,8 @@ import { ResetRequestPage } from './pages/ResetRequestPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
+import { OAuthCompletePage } from './pages/OAuthCompletePage';
+import { OAuthErrorPage } from './pages/OAuthErrorPage';
 import { DeviceAuthorizationPage } from './pages/DeviceAuthorizationPage';
 import { PublicAppsPage } from './pages/PublicAppsPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -34,6 +36,8 @@ export function UserApp() {
         <Route path="/qq-register" element={<QqRegisterPage />} />
         <Route path="/social-register" element={<QqRegisterPage />} />
         <Route path="/authorize" element={<OAuthAuthorizePage />} />
+        <Route path="/oauth/complete" element={<OAuthCompletePage />} />
+        <Route path="/oauth/error" element={<OAuthErrorPage />} />
         <Route path="/device" element={<DeviceAuthorizationPage />} />
         <Route path="/oauth/device" element={<DeviceAuthorizationPage />} />
         <Route path="/apps" element={<PublicAppsPage />} />

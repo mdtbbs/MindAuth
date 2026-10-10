@@ -56,7 +56,7 @@ OAuth 2.0 / OIDC 全部业务逻辑：授权码签发、令牌交换、刷新轮
 | 导出 | 说明 |
 |------|------|
 | `OAuthError` | 携带 `status`/`error`/`errorDescription`/`errorPageParams` 的错误类 |
-| `authorize({ clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, responseType, sessionToken, ipAddress })` | 校验参数并签发授权码；未登录返回 `{ loginRedirect: true, client }`，成功返回 `{ redirectTo }` |
+| `authorize({ clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod, responseType, sessionToken, ipAddress })` | 校验参数并签发授权码；未登录返回 `{ loginRedirect: true, client }`，成功返回已验证回调、客户端/账号展示摘要和授权 scope |
 | `exchangeCode({ code, clientId, clientSecret, redirectUri, codeVerifier })` | 授权码换令牌：验客户端、原子消费码、PKCE 校验 |
 | `refresh({ refreshToken, clientId, clientSecret })` | 刷新令牌轮换（MySQL 事务 + `SELECT FOR UPDATE`） |
 | `issueNativeTokens({ userId, clientId, accessClientId, nativeSessionId, scope })` / `refreshNative(...)` | Native Bearer token 签发及设备绑定的 refresh rotation；复用相同 token store |
@@ -71,6 +71,12 @@ OAuth 2.0 / OIDC 全部业务逻辑：授权码签发、令牌交换、刷新轮
 依赖：`tokenStore`、`sessionManager`；MySQL `clients`、`refresh_tokens`、`authorizations`、`users`、`login_logs`、`user_fields`/`user_field_values`；utils `crypto`、`token`、`datetime`、`phone`。
 
 约束：PKCE 只接受 `S256`；client_secret 先按 `client_id` 取行再 `timingSafeCompare`（避免 SQL 等值比较时序泄漏）；refresh token SHA-256 哈希落库，轮换在事务行锁内完成。OAuth refresh 重放维持原 user/client 撤销策略；Native refresh 重放只撤销关联 native session。OAuth scope 白名单由 `src/modules/oauth/scopes.js` 维护；官方 Native 新登录固定使用 `openid profile game_content game_content.saves.read game_content.saves.write game_content.saves.delete`，refresh rotation 保留已存 scope，所以旧 Native 会话不会自动继承这些权限；授权码 5min、access token 1h、refresh token 30 天。
+
+授权路由仅对 registry 中 `redirect_type=custom_scheme` 的成功或取消结果创建 completion ticket；HTTPS 与 loopback 仍直接交付。`completionStore` 用 Redis 保存 SHA-256 ticket key 和 5 分钟 TTL，展示接口按当前登录 session 绑定；返回接口仅解析服务器保存的回调地址，不接受浏览器提交的 redirect target。
+
+### completionStore（`src/modules/oauth/completionStore.js`）
+
+短期 OAuth Native 完成页交接状态存储。只暴露随机 ticket，Redis 键存 ticket 的 SHA-256；记录包含签发后已构造的回调地址及用于页面展示的账号、客户端和 scope 摘要，5 分钟后自动过期。路由验证当前 session 对应的 user id，并仅把服务器保存的返回 URI 用于启动 custom-scheme 客户端。
 
 ### tokenStore（`src/modules/oauth/tokenStore.js`）
 
