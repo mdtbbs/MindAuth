@@ -16,7 +16,7 @@ interface ChallengeQuestion {
   question: string;
 }
 
-// Mirrors backend rules (utils/validation.js): 8+ chars, upper + lower + digit
+// Mirrors backend rules (utils/validation.js): 8+ chars, one letter + one digit
 function validateUsername(v: string, t: (key: string) => string): string {
   if (!v.trim()) return t('register.usernameRequired');
   if (v.trim().length < 3) return t('register.usernameMin');
@@ -30,7 +30,7 @@ function validateEmail(v: string, t: (key: string) => string): string {
 function validatePassword(v: string, t: (key: string) => string): string {
   if (!v) return t('register.passwordRequired');
   if (v.length < 8) return t('register.passwordMin');
-  if (!(/[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v))) return t('register.passwordComplexity');
+  if (!(/[A-Za-z]/.test(v) && /\d/.test(v))) return t('register.passwordComplexity');
   return '';
 }
 function validateEmailCode(v: string, t: (key: string) => string): string {

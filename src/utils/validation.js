@@ -22,11 +22,10 @@ function isValidEmail(email) {
 }
 
 /**
- * Password validation (enhanced)
+ * Password validation
  * Requirements:
  * - Minimum 8 characters
- * - At least one uppercase letter
- * - At least one lowercase letter
+ * - At least one ASCII letter
  * - At least one digit
  * @param {string} password - Password to validate
  * @returns {boolean} True if password meets requirements
@@ -36,11 +35,10 @@ function isValidPassword(password) {
     return false;
   }
 
-  const hasUppercase = /[A-Z]/.test(password);
-  const hasLowercase = /[a-z]/.test(password);
+  const hasLetter = /[A-Za-z]/.test(password);
   const hasDigit = /[0-9]/.test(password);
 
-  return hasUppercase && hasLowercase && hasDigit;
+  return hasLetter && hasDigit;
 }
 
 /**
@@ -55,11 +53,8 @@ function getPasswordValidationError(password) {
   if (password.length < 8) {
     return '密码至少需要8个字符';
   }
-  if (!/[A-Z]/.test(password)) {
-    return '密码需要包含大写字母';
-  }
-  if (!/[a-z]/.test(password)) {
-    return '密码需要包含小写字母';
+  if (!/[A-Za-z]/.test(password)) {
+    return '密码需要包含字母';
   }
   if (!/[0-9]/.test(password)) {
     return '密码需要包含数字';

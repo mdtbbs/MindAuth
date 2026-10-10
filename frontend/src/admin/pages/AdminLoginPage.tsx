@@ -140,7 +140,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="密码 (8+字符, 含大小写和数字)"
+                placeholder="输入管理员密码"
               />
               <Button type="submit" fullWidth loading={loading}>
                 创建管理员

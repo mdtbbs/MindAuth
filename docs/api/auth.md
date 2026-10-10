@@ -58,7 +58,7 @@ QQ 继续使用既有 `/api/auth/qq`、`/api/auth/qq/callback` 与 `/api/auth/qq
 |------|------|------|------|
 | `username` | string | 是 | 2–50 字符，仅允许字母、数字、下划线、连字符及中日文字符 |
 | `email` | string | 是 | 合法邮箱格式 |
-| `password` | string | 是 | 至少 8 字符，须含大写字母、小写字母和数字 |
+| `password` | string | 是 | 至少 8 字符，须含至少一个英文字母和一个数字 |
 | `email_code` | string | 是 | 6 位数字验证码，由 `/api/register/send-code` 发送到邮箱 |
 | `challenge_id` | number | 条件必填 | 题库中存在启用的问答题时必填（先经 `GET /api/challenge/random` 获取） |
 | `challenge_answer` | string | 条件必填 | 问答题答案（比对时 trim + 小写化） |
@@ -359,7 +359,7 @@ GET /logout?redirect_uri=https%3A%2F%2Fevil.example.com%2Fsteal&client_id=forum
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `token` | string | 是 | 邮件链接中的原始重置令牌 |
-| `new_password` | string | 是 | 新密码（至少 8 字符，须含大写、小写字母和数字） |
+| `new_password` | string | 是 | 新密码（至少 8 字符，须含至少一个英文字母和一个数字） |
 
 成功响应：
 

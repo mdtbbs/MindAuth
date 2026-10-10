@@ -37,7 +37,7 @@ MindAuth 账户自服务域 API 参考，覆盖账户安全、会话管理、手
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |------|------|------|------|------|
 | `old_password` | body | string | 是 | 当前密码 |
-| `new_password` | body | string | 是 | 新密码，须通过 `isValidPassword` 校验（8 位以上 + 复杂度） |
+| `new_password` | body | string | 是 | 新密码，至少 8 位，且含至少一个英文字母和一个数字 |
 
 成功响应：
 

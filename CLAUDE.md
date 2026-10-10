@@ -341,7 +341,7 @@ Migration `009_native_client_sessions.sql` adds the official Mindustry Mod clien
 | File | Functions |
 |------|-----------|
 | `token.js` | `generateToken()` (32 bytes), `generateShortToken()` (16 bytes), `hashToken()` (SHA-256) |
-| `validation.js` | `isValidEmail`, `isValidPassword` (rules from `system_config`: `password_min_length` default 6, `password_require_complexity` default off), `getPasswordValidationError`, `isValidUsername`, `getUsernameValidationError`, `escapeHtml` |
+| `validation.js` | `isValidEmail`, `isValidPassword` (8+ characters, at least one ASCII letter and one digit), `getPasswordValidationError`, `isValidUsername`, `getUsernameValidationError`, `escapeHtml` |
 | `email.js` | `sendEmail`, `sendVerificationEmail`, `sendPasswordResetEmail` |
 | `crypto.js` | `timingSafeCompare` |
 | `request.js` | `getClientIp` (unconditional CDN-header extraction; priority: `ali-real-client-ip` → `x-real-ip` → `cf-connecting-ip` → `x-forwarded-for[0]` → socket peer; header values accept IPv4/IPv6, ports and brackets stripped, `::ffff:` unmapped), `normalizeIpCandidate` |
