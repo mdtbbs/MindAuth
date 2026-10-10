@@ -105,10 +105,26 @@ function createRateLimiter(options = {}) {
   };
 }
 
+/**
+ * Reset a rate-limit counter for an IP.
+ *
+ * A `keyPrefix` may be shared by several limiter shapes, so we delete every
+ * key the limiter family could have written:
+ *   - `${prefix}:${ip}`                    (createRateLimiter)
+ *   - `${prefix}:${clientType}:${ip}`      (createClientAwareRateLimiter)
+ *
+ * This matters for login: the success path resets `${prefix}` while the
+ * limiter actually counts against `${prefix}:default:${ip}`. Deleting only
+ * the first form left the real counter untouched, so a user who logged in
+ * successfully was still 429'd for the rest of the window.
+ *
+ * @param {string} ip
+ * @param {string} keyPrefix
+ */
 async function resetRateLimit(ip, keyPrefix) {
   if (!keyPrefix) throw new Error('resetRateLimit requires the keyPrefix of the limiter to reset');
-  const key = `${keyPrefix}:${ip}`;
-  await client.del(key);
+  const keys = [`${keyPrefix}:${ip}`, `${keyPrefix}:default:${ip}`, `${keyPrefix}:mod:${ip}`];
+  await Promise.all(keys.map(k => client.del(k).catch(() => {})));
 }
 
 async function getRateLimitStatus(ip, keyPrefix) {
@@ -123,17 +139,39 @@ async function getRateLimitStatus(ip, keyPrefix) {
 }
 
 /**
- * 检测客户端类型
+ * Client type detection for client-aware limiters.
+ *
+ * SECURITY: `X-Client-Type` and the User-Agent are both attacker-controlled
+ * request headers, so they must never be the sole reason a client gets a
+ * *looser* budget — otherwise one extra header multiplies the brute-force
+ * budget for every credential-stuffing run at zero cost (5 → 20 attempts).
+ *
+ * A client is therefore treated as `mod` only when it presents the shared
+ * secret that the Mod/launcher builds ship with (`X-Client-Key`). Clients
+ * that omit the secret keep the strict default budget. The User-Agent alone
+ * proves nothing and is only used as a *hint* for logging/metrics.
+ *
  * @param {Express.Request} req
  * @returns {'default' | 'mod'}
  */
 function detectClientType(req) {
-  // 显式声明
-  if (req.headers['x-client-type'] === 'mod') return 'mod';
-  // User-Agent 自动识别
-  const ua = req.headers['user-agent'] || '';
-  if (/MindustryMod|BackupSave|LanLink/i.test(ua)) return 'mod';
-  return 'default';
+  if (req.headers['x-client-type'] !== 'mod') return 'default';
+
+  const expected = clientAwareSecret();
+  const presented = req.headers['x-client-key'];
+  if (!expected || typeof presented !== 'string') return 'default';
+  // Timing-safe compare; length mismatch already returns false internally.
+  const { timingSafeCompare } = require('../utils/crypto');
+  return timingSafeCompare(presented, expected) ? 'mod' : 'default';
+}
+
+/**
+ * Shared secret expected in `X-Client-Key` for the looser `mod` budget.
+ * Read lazily so tests and deployments can set the env var at any time.
+ * @returns {string}
+ */
+function clientAwareSecret() {
+  return process.env.CLIENT_AWARE_RATE_LIMIT_KEY || '';
 }
 
 /**
@@ -239,4 +277,4 @@ function createClientAwareRateLimiter(options = {}) {
   };
 }
 
-module.exports = { createRateLimiter, createClientAwareRateLimiter, resetRateLimit, getRateLimitStatus };
+module.exports = { createRateLimiter, createClientAwareRateLimiter, resetRateLimit, getRateLimitStatus, detectClientType };
