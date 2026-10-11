@@ -43,6 +43,9 @@ const revokeLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, 
 const deviceCodeLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_code' });
 const deviceTokenLimiter = createRateLimiter({ maxAttempts: 60, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_token' });
 const deviceApproveLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_approve' });
+// The preview endpoint guesses user codes; without a limiter it was the one
+// device-flow route an attacker could hammer to enumerate valid codes.
+const deviceInfoLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 60 * 1000, keyPrefix: 'ratelimit:oauth_device_info' });
 
 // Standard RFC 6749 error response
 function oauthError(res, statusCode, error, description) {
@@ -495,7 +498,7 @@ router.get('/device/verify', (req, res) => {
   res.redirect(`/device${userCode ? `?user_code=${encodeURIComponent(userCode)}` : ''}`);
 });
 
-router.get('/device/info', requireAuth, async (req, res) => {
+router.get('/device/info', requireAuth, deviceInfoLimiter, async (req, res) => {
   try {
     const userCode = typeof req.query.user_code === 'string' ? req.query.user_code.trim().toUpperCase() : '';
     if (!userCode) return res.status(400).json({ success: false, message: '请输入设备页面显示的用户码。' });

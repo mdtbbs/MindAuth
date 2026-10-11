@@ -60,3 +60,39 @@ test('_ipToLong still parses IPv4 (backward compat)', () => {
   assert.equal(_ipToLong('0.0.0.0'), 0);
   assert.equal(_ipToLong('255.255.255.255'), 4294967295);
 });
+
+// ─── Degraded-mode reporting ─────────────────────────────────
+
+test('getEnforcementStatus reports degraded after a failed lookup', async () => {
+  const matcher = require('../../src/modules/security/ipBanMatcher');
+  // A Redis/DB error inside isBanned must not throw, but must be visible to
+  // health checks — otherwise bans stop applying with no signal anywhere.
+  const { client: redisClient } = require('../../src/redis');
+  const origGet = redisClient.get;
+  redisClient.get = async () => { throw new Error('redis down'); };
+  try {
+    const result = await matcher.isBanned('203.0.113.1');
+    assert.equal(result.banned, false, 'fails open');
+    const status = matcher.getEnforcementStatus();
+    assert.equal(status.degraded, true);
+    assert.match(status.reason, /redis down/);
+  } finally {
+    redisClient.get = origGet;
+  }
+});
+
+test('a successful ban-cache refresh clears the degraded marker', async () => {
+  const matcher = require('../../src/modules/security/ipBanMatcher');
+  const { client: redisClient } = require('../../src/redis');
+  const origGet = redisClient.get;
+  redisClient.get = async () => { throw new Error('redis down'); };
+  try {
+    await matcher.isBanned('203.0.113.2');
+    assert.equal(matcher.getEnforcementStatus().degraded, true);
+  } finally {
+    redisClient.get = origGet;
+  }
+
+  await matcher.refreshCache();
+  assert.equal(matcher.getEnforcementStatus().degraded, false);
+});

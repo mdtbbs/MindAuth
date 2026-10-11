@@ -194,11 +194,11 @@ OAuth 完成页和 OAuth 错误页同样使用四语文案。完成页仅服务�
 这三个页面的样式与主题脚本由 `public/standalone.css` + `public/standalone.js` 自持，
 并在 `src/app.js` 的 `LEGACY_ASSETS` 白名单里放行；改色时需与 `design/tokens.css` 同步。
 
-## 旧版 vanilla SPA（勿动）
+## 旧版 vanilla SPA（已删除）
 
-`public/js/` 下保留着迁移前的 vanilla JS SPA（`main.js`、`admin.js`、`router.js`、`state.js`、`templates.js`、`handlers.js`、`auth.js`、`common.js`、`shared-loader.js`、`utils.js`、`dashboard.js`），**代码未删除但已不参与任何页面**：
+迁移前的 vanilla JS SPA（`public/js/*.js`）、`public/index.html`、`public/admin.html` 与 `public/style.css` **已删除** —— 它们不参与任何页面，旧页面引用的 `/style.css` 也已随 `public/style.css` 一起消失。当前 `public/` 只保留白名单静态页与 `standalone.*`：
 
-- **LEGACY_FILES 白名单隔离**（`src/app.js`）：不再对 `public/` 整体 `express.static`，仅允许 GET 白名单内 4 个文件：`/error.html`、`/oauth-error.html`、`/robots.txt`、`/docs.html`，外加 `LEGACY_ASSETS` 放行的 `/standalone.css`、`/standalone.js`（见上文「独立静态页」）。这防止 `public/index.html` / `public/admin.html` 遮蔽 React 构建产物，也使 `public/js/*` 无法经 HTTP 访问。
+- **LEGACY_FILES 白名单隔离**（`src/app.js`）：不对 `public/` 整体 `express.static`，仅允许 GET 白名单内 4 个文件：`/error.html`、`/oauth-error.html`、`/robots.txt`、`/docs.html`，外加 `LEGACY_ASSETS` 放行的 `/standalone.css`、`/standalone.js`（见上文「独立静态页」，`public/*.html` 已改引 `standalone.css`）。这防止任何遗留文件遮蔽 React 构建产物。
 - **防回归测试**：`tests/specs/build/no-legacy-deps.spec.js`（Playwright）断言用户/管理页面加载期间不请求 `/js/*.js`、`/shared-styles/*`、`/templates/*` 等旧路径，生产 HTML 源码不含旧引用，同时验证白名单文件仍可访问、`/assets/*` 带 1 年 immutable 缓存头。
 - **开发约定**：不得给旧 SPA 新增功能或引用；新功能一律进 `frontend/src/`。
 

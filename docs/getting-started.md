@@ -107,7 +107,7 @@ Seed 幂等，可重复启动；已存在的记录不会被覆盖。
 | `src/config/` | `index.js` 环境变量集中读取；`validate.js` 启动校验 |
 | `src/utils/` | token、validation、email、crypto、cleanup 等工具 |
 | `frontend/` | React 18 + Vite + TS，双入口 `index.html`（用户）/ `admin.html`（管理），源码在 `frontend/src/` |
-| `public/` | 静态文件与 `uploads/`；`public/js/` 为旧版 SPA 遗留（见下文常见坑） |
+| `public/` | 静态文件与 `uploads/`；仅 `error.html` / `oauth-error.html` / `docs.html` 等白名单页面（见下文常见坑） |
 | `tests/` | `unit/`、`integration/`、`specs/`（Playwright E2E）、`fixtures/`、`helpers/` |
 
 更完整的架构说明见 [architecture/overview.md](architecture/overview.md)。
@@ -146,6 +146,6 @@ npm run verify     # lint + typecheck + build 一条龙
 - **数据库不存在**：迁移只建表不建库，`Unknown database 'mindauth'` 说明忘了第 2 步。
 - **限流 keyPrefix 必须唯一**：新增 rate limiter 时必须给独立的 `keyPrefix`（见 `src/config/index.js` 的 rateLimit 配置），否则不同端点会互相消耗/重置对方的配额——这是硬性约定。
 - **本地反代下 IP 全是代理 IP**：MindAuth 已改为无条件直读 CDN header（`ali-real-client-ip` → `x-real-ip` → `cf-connecting-ip` → `x-forwarded-for[0]` → socket）。本地调试时若仍看到代理 IP，是 nginx 没覆写 header（确保 `proxy_set_header X-Real-IP $remote_addr;` 用覆盖语义），或客户端能绕过反代直连 4001（防火墙需限制为只允许反代 IP）。
-- **`public/js/` 是旧版 SPA 遗留**：当前前端在 `frontend/`（Vite 构建到 `dist/client/`）。不要给 `public/js/` 下的旧文件加功能或修 bug。
+- **前端在 `frontend/`**（Vite 构建到 `dist/client/`）。旧版 vanilla SPA（`public/js/`、`public/index.html`、`public/admin.html`、`public/style.css`）已删除；新增页面请改 `frontend/src/`。
 - **生产环境启动强校验**：`NODE_ENV=production` 时 `src/config/validate.js` 会直接拒绝启动：`ADMIN_SECRET` 少于 32 字符、`BASE_URL` 指向 localhost、`ALLOWED_ORIGINS=*`、`USE_MEMORY_REDIS=1` 均为致命错误。开发环境同类问题只 warn，容易在部署时才暴露。
 - **改完前端页面没变化**：Express 服务的是 `dist/client/` 的构建产物，直连 4001 时需重新 `npm run build`；或改用 5173 的 Vite dev server。

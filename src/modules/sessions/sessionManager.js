@@ -15,6 +15,7 @@
 
 const crypto = require('crypto');
 const { pool } = require('../../db');
+const registrationPolicy = require('../config/registrationPolicy');
 const { client } = require('../../redis');
 const { parseDeviceInfo } = require('../../utils/deviceInfo');
 const tokenStore = require('../oauth/tokenStore');
@@ -22,10 +23,10 @@ const tokenStore = require('../oauth/tokenStore');
 // ─── Constants ────────────────────────────────────────────────
 
 const SESSION_CACHE_TTL = 86400;           // 24 h Redis cache
-const SESSION_LIFETIME_MS = 30 * 86400000; // 30 days
 const ADMIN_SESSION_TTL = 86400;           // 24 h Redis cache
 const ADMIN_SESSION_LIFETIME_MS = 86400000; // 1 day
 const TOUCH_THROTTLE_S = 300;              // 5 min between last_active_at updates
+const BAN_RECHECK_INTERVAL_S = 60;         // 1 min bound on cached ban-state staleness
 
 // Admin roles (must match ROLE_PERMISSIONS keys in requireAdmin)
 const ADMIN_ROLES = ['admin', 'super_admin', 'user_admin', 'security_admin', 'config_admin', 'readonly_admin'];
@@ -53,7 +54,11 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
   const rawToken = generateRawToken();
   const tokenHash = hashToken(rawToken);
   const deviceInfo = parseDeviceInfo(userAgent);
-  const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS);
+  // Lifetime is admin-configurable (`session_lifetime_days`); the constant is
+  // the fallback when the setting is missing or unreadable.
+  const lifetimeDays = await registrationPolicy.getSessionLifetimeDays();
+  const lifetimeMs = lifetimeDays * 86400000;
+  const expiresAt = new Date(Date.now() + lifetimeMs);
 
   // 1. Insert into MySQL (durable store) — token_hash stored, never raw token.
   // expires_at uses DB time (NOW()) so SQL-side expiry checks are consistent
@@ -61,7 +66,7 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
   const [result] = await pool.execute(
     `INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, expires_at)
      VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))`,
-    [userId, tokenHash, ipAddress || null, (userAgent || '').slice(0, 500), deviceInfo, Math.floor(SESSION_LIFETIME_MS / 1000)]
+    [userId, tokenHash, ipAddress || null, (userAgent || '').slice(0, 500), deviceInfo, Math.floor(lifetimeMs / 1000)]
   );
   const sessionId = result.insertId;
 
@@ -81,10 +86,48 @@ async function createUserSession({ userId, ipAddress, userAgent, remember }) {
   const cachePayload = { ...userRows[0], session_id: sessionId, session_expires_at: expiresAt.toISOString() };
   await client.setEx(`session:${tokenHash}`, SESSION_CACHE_TTL, JSON.stringify(cachePayload));
 
-  // 4. Add to per-user index set (for bulk invalidation without SCAN)
-  await client.sAdd(`sessions_by_user:${userId}`, String(sessionId));
+  // 4. Add to per-user index set (for bulk invalidation without SCAN).
+  //    The set is pruned by revokeAllUserSessions, but give it a TTL as a
+  //    backstop so a crash between writes cannot leave it growing forever.
+  const indexKey = `sessions_by_user:${userId}`;
+  await client.sAdd(indexKey, String(sessionId));
+  // TTL outlives the session itself (30 days) by one cache window, so the
+  // set is always available while any of its sessions can still be revoked.
+  await client.expire(indexKey, Math.ceil(lifetimeMs / 1000) + SESSION_CACHE_TTL).catch(() => {});
 
   return { token: rawToken, expiresAt, sessionId };
+}
+
+/**
+ * Throttled ban re-check for cached user sessions.
+ *
+ * Returns false when the account is missing or actively banned. The DB is
+ * queried at most once per `BAN_RECHECK_INTERVAL_S`, so the session cache
+ * still absorbs the per-request load.
+ *
+ * @param {number} userId
+ * @returns {Promise<boolean>} true when the session may continue
+ */
+async function isBannedFresh(userId) {
+  const throttleKey = `session_ban_check:${userId}`;
+  try {
+    if (await client.get(throttleKey)) return true;
+  } catch { /* Redis down: fall through to the DB check */ }
+
+  const [rows] = await pool.execute(
+    'SELECT ban_status, ban_expires_at FROM users WHERE id = ?',
+    [userId]
+  );
+  const user = rows[0];
+  if (!user) return false;
+  const banned = user.ban_status === 'banned'
+    && (!user.ban_expires_at || new Date(user.ban_expires_at) > new Date());
+  if (banned) return false;
+
+  try {
+    await client.setEx(throttleKey, BAN_RECHECK_INTERVAL_S, '1');
+  } catch { /* best effort — a Redis miss just means we check again next time */ }
+  return true;
 }
 
 /**
@@ -119,6 +162,17 @@ async function authenticateUserSession(rawToken) {
       }
       // Sanity check: must have phone_verified field (guards against stale/malformed cache)
       if (Object.prototype.hasOwnProperty.call(parsed, 'phone_verified')) {
+        // Re-check the ban state against MySQL on a throttle. The cache lives
+        // up to 24 h; a ban applied through any path that misses
+        // revokeAllUserSessions would otherwise leave the account usable on
+        // every requireAuth endpoint for a full day. Admin sessions already
+        // re-check the DB per request — this gives user sessions the same
+        // guarantee for the one field where staleness actually matters,
+        // bounded to BAN_RECHECK_INTERVAL_S instead of the full cache TTL.
+        if (!(await isBannedFresh(parsed.id))) {
+          await client.del(`session:${tokenHash}`).catch(() => {});
+          return null;
+        }
         return {
           user: parsed,
           session: { id: parsed.session_id },

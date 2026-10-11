@@ -99,8 +99,8 @@ async function list(userId, options = {}) {
     query += ' AND is_read = 0';
   }
 
-  query += ' ORDER BY created_at DESC';
-  const [rows] = await pool.query(`${query} LIMIT ${limit} OFFSET ${offset}`, params);
+  query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  const [rows] = await pool.query(query, [...params, limit, offset]);
 
   const [countRows] = await pool.execute(
     `SELECT COUNT(*) as count FROM user_notifications WHERE user_id = ?${unreadOnly ? ' AND is_read = 0' : ''}`,

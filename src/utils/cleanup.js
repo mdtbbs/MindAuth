@@ -76,7 +76,38 @@ async function cleanupExpiredData() {
       [auditCutoff]
     );
 
-    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, cleared ${refreshRecoveryResult.affectedRows} expired refresh recovery responses, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${regCodeResult.affectedRows} registration_codes, ${userAuditResult.affectedRows} user_audit_logs from MySQL`);
+    // Native auth tables: all four carry `expires_at` and none had a cleanup
+    // job, so they grew without bound (and they hold phone-number hashes and
+    // code digests). Deletes cascade from native_auth_transactions.
+    const [nativeTxResult] = await pool.execute(
+      'DELETE FROM native_auth_transactions WHERE expires_at < ?',
+      [now]
+    );
+    const [nativeCodeResult] = await pool.execute(
+      'DELETE FROM native_authorization_codes WHERE expires_at < ?',
+      [now]
+    );
+    // Challenges are removed explicitly: a consumed-but-unexpired row would
+    // otherwise outlive its transaction by the remaining TTL.
+    const [nativeSmsResult] = await pool.execute(
+      'DELETE FROM native_sms_challenges WHERE expires_at < ?',
+      [now]
+    );
+    const [nativePhoneResult] = await pool.execute(
+      'DELETE FROM native_phone_challenges WHERE expires_at < ?',
+      [now]
+    );
+
+    // Device sessions for the Mod: revoked sessions older than 30 days and
+    // sessions untouched for 90 days are no longer needed for revocation or
+    // "recent devices" display.
+    const [nativeSessionResult] = await pool.execute(
+      `DELETE FROM native_client_sessions
+       WHERE (revoked_at IS NOT NULL AND revoked_at < DATE_SUB(NOW(), INTERVAL 30 DAY))
+          OR (revoked_at IS NULL AND last_active_at < DATE_SUB(NOW(), INTERVAL 90 DAY))`
+    );
+
+    console.log(`Cleanup completed: removed ${result.affectedRows} refresh_tokens, cleared ${refreshRecoveryResult.affectedRows} expired refresh recovery responses, ${smsResult.affectedRows} sms_audit_logs, ${sessionResult.affectedRows} expired sessions, ${auditResult.affectedRows} audit_logs, ${emailTokenResult.affectedRows} email_tokens, ${regCodeResult.affectedRows} registration_codes, ${userAuditResult.affectedRows} user_audit_logs, ${nativeTxResult.affectedRows} native_transactions, ${nativeCodeResult.affectedRows} native_codes, ${nativeSmsResult.affectedRows} native_sms_challenges, ${nativePhoneResult.affectedRows} native_phone_challenges, ${nativeSessionResult.affectedRows} native_sessions from MySQL`);
 
     // Note: auth_codes, admin_sessions, password_reset_tokens, email_verification_tokens
     // are stored in Redis and cleaned automatically via TTL

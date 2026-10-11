@@ -36,6 +36,14 @@ const { getClientIp } = require('../utils/request');
 const CODE_TTL = 300; // 5 minutes
 const MAX_VERIFY_FAILURES = 5;
 const EMAIL_COOLDOWN_MS = 60 * 1000; // 1 minute per-email cooldown
+// After a failed send the caller waits this long before retrying — long
+// enough that a failure loop cannot be used as an unbounded resend pump.
+const SMTP_FAILURE_COOLDOWN_SECONDS = 10;
+// Bounds the *volume* sent to one address. The 1-minute cooldown only caps
+// the burst rate: an attacker rotating IPs (and deliberately failing SMTP to
+// reset the cooldown) could still send ~60 mails/hour to a chosen address.
+const EMAIL_HOURLY_MAX = 5;
+const EMAIL_HOURLY_WINDOW_SECONDS = 3600;
 const isProduction = process.env.NODE_ENV === 'production';
 
 // Per-IP rate limit (3 per 10 min) — matches config.rateLimit.registerSendCode.
@@ -44,6 +52,7 @@ const sendIpLimiter = createRateLimiter(config.rateLimit.registerSendCode);
 // Per-email cooldown: stored in Redis with a dedicated key namespace.
 // Ensures the same address cannot be spammed even from different IPs.
 const EMAIL_COOLDOWN_PREFIX = 'register_email_cooldown:';
+const EMAIL_HOURLY_PREFIX = 'register_email_hourly:';
 
 function emailKey(email) {
   return hashToken(email.toLowerCase().trim());
@@ -120,6 +129,25 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
       });
     }
 
+    // 2b. Per-email hourly quota. Counted before generating a code so a
+    //     burst of requests cannot slip through on cooldown resets.
+    const hourlyKey = `${EMAIL_HOURLY_PREFIX}${emailKey(email)}`;
+    let hourlyCount;
+    try {
+      hourlyCount = await client.incr(hourlyKey);
+      if (hourlyCount === 1) await client.expire(hourlyKey, EMAIL_HOURLY_WINDOW_SECONDS);
+    } catch {
+      hourlyCount = 1; // Redis down: the per-IP limiter still applies
+    }
+    if (hourlyCount > EMAIL_HOURLY_MAX) {
+      return res.status(429).json({
+        success: false,
+        code: 'EMAIL_HOURLY_LIMIT',
+        retry_after_seconds: EMAIL_HOURLY_WINDOW_SECONDS,
+        message: '该邮箱请求验证码过于频繁，请稍后再试',
+      });
+    }
+
     // 3. Generate code + store in Redis (primary) and MySQL (fallback).
     //    We store the code HASH, never the plaintext. The register endpoint
     //    hashes the presented code and compares.
@@ -143,7 +171,12 @@ router.post('/send-code', sendIpLimiter, async (req, res) => {
       try {
         await pool.execute('DELETE FROM registration_email_codes WHERE email_hash = ?', [eHash]);
       } catch {}
-      await client.del(cooldownKey).catch(() => {});
+      // Shorten the cooldown instead of clearing it. Clearing it turned a
+      // deliberately-triggered SMTP failure into an unlimited resend loop
+      // (each attempt resets the wait), and the per-email hourly quota was
+      // the only thing backstopping that. A retry after 10 s still covers
+      // the legitimate "mail server hiccup" case.
+      await client.set(cooldownKey, '1', 'EX', SMTP_FAILURE_COOLDOWN_SECONDS).catch(() => {});
       if (sendErr.message && sendErr.message.includes('邮件服务未配置')) {
         return res.status(503).json({
           success: false,

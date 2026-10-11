@@ -4,10 +4,11 @@ const bcrypt = require('bcrypt');
 const { pool, transaction, isDuplicateError } = require('../db');
 const { client } = require('../redis');
 const { hashToken } = require('../utils/token');
-const { isValidEmail, isValidPassword, isValidUsername, getPasswordValidationError } = require('../utils/validation');
+const { isValidEmail, isValidUsername } = require('../utils/validation');
 const { getClientIp } = require('../utils/request');
 const requireAuth = require('../middleware/requireAuth');
 const { createRateLimiter, createClientAwareRateLimiter, resetRateLimit } = require('../middleware/rateLimit');
+const { timingSafeCompare } = require('../utils/crypto');
 const { maskPhone } = require('../utils/phone');
 const sessionManager = require('../modules/sessions/sessionManager');
 const passwordLogin = require('../modules/auth/passwordLogin');
@@ -15,6 +16,7 @@ const challengeManager = require('../modules/challenges/challengeManager');
 const notificationCenter = require('../modules/notifications/notificationCenter');
 const config = require('../config');
 const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
+const registrationPolicy = require('../modules/config/registrationPolicy');
 
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 const loginRateLimiter = createClientAwareRateLimiter(config.rateLimit.login);
@@ -22,14 +24,25 @@ const registerRateLimiter = createRateLimiter(config.rateLimit.register);
 
 const REGISTER_CODE_MAX_FAILURES = 5;
 
+// Per-IP limit for the service-to-service validation endpoint. It returns
+// account data for a valid service key, so an unauthenticated caller probing
+// the key must be throttled.
+const serviceValidateLimiter = createRateLimiter({
+  maxAttempts: 30,
+  windowMs: 60 * 1000,
+  keyPrefix: 'ratelimit:service_validate',
+});
+
 // ---- 服务间 API：用户名密码验证（供 MindFourm 调用）----
 
-router.post('/service/validate-credentials', async (req, res) => {
+router.post('/service/validate-credentials', serviceValidateLimiter, async (req, res) => {
   // 验证服务间 API Key
   const serviceApiKey = req.headers['x-service-api-key'];
   const expectedKey = process.env.SERVICE_API_KEY;
 
-  if (!expectedKey || serviceApiKey !== expectedKey) {
+  // Timing-safe comparison — a plain `!==` leaks the key byte by byte to a
+  // caller who can measure response times.
+  if (!expectedKey || typeof serviceApiKey !== 'string' || !timingSafeCompare(serviceApiKey, expectedKey)) {
     return res.status(403).json({
       success: false,
       code: 'SERVICE_API_KEY_INVALID',
@@ -88,8 +101,16 @@ router.post('/service/validate-credentials', async (req, res) => {
   }
 });
 
+const CODE_TTL_SECONDS = 300; // must match registerEmailCode's CODE_TTL
+
 function emailKey(email) {
   return hashToken(email.toLowerCase().trim());
+}
+
+// Failure counter lives in its own key so a Redis→MySQL fallback cannot reset
+// it to zero. TTL matches the code lifetime.
+function failureKey(emailHash) {
+  return `register_email_code_failures:${emailHash}`;
 }
 
 async function removeCodeFromMysql(emailHash) {
@@ -109,6 +130,17 @@ async function removeCodeFromMysql(emailHash) {
 // is sent.
 router.post('/register', registerRateLimiter, async (req, res) => {
   const { username, email, password, email_code, challenge_id, challenge_answer } = req.body;
+
+  // The admin settings switch actually gates the endpoint now. It used to be
+  // editable (and documented) but read by nothing — turning registration off
+  // had no effect at all.
+  if (!(await registrationPolicy.isRegistrationEnabled())) {
+    return res.status(403).json({
+      success: false,
+      code: 'REGISTRATION_DISABLED',
+      message: '当前已关闭新用户注册',
+    });
+  }
 
   if (!username || !email || !password || !email_code) {
     return res.status(400).json({
@@ -139,8 +171,8 @@ router.post('/register', registerRateLimiter, async (req, res) => {
 
   // Verify challenge question if enabled
   if (challenge_id) {
-    const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const challengeResult = await challengeManager.verifyForRegistration(csrfToken, challenge_id, challenge_answer);
+    const challengeSessionId = challengeManager.resolveSessionId(req, res);
+    const challengeResult = await challengeManager.verifyForRegistration(challengeSessionId, challenge_id, challenge_answer);
     if (!challengeResult.success) {
       const messageMap = {
         CHALLENGE_EXPIRED: '验证已过期，请刷新获取新题',
@@ -178,8 +210,11 @@ router.post('/register', registerRateLimiter, async (req, res) => {
     return res.status(400).json({ success: false, code: 'EMAIL_DOMAIN_BLOCKED', message: '暂不支持使用该邮箱' });
   }
 
-  if (!isValidPassword(password)) {
-    return res.status(400).json({ success: false, message: getPasswordValidationError(password) || '密码不符合要求' });
+  // Password policy is admin-configurable (min length / complexity) on top of
+  // the non-negotiable floor enforced inside the policy module.
+  const passwordError = await registrationPolicy.validatePassword(password);
+  if (passwordError) {
+    return res.status(400).json({ success: false, message: passwordError });
   }
 
   // ── Email code verification ───────────────────────────────────
@@ -201,7 +236,13 @@ router.post('/register', registerRateLimiter, async (req, res) => {
         [eHash]
       );
       if (rows[0]) {
-        record = { email: rows[0].email, codeHash: rows[0].code_hash, failures: 0 };
+        // The failure counter must survive a Redis miss. MySQL has no
+        // `failures` column, so the count lives in Redis under a dedicated
+        // key that is independent of the (possibly absent) code payload —
+        // otherwise every MySQL fallback reset it to 0 and the 5-attempt
+        // bound was decorative.
+        const failures = Number(await client.get(failureKey(eHash)).catch(() => null)) || 0;
+        record = { email: rows[0].email, codeHash: rows[0].code_hash, failures };
       }
     }
   } catch (err) {
@@ -218,10 +259,22 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   }
 
   if (record.codeHash !== presentedHash) {
-    // Track failures so brute-forcing a 6-digit code is bounded.
-    const failures = (record.failures || 0) + 1;
+    // Track failures so brute-forcing a 6-digit code is bounded. The counter
+    // is incremented atomically in Redis (INCR) so concurrent attempts cannot
+    // each read the same stale value, and it outlives the code payload.
+    const fKey = failureKey(eHash);
+    let failures;
+    try {
+      failures = await client.incr(fKey);
+      if (failures === 1) await client.expire(fKey, CODE_TTL_SECONDS);
+    } catch {
+      // Redis unavailable: fall back to the value carried on the record.
+      failures = (record.failures || 0) + 1;
+    }
+
     if (failures >= REGISTER_CODE_MAX_FAILURES) {
       await client.del(`register_email_code:${eHash}`).catch(() => {});
+      await client.del(fKey).catch(() => {});
       await removeCodeFromMysql(eHash);
       return res.status(400).json({
         success: false,
@@ -229,17 +282,7 @@ router.post('/register', registerRateLimiter, async (req, res) => {
         message: '验证码错误次数过多，请重新获取',
       });
     }
-    // Persist the incremented failure count.
-    try {
-      const ttl = await client.ttl(`register_email_code:${eHash}`);
-      if (ttl > 0) {
-        await client.setEx(
-          `register_email_code:${eHash}`,
-          ttl,
-          JSON.stringify({ ...record, failures })
-        );
-      }
-    } catch {}
+
     return res.status(400).json({
       success: false,
       code: 'EMAIL_CODE_MISMATCH',
@@ -251,6 +294,7 @@ router.post('/register', registerRateLimiter, async (req, res) => {
   // Delete the code BEFORE inserting the user so a concurrent retry
   // cannot reuse the same code.
   await client.del(`register_email_code:${eHash}`).catch(() => {});
+  await client.del(failureKey(eHash)).catch(() => {});
   await removeCodeFromMysql(eHash);
 
   try {

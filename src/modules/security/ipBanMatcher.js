@@ -180,9 +180,45 @@ async function isBanned(ip) {
     return { banned: false };
   } catch (err) {
     console.warn('[IPBanMatcher] isBanned check failed:', err.message);
-    // Fail open — don't block requests on cache/DB errors
+    // Fail open by design: a cache/DB outage must not turn into a site-wide
+    // block. The cost is that bans stop applying while the outage lasts, so
+    // the condition is reported to health checks — it used to vanish into a
+    // console line nobody reads.
+    markDegraded(err);
     return { banned: false };
   }
+}
+
+// ─── Degraded-mode reporting ─────────────────────────────────
+
+// Set when a lookup failed; consumed by the health endpoint so operators can
+// alert on "IP bans are not currently enforced".
+let degradedSince = null;
+let degradedReason = null;
+
+function markDegraded(err) {
+  if (degradedSince) return;
+  degradedSince = new Date().toISOString();
+  degradedReason = err.message;
+}
+
+/**
+ * Clear the degraded marker (used by tests and after a successful refresh).
+ */
+function clearDegraded() {
+  degradedSince = null;
+  degradedReason = null;
+}
+
+/**
+ * Report whether ban enforcement is currently impaired.
+ *
+ * @returns {{ degraded: boolean, since?: string, reason?: string }}
+ */
+function getEnforcementStatus() {
+  return degradedSince
+    ? { degraded: true, since: degradedSince, reason: degradedReason }
+    : { degraded: false };
 }
 
 /**
@@ -193,6 +229,8 @@ async function isBanned(ip) {
  */
 async function refreshCache() {
   await client.del(CACHE_KEY);
+  // A successful admin mutation is proof the store is reachable again.
+  clearDegraded();
 }
 
 /**
@@ -208,6 +246,7 @@ async function clearCache() {
 
 module.exports = {
   isBanned,
+  getEnforcementStatus,
   refreshCache,
   clearCache,
   // Exposed for testing

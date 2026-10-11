@@ -1268,7 +1268,7 @@ async function userinfo(accessToken) {
 
   // 2. Get user info
   const [userRows] = await pool.execute(
-    'SELECT id, username, email, email_verified, preferred_locale, phone, phone_verified, phone_verified_at, avatar_url, ban_status, created_at FROM users WHERE id = ?',
+    'SELECT id, username, email, email_verified, preferred_locale, phone, phone_verified, phone_verified_at, avatar_url, ban_status, created_at, updated_at FROM users WHERE id = ?',
     [tokenData.user_id]
   );
   const user = userRows[0];
@@ -1290,7 +1290,10 @@ async function userinfo(accessToken) {
     claims.phone_masked = maskPhone(user.phone);
     claims.ban_status = user.ban_status || 'none';
     claims.is_muted = user.ban_status === 'muted';
-    claims.updated_at = Math.floor(new Date(user.created_at).getTime() / 1000);
+    // Real modification time (users.updated_at). It used to be created_at,
+    // which made the claim useless for change detection — clients polling it
+    // could never observe an update.
+    claims.updated_at = Math.floor(new Date(user.updated_at || user.created_at).getTime() / 1000);
 
     // Include public custom fields
     const [customFieldRows] = await pool.execute(`

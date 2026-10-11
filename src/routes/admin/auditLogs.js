@@ -57,8 +57,8 @@ router.get('/audit-logs', requireAdmin, requireAdminPermission('audit_logs.read'
       countParams.push(`${end_date} 00:00:00`);
     }
 
-    query += ' ORDER BY created_at DESC';
-    const [rows] = await pool.query(`${query} LIMIT ${limit} OFFSET ${offset}`, params);
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    const [rows] = await pool.query(query, [...params, limit, offset]);
     const [countRows] = await pool.execute(countQuery, countParams);
 
     res.json({

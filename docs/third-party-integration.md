@@ -158,7 +158,9 @@ app.get('/oauth/callback', async (req, res, next) => {
 
 ### 兑换授权码
 
-`POST {issuer}/api/token`，请求体为 JSON（不接受 `application/x-www-form-urlencoded`）：
+`POST {issuer}/api/token`，请求体为 JSON 或 `application/x-www-form-urlencoded`（RFC 6749 §4.1.3 要求支持后者，二者等价）：
+
+> 其他端点（如 `/api/refresh`、`/api/revoke`、`/api/introspect`）与设备流程端点同样接受这两种编码。其余业务 API 仅接受 JSON。
 
 下面的请求体演示 Confidential Client。Public Client 不发送 `client_secret`，并必须额外发送发起登录时保存的 `redirect_uri`；具体字段见 [Public Client 指南](public-client-pkce.md)。
 
