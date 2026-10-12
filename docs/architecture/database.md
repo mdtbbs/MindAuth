@@ -130,10 +130,10 @@ MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承
 | `login_fail:{username}:{ip}` | 5min | 登录失败计数（按用户名+IP 键控；满 5 次触发 15min→1h→2h 递增锁定后删除） | `routes/auth.js` |
 | `ratelimit:{name}:{ip}` | 随窗口 | 固定窗口限流计数；每个限流器必须有唯一 `keyPrefix`（如 `ratelimit:login` 5/5min、`ratelimit:register` 5/h、`ratelimit:admin_login` 3/15min、`ratelimit:oauth_token` 60/min 等，共约 20 个前缀） | `middleware/rateLimit.js`（前缀定义在 `config/index.js` 与各路由） |
 | `sms:code:{phone}` | 5min | 短信验证码 | `utils/aliyunSms.js` |
-| `sms:send:ip:{ip}` | 1h | 短信发送限流：同 IP 3 次/时 | `modules/sms/smsBinding.js` |
-| `sms:send:user:{userId}` | 5min | 短信发送限流：同用户 3 次/5min | `modules/sms/smsBinding.js` |
+| `sms:send:ip:{ip}` | 1h | 短信发送限流：同 IP 10 次/时 | `modules/sms/smsBinding.js` |
+| `sms:send:user:{userId}` | 10min | 短信发送限流：同用户 5 次/10min | `modules/sms/smsBinding.js` |
 | `sms:send:phone:{phone}` | 1min | 短信发送限流：同号码 1 次/min | `modules/sms/smsBinding.js` |
-| `sms:verify:fail:user:{userId}:{phone}` / `...:phone:{phone}` / `...:ip:{ip}` | 5min / 1h / 1h | 短信校验失败计数（阈值 5/10/20），校验成功清除 user 维度 | `modules/sms/smsBinding.js` |
+| `sms:verify:fail:user:{userId}:{phone}` / `...:phone:{phone}` / `...:ip:{ip}` | 5min / 1h / 1h | 短信校验失败计数（阈值 8/15/30），校验成功清除 user 维度 | `modules/sms/smsBinding.js` |
 | `challenge_session:{csrfToken}` | 30min | 注册挑战问答会话状态 | `modules/challenges/challengeManager.js` |
 | `ip_bans_cache` | 5min | `ip_bans` 全表缓存（增删改时主动 DEL） | `modules/security/ipBanMatcher.js` |
 | `email_policy:snapshot:v1` | 30s | 活动邮箱域名规则和白名单模式快照；修改规则/模式时主动删除，Redis 不可用时从 MySQL 回源 | `modules/emailPolicy/emailPolicyService.js` |
