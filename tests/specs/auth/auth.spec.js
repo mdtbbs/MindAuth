@@ -164,9 +164,10 @@ test.describe('管理员后台', () => {
     await expect(page.getByRole('button', { name: '保存配置' })).toBeVisible();
   });
 
-  test('创建新应用', async ({ page }) => {
+  test('创建服务端网页应用并展示一次性密钥', async ({ page }) => {
     await page.goto('/admin#/clients');
     await page.getByRole('button', { name: '创建客户端' }).click({ timeout: 8000 });
+    await page.getByRole('dialog').getByRole('combobox', { name: /^应用类型/ }).selectOption('confidential');
 
     await page.getByPlaceholder('例如: MindFourm').fill('Playwright测试应用_' + Date.now());
     await page.getByPlaceholder('https://example.com/callback').fill('https://example.com/callback');
