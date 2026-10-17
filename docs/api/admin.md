@@ -79,14 +79,16 @@ MindAuth 管理端 API（挂载于 `/api/admin`），覆盖管理员账号、用
 | 方法 | 路径 | 权限 | 限流 | 参数摘要 | 说明 |
 |------|------|------|------|----------|------|
 | GET | `/api/admin/clients` | `clients.read` | — | — | 列表：`id, name, client_id, redirect_uri, require_pkce, created_at`（**不含 secret**） |
-| POST | `/api/admin/clients` | `clients.write` | 20 次/小时 | `name`*, `redirect_uri`*, `require_pkce` | 创建客户端（见下文） |
-| PUT | `/api/admin/clients/:id` | `clients.write` | — | `name`*, `redirect_uri`*, `require_pkce`, `scopes` | 更新客户端名称、回调地址、PKCE 与 scope；scope 必须是非空且无重复的受支持列表。已启用客户端的 scope 发生变化时会在事务中撤销全部授权和 refresh token，并清除关联 access token；`require_pkce` 省略时不改动该标志；回调地址过 SSRF 校验 |
+| POST | `/api/admin/clients` | `clients.write` | 20 次/小时 | `name`*, `redirect_uri`* 或 `redirect_uris`, `client_type`, `party_type`, `require_pkce`, `forum_access` | 创建客户端（见下文） |
+| PUT | `/api/admin/clients/:id` | `clients.write` | — | `name`*, `redirect_uri`*, `require_pkce`, `forum_access`（兼容旧 `scopes`） | 更新名称、回调、PKCE 和两档接入范围；Public Client 始终强制 PKCE。已启用客户端的 scope 发生变化时会在事务中撤销全部授权和 refresh token，并清除关联 access token；`require_pkce` 省略时不改动该标志；回调地址过 SSRF 校验 |
 | POST | `/api/admin/clients/:id/rotate-secret` | `clients.write` | — | — | 轮换客户端密钥：旧 secret 立即失效，返回 `{ client_id, client_secret }`，**新 secret 仅此一次回显**；客户端不存在 404；写审计 `client.rotate_secret` |
 | DELETE | `/api/admin/clients/:id` | `clients.write` | — | — | 删除客户端 |
 
 ### 创建客户端与 secret 返回时机
 
-`POST /api/admin/clients` 成功返回 201：
+后台可创建 `public`（桌面/移动/Mod/纯前端网页，无密钥且强制 PKCE）与 `confidential`（有后端的网站，密钥仅服务端保存）。`client_type` 省略兼容默认 confidential；`party_type` 默认 third_party，需明确选择 first_party 才是官方应用。`forum_access` 默认为 false；true 一并启用公开论坛功能，不再逐项审批。应用资料审核仅决定批准、拒绝、停用，无需提供 `approved_scopes` 或 `approved_capabilities`。
+
+`POST /api/admin/clients` 成功返回 201（Public Client 的 `client_secret` 为 null）：
 
 ```json
 { "success": true, "client_id": "<16字节hex>", "client_secret": "<32字节hex>" }

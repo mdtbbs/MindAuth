@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { ApiError } from '@/api/client';
+import { AccessSummary } from '@/shared/ForumAccess';
 import { useI18n } from '@/i18n/I18nProvider';
 import './OAuthCompletePage.css';
 
@@ -16,7 +17,7 @@ type OAuthCompletion = {
     developer_url: string | null;
   };
   account: { display_name: string; username: string; avatar_url: string | null };
-  scopes: Array<{ name: string; description: string; sensitive?: boolean }>;
+  scopes: Array<{ scope?: string; name: string; description: string; sensitive?: boolean }>;
 };
 
 type ReturnState = 'idle' | 'returning' | 'manual' | 'opened';
@@ -40,38 +41,8 @@ function IdentityAvatar({ name, src, failedLabel }: { name: string; src: string 
   return <span className="oauth-complete__avatar oauth-complete__avatar--fallback" aria-hidden="true">{initial}</span>;
 }
 
-function PermissionList({ scopes, t }: { scopes: OAuthCompletion['scopes']; t: (key: string) => string }) {
-  return (
-    <>
-      <ul className="oauth-complete__permissions">
-        {scopes.map((scope) => {
-          const nameKey = `oauth.scope.${scope.name}`;
-          const descriptionKey = `oauth.scopeDesc.${scope.name}`;
-          const translatedName = t(nameKey);
-          const translatedDescription = t(descriptionKey);
-          const writePermission = /(?:\.write|\.upload|\.delete)$/.test(scope.name);
-          return (
-            <li key={scope.name} className={writePermission ? 'oauth-complete__permission--write' : ''}>
-              <span className="oauth-complete__permission-mark" aria-hidden="true">✓</span>
-              <div className="oauth-complete__permission-copy">
-                <strong>{translatedName === nameKey ? scope.description : translatedName}</strong>
-                <p>{translatedDescription === descriptionKey ? scope.description : translatedDescription}</p>
-              </div>
-              {writePermission ? <span className="oauth-complete__permission-badge">{t('oauth.complete.canChange')}</span> : null}
-            </li>
-          );
-        })}
-      </ul>
-      <details className="oauth-complete__scope-identifiers">
-        <summary>{t('oauth.complete.scopeIdentifiers')}</summary>
-        <ul>{scopes.map((scope) => <li key={scope.name}><code>{scope.name}</code></li>)}</ul>
-      </details>
-    </>
-  );
-}
-
 export function OAuthCompletePage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [ticket, setTicket] = useState('');
   const [completion, setCompletion] = useState<OAuthCompletion | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'expired' | 'failed'>('loading');
@@ -256,11 +227,7 @@ export function OAuthCompletePage() {
             {!cancelled && completion.scopes.length ? (
               <section className="oauth-complete__access">
                 <h2>{t('oauth.complete.authorizedAccess')}</h2>
-                <p className="oauth-complete__access-summary">{t('oauth.complete.permissionsSummary', { count: completion.scopes.length })}</p>
-                <details>
-                  <summary>{t('oauth.complete.details')}</summary>
-                  <PermissionList scopes={completion.scopes} t={t} />
-                </details>
+                <AccessSummary scopes={completion.scopes.map(scope => scope.scope || scope.name)} locale={locale} />
               </section>
             ) : null}
           </article>

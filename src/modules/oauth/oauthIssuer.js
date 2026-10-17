@@ -39,7 +39,7 @@ const { maskPhone } = require('../../utils/phone');
 const { forumProfileUrl } = require('../../utils/forumProfileUrl');
 const sessionManager = require('../sessions/sessionManager');
 const tokenStore = require('./tokenStore');
-const { VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes } = require('./scopes');
+const { VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes, hasForumAccess } = require('./scopes');
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -133,10 +133,16 @@ async function assertUserNotBanned(userId) {
   }
 }
 
-async function assertClientActive(clientId) {
-  const [rows] = await pool.execute('SELECT status FROM clients WHERE client_id = ? LIMIT 1', [clientId]);
+async function assertClientActive(clientId, tokenScope, nativeSessionId) {
+  const [rows] = await pool.execute('SELECT status, approved_scopes FROM clients WHERE client_id = ? LIMIT 1', [clientId]);
   if (!rows[0] || (rows[0].status && rows[0].status !== 'approved')) {
     throw new OAuthError(401, 'invalid_token', '客户端未批准或已停用');
+  }
+  if (!nativeSessionId && tokenScope && rows[0].approved_scopes != null) {
+    const allowed = normalizeScopes(rows[0].approved_scopes);
+    if (String(tokenScope).split(/\s+/).filter(Boolean).some(scope => !allowed.includes(scope))) {
+      throw new OAuthError(401, 'invalid_token', '应用的访问范围已变更，请重新登录');
+    }
   }
 }
 
@@ -488,7 +494,7 @@ function redirectUriMatches(requested, registered) {
 
 function requestedScopes(scope, client) {
   const approved = normalizeScopes(client.approved_scopes, LEGACY_DEFAULT_SCOPES);
-  const requested = typeof scope === 'string' && scope.trim()
+  let requested = typeof scope === 'string' && scope.trim()
     ? [...new Set(scope.trim().split(/\s+/))]
     : approved;
   const invalid = requested.filter(value => !VALID_SCOPES.includes(value));
@@ -496,6 +502,11 @@ function requestedScopes(scope, client) {
     throw new OAuthError(400, 'invalid_scope', `无效的 scope: ${invalid.join(', ')}`, {
       error: 'invalid_scope', description: `无效的 scope: ${invalid.join(', ')}`,
     });
+  }
+  // New applications have one forum grant. Legacy scope names are accepted
+  // as request aliases, but always consent to and issue the whole group.
+  if (approved.includes('forum') && hasForumAccess(requested)) {
+    requested = normalizeScopes([...requested, 'openid', 'profile', 'forum']);
   }
   if (requested.some(value => !approved.includes(value))) {
     throw new OAuthError(400, 'invalid_scope', '请求的 scope 未包含在此应用的权限配置中', {
@@ -1144,7 +1155,7 @@ async function introspect({ token, clientId, clientSecret }) {
   const tokenData = await tokenStore.getAccessToken(token);
   if (tokenData && (tokenData.client_id === clientId || trustedResourceServer)) {
     try {
-      await assertClientActive(tokenData.client_id);
+      await assertClientActive(tokenData.client_id, tokenData.scope, tokenData.native_session_id);
       await assertUserNotBanned(tokenData.user_id);
       await assertNativeSessionActive(tokenData.native_session_id);
     } catch (err) {
@@ -1175,7 +1186,7 @@ async function introspect({ token, clientId, clientSecret }) {
   const refreshToken = refreshRows[0];
   if (refreshToken && (refreshToken.client_id === clientId || trustedResourceServer)) {
     try {
-      await assertClientActive(refreshToken.client_id);
+      await assertClientActive(refreshToken.client_id, refreshToken.scope, refreshToken.native_session_id);
       await assertUserNotBanned(refreshToken.user_id);
       await assertNativeSessionActive(refreshToken.native_session_id);
     } catch (err) {
@@ -1260,7 +1271,7 @@ async function userinfo(accessToken) {
   if (!tokenData) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
-  await assertClientActive(tokenData.client_id);
+  await assertClientActive(tokenData.client_id, tokenData.scope, tokenData.native_session_id);
   await assertUserNotBanned(tokenData.user_id);
   await assertNativeSessionActive(tokenData.native_session_id);
 
@@ -1328,7 +1339,7 @@ async function userByAccessToken(accessToken) {
   if (!tokenData) {
     throw new OAuthError(401, 'invalid_token', '无效或过期的 access token');
   }
-  await assertClientActive(tokenData.client_id);
+  await assertClientActive(tokenData.client_id, tokenData.scope, tokenData.native_session_id);
   await assertUserNotBanned(tokenData.user_id);
   await assertNativeSessionActive(tokenData.native_session_id);
 
@@ -1634,6 +1645,10 @@ async function exchangeDeviceToken({ clientId, deviceCode }) {
   const refreshToken = generateToken();
   const refreshExpiresAt = formatMySQLDateTimeFromMs(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
   const effectiveScope = effectiveDeviceData.scope || 'openid profile email';
+  const allowed = normalizeScopes(clientData.approved_scopes, LEGACY_DEFAULT_SCOPES);
+  if (effectiveScope.split(/\s+/).some(scope => !allowed.includes(scope))) {
+    throw new OAuthError(400, 'invalid_grant', '应用的访问范围已变更，请重新登录');
+  }
 
   // 8. Store access token in Redis
   await tokenStore.storeAccessToken(accessToken, {
@@ -1641,6 +1656,8 @@ async function exchangeDeviceToken({ clientId, deviceCode }) {
     client_id: clientId,
     scope: effectiveScope,
     token_type: 'Bearer',
+    client_type: clientData.client_type || 'confidential',
+    party_type: clientData.party_type || 'first_party',
   }, ACCESS_TOKEN_TTL_S);
 
   // 9. Store refresh token in MySQL (hashed)

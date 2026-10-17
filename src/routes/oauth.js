@@ -195,8 +195,8 @@ router.get('/authorize/consent-info', requireAuth, async (req, res) => {
       success: true,
       consent_required: result.consentRequired,
       client: result.client,
-      scopes: result.requestedScopes.map((name) => ({ name, ...SCOPE_DESCRIPTIONS[name] })),
-      new_scopes: (result.newScopes || []).map((name) => ({ name, ...SCOPE_DESCRIPTIONS[name] })),
+      scopes: result.requestedScopes.map((name) => ({ scope: name, name, ...SCOPE_DESCRIPTIONS[name] })),
+      new_scopes: (result.newScopes || []).map((name) => ({ scope: name, name, ...SCOPE_DESCRIPTIONS[name] })),
       previous_scopes: result.previousScopes || [],
     });
   } catch (err) {
@@ -221,7 +221,7 @@ router.post('/authorize/complete-info', completionLimiter, requireAuth, async (r
       client: completion.client,
       account: completion.account,
       scopes: (completion.scopes || []).filter((name) => SCOPE_DESCRIPTIONS[name]).map((name) => ({
-        name,
+        scope: name, name,
         ...SCOPE_DESCRIPTIONS[name],
       })),
     });
@@ -512,7 +512,7 @@ router.get('/device/info', requireAuth, async (req, res) => {
         party_type: client.party_type,
       },
       scopes: String(deviceData.scope || '').split(/\s+/).filter(Boolean)
-        .map(name => ({ name, ...(SCOPE_DESCRIPTIONS[name] || { name, description: '此权限由应用请求。' }) })),
+        .map(name => ({ scope: name, name, ...(SCOPE_DESCRIPTIONS[name] || { name, description: '此权限由应用请求。' }) })),
     });
   } catch (err) {
     handleOAuthError(res, err, 'Device verification preview error');

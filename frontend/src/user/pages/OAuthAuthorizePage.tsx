@@ -4,9 +4,10 @@ import { useAuth } from '@/auth/AuthProvider';
 import api, { ApiError } from '@/api/client';
 import { Button } from '@/shared/Button';
 import { AuthShell } from '@/user/components/AuthShell';
+import { AccessSummary } from '@/shared/ForumAccess';
 import { useI18n } from '@/i18n/I18nProvider';
 
-type ScopeInfo = { name: string; description: string; sensitive?: boolean };
+type ScopeInfo = { scope?: string; name: string; description: string; sensitive?: boolean };
 type ConsentInfo = {
   success: boolean;
   consent_required: boolean;
@@ -21,15 +22,8 @@ type ConsentInfo = {
   previous_scopes: string[];
 };
 
-const SCOPE_ICONS: Record<string, string> = {
-  openid: '◉', profile: '👤', email: '✉️', 'forum.read': '💬', 'forum.write': '✍️',
-  'resource.read': '🗂️', 'resource.download': '⬇️', 'resource.upload': '⬆️',
-  'notification.read': '🔔', 'message.read': '📨', 'message.write': '✉️',
-  'game_content.saves.read': '☁️', 'game_content.saves.write': '☁️', 'game_content.saves.delete': '☁️',
-};
-
 export function OAuthAuthorizePage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -110,8 +104,6 @@ export function OAuthAuthorizePage() {
     }
   }
 
-  const scopesToShow = consent?.new_scopes?.length ? consent.new_scopes : consent?.scopes || [];
-  const redirectHost = (() => { try { return new URL(request.redirect_uri).host || new URL(request.redirect_uri).protocol.slice(0, -1); } catch { return t('oauth.registeredCallback'); } })();
   const official = consent?.client.party_type === 'first_party';
   const developerProfileUrl = consent?.client.developer_url || null;
   const initials = Array.from(consent?.client.name?.trim() || 'A')[0].toUpperCase();
@@ -129,34 +121,12 @@ export function OAuthAuthorizePage() {
           <p className="oauth-consent__developer">{consent.client.developer_name ? developerProfileUrl ? <a href={developerProfileUrl} target="_blank" rel="noreferrer">{t('oauth.developerBy', { name: consent.client.developer_name })}</a> : t('oauth.developerBy', { name: consent.client.developer_name }) : t('oauth.officialProvider')}</p>
           <p>{consent.client.description || t('oauth.missingDescription')}</p>
 
-          <section className="oauth-consent__permissions">
-            <h2>{consent.previous_scopes.length ? t('oauth.newScopes') : t('oauth.requestedScopes')}</h2>
-            <ul className="public-scope-list">
-              {scopesToShow.map((scope) => (
-                <li key={scope.name}>
-                  <span className="oauth-scope-icon" aria-hidden="true">{SCOPE_ICONS[scope.name] || '•'}</span>
-                  <div><strong>{t(`oauth.scope.${scope.name}`) === `oauth.scope.${scope.name}` ? scope.description : t(`oauth.scope.${scope.name}`)}</strong>{scope.sensitive ? <span className="public-scope-sensitive">{t('oauth.sensitive')}</span> : null}{/(?:\.write|\.upload|\.delete)$/.test(scope.name) ? <span className="public-scope-write">{t('oauth.complete.canChange')}</span> : null}<p>{t(`oauth.scopeDesc.${scope.name}`) === `oauth.scopeDesc.${scope.name}` ? scope.description : t(`oauth.scopeDesc.${scope.name}`)}</p></div>
-                </li>
-              ))}
-            </ul>
-            {consent.previous_scopes.length ? <p className="section-description">{t('oauth.previousConsent')}</p> : null}
-          </section>
-
-          <details className="oauth-consent__details">
-            <summary>{t('oauth.details')}</summary>
-            <dl><div><dt>{t('oauth.clientId')}</dt><dd><code>{consent.client.client_id}</code></dd></div><div><dt>{t('oauth.redirectHost')}</dt><dd>{redirectHost}</dd></div>
-              {consent.client.website_url ? <div><dt>{t('oauth.website')}</dt><dd><a href={consent.client.website_url} target="_blank" rel="noreferrer">{consent.client.website_url}</a></dd></div> : null}
-              {consent.client.developer_name ? <div><dt>{t('oauth.developer')}</dt><dd>{consent.client.developer_name}</dd></div> : null}
-            </dl>
-          </details>
-          <details className="oauth-scope-identifiers">
-            <summary>{t('oauth.complete.scopeIdentifiers')}</summary>
-            <ul>{scopesToShow.map((scope) => <li key={scope.name}><code>{scope.name}</code></li>)}</ul>
-          </details>
+          <AccessSummary scopes={consent.scopes.map(scope => scope.scope || scope.name)} locale={locale} />
+          {consent.client.website_url ? <a href={consent.client.website_url} target="_blank" rel="noreferrer">{t('oauth.website')}</a> : null}
           <p className="section-description">{t('oauth.revokeNotice')}</p>
           <div className="oauth-consent__actions">
             <Button type="button" variant="secondary" disabled={busy} onClick={() => void decide('deny')}>{t('oauth.cancel')}</Button>
-            <Button type="button" disabled={busy} onClick={() => void decide('approve')}>{busy ? t('oauth.submitting') : t('oauth.approve')}</Button>
+            <Button type="button" disabled={busy} onClick={() => void decide('approve')}>{busy ? t('oauth.submitting') : t('access.approve')}</Button>
           </div>
         </div>
       )}

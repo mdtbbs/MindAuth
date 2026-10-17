@@ -344,6 +344,7 @@ export interface AdminOAuthClient {
 }
 
 export interface AdminCreatedClient {
+  client_type?: 'public' | 'confidential';
   success: boolean;
   client_id: string;
   client_secret?: string | null;

@@ -1,5 +1,8 @@
 # MindAuth API 参考
 
+OAuth 申请/管理新增布尔 `forum_access`：false 仅登录/基本资料，true 申请统一论坛组。管理员创建支持 public/confidential，并整体审核接入范围。具体参数见 developer-applications.md、admin.md 与 oauth.md。
+
+
 MindAuth 是 Mindustry 社区的 OAuth 2.0 SSO 认证服务（Express，默认端口 4001）。本文档描述所有 API 共享的通用约定，并提供全端点索引；各域端点的请求/响应细节见 [auth.md](auth.md)、[oauth.md](oauth.md)、[account.md](account.md)、[admin.md](admin.md)，整体架构见 [../architecture/overview.md](../architecture/overview.md)。
 
 > **维护提示**：新增/修改任何路由端点时需同步更新本索引及对应域文档。

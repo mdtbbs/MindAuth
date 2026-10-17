@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+OAuth application access now has two levels: sign-in/basic profile or the optional `forum` group (`forum_access`). Admin approval accepts the whole requested level; no per-feature scope/capability matrix. Public and confidential clients can both be created in admin. Public clients always use PKCE without a secret; admin creation defaults to third-party identity. Migration `024_forum_access_scope_capacity.sql` widens authorization/refresh scope storage to 2048 characters. Legacy fine-grained scopes remain compatibility aliases and old narrow refresh tokens never auto-upgrade.
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in the MindAuth service.
 
 ## Project Overview

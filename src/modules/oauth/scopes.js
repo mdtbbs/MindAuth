@@ -2,6 +2,7 @@ const SCOPE_DESCRIPTIONS = Object.freeze({
   openid: { name: '账户标识', description: '读取用于识别 MDTBBS 账户的稳定标识。' },
   profile: { name: '查看基本资料', description: '允许此应用查看你的用户名、头像等基本账户信息。' },
   email: { name: '查看电子邮箱', description: '允许此应用读取你的邮箱地址和验证状态。' },
+  forum: { name: '使用论坛功能', description: '读取基本资料，并以你的身份使用论坛功能，包括发帖、回复、资源、私信、云存档和联机。' },
   'forum.read': { name: '浏览论坛', description: '允许此应用读取你有权限查看的论坛帖子和回复。' },
   'forum.write': { name: '发布论坛内容', description: '允许此应用以你的身份发布帖子、回复以及执行相关论坛操作。' },
   'resource.read': { name: '浏览资源', description: '允许此应用读取 MDTBBS 中的地图、蓝图、Mod 等资源信息。' },
@@ -21,6 +22,27 @@ const SCOPE_DESCRIPTIONS = Object.freeze({
 });
 
 const VALID_SCOPES = Object.freeze(Object.keys(SCOPE_DESCRIPTIONS));
+const ACCOUNT_SCOPES = Object.freeze(['openid', 'profile', 'email']);
+const FORUM_SCOPES = Object.freeze(VALID_SCOPES.filter(scope => !ACCOUNT_SCOPES.includes(scope)));
+
+function hasForumAccess(value) {
+  return normalizeScopes(value).some(scope => FORUM_SCOPES.includes(scope));
+}
+
+function applicationScopes(data, legacyKey = 'requested_scopes') {
+  if (data.forum_access !== undefined) {
+    if (typeof data.forum_access !== 'boolean') throw new Error('forum_access 必须是布尔值');
+    return ['openid', 'profile', ...(data.forum_access ? ['forum'] : [])];
+  }
+  const raw = data[legacyKey];
+  if (raw === undefined) return ['openid', 'profile'];
+  if (!Array.isArray(raw) || !raw.length || raw.some(scope => !VALID_SCOPES.includes(scope))
+    || new Set(raw).size !== raw.length) throw new Error('无效的 scope 配置');
+  // Older integrations can still submit their scope arrays. New application
+  // configurations always describe one of the two access levels.
+  return ['openid', 'profile', ...(raw.includes('email') ? ['email'] : []),
+    ...(hasForumAccess(raw) ? ['forum'] : [])];
+}
 // Native password login continues to issue only this fixed legacy scope set.
 // OAuth scopes are intentionally not folded into existing Native tokens.
 const LEGACY_NATIVE_SCOPES = Object.freeze(['openid', 'profile', 'game_content']);
@@ -31,7 +53,11 @@ function normalizeScopes(value, fallback = []) {
     try { scopes = JSON.parse(scopes); } catch { scopes = scopes.split(/\s+/); }
   }
   if (!Array.isArray(scopes)) scopes = fallback;
-  return [...new Set(scopes.filter(scope => typeof scope === 'string' && VALID_SCOPES.includes(scope)))];
+  const normalized = [...new Set(scopes.filter(scope => typeof scope === 'string' && VALID_SCOPES.includes(scope)))];
+  // Keep the fine-grained names in issued tokens for existing resource servers.
+  // Expanding only the explicit group marker never upgrades old narrow tokens.
+  return normalized.includes('forum') ? [...new Set([...normalized, ...FORUM_SCOPES])] : normalized;
 }
 
-module.exports = { SCOPE_DESCRIPTIONS, VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes };
+module.exports = { SCOPE_DESCRIPTIONS, VALID_SCOPES, LEGACY_NATIVE_SCOPES, normalizeScopes,
+  ACCOUNT_SCOPES, FORUM_SCOPES, hasForumAccess, applicationScopes };

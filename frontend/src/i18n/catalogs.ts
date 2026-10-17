@@ -2,6 +2,7 @@ export type Locale = 'zh-CN' | 'en' | 'ru' | 'ja';
 
 export const SUPPORTED_LOCALES: readonly Locale[] = ['zh-CN', 'en', 'ru', 'ja'];
 
+import { forumAccessMessages } from './forumAccessCatalogs';
 import { developerMessages } from './developerCatalogs';
 import { registrationMessages } from './registrationCatalogs';
 import { securityMessages } from './securityCatalogs';
@@ -45,6 +46,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...sharedMessages['zh-CN'],
     ...oauthMessages['zh-CN'],
     ...socialMessages['zh-CN'],
+    ...forumAccessMessages['zh-CN'],
   },
   en: {
     'language.label': 'Language', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -81,6 +83,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...sharedMessages.en,
     ...oauthMessages.en,
     ...socialMessages.en,
+    ...forumAccessMessages.en,
   },
   ru: {
     'language.label': 'Язык', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -117,6 +120,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...sharedMessages.ru,
     ...oauthMessages.ru,
     ...socialMessages.ru,
+    ...forumAccessMessages.ru,
   },
   ja: {
     'language.label': '言語', 'language.zh-CN': '简体中文', 'language.en': 'English', 'language.ru': 'Русский', 'language.ja': '日本語',
@@ -153,6 +157,7 @@ const messages: Record<Locale, Record<string, string>> = {
     ...sharedMessages.ja,
     ...oauthMessages.ja,
     ...socialMessages.ja,
+    ...forumAccessMessages.ja,
   },
 };
 

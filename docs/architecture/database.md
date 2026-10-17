@@ -1,5 +1,8 @@
 # MindAuth 数据模型
 
+OAuth 两档范围复用 clients.requested_scopes / approved_scopes 的 JSON 数组，无新增列。迁移 `024_forum_access_scope_capacity.sql` 将 authorizations.scope 与 refresh_tokens.scope 从 VARCHAR(255) 扩至 VARCHAR(2048)，容纳完整论坛组的兼容别名；不会修改现有授权或令牌内容。`forum` 为统一组标记，并附带旧细分别名；旧记录继续按原范围读取。应用范围变更时撤销 authorizations、refresh_tokens 与 Redis access token，旧令牌不通过刷新自动增加范围。
+
+
 MindAuth 使用 MySQL 持久化账号、OAuth 与审计数据，使用 Redis 承载会话缓存、短时令牌与限流计数；schema 由启动时自动执行的版本化迁移管理。
 
 > **维护提示**：修改 src/db/migrations/**、src/db/* 时需同步更新本文档。

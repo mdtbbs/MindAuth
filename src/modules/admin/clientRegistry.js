@@ -5,7 +5,7 @@ const { generateToken, generateShortToken } = require('../../utils/token');
 const { hashClientSecret } = require('../../utils/secrets');
 const { forumProfileUrl } = require('../../utils/forumProfileUrl');
 const { writeAdminAudit } = require('../audit/auditWriter');
-const { VALID_SCOPES, SCOPE_DESCRIPTIONS, normalizeScopes } = require('../oauth/scopes');
+const { SCOPE_DESCRIPTIONS, normalizeScopes, hasForumAccess, applicationScopes } = require('../oauth/scopes');
 const tokenStore = require('../oauth/tokenStore');
 const { normalizeEcosystem, isSupportedEcosystem, assertDeveloperEligibility } = require('../developer/DeveloperPolicy');
 
@@ -103,17 +103,12 @@ function validateLaunchUriTemplate(value) {
 }
 
 function requestedCapabilities(data, scopes) {
-  const requested = {
-    supports_presence: data.supports_presence === true,
-    supports_multiplayer: data.supports_multiplayer === true,
-    supports_join_intent: data.supports_join_intent === true,
+  const enabled = hasForumAccess(scopes);
+  return {
+    supports_presence: enabled,
+    supports_multiplayer: enabled,
+    supports_join_intent: enabled && Boolean(data.launch_uri_template),
   };
-  if (requested.supports_presence && !scopes.includes('presence.write')) throw new Error('Presence 客户端能力需要申请 presence.write');
-  if (requested.supports_multiplayer && !scopes.includes('multiplayer.write')) throw new Error('Multiplayer 客户端能力需要申请 multiplayer.write');
-  if (requested.supports_join_intent && (!scopes.includes('multiplayer.write') || !data.launch_uri_template)) {
-    throw new Error('Join Intent 客户端能力需要 multiplayer.write 和启动 URI 模板');
-  }
-  return requested;
 }
 
 async function readRedirectUris(clientNumericId, executor = pool) {
@@ -168,6 +163,7 @@ async function listClients() {
     client_secret_configured: Boolean(client.client_secret),
     client_secret: undefined,
     require_pkce: client.require_pkce === 1 || client.require_pkce === true,
+    forum_access: hasForumAccess(client.requested_scopes),
     requested_scopes: parseScopes(client.requested_scopes),
     approved_scopes: parseScopes(client.approved_scopes),
     redirect_uris: byClient.get(client.id) || (client.redirect_uri ? [{ redirect_uri: client.redirect_uri, redirect_type: 'web' }] : []),
@@ -190,6 +186,7 @@ async function getClient(id) {
     client_secret_configured: Boolean(client.client_secret),
     client_secret: undefined,
     require_pkce: client.require_pkce === 1 || client.require_pkce === true,
+    forum_access: hasForumAccess(client.requested_scopes),
     requested_scopes: parseScopes(client.requested_scopes),
     approved_scopes: parseScopes(client.approved_scopes),
     redirect_uris: await readRedirectUris(client.id),
@@ -208,34 +205,35 @@ async function createClient(data, actor) {
   if (!redirectUris.length) throw new Error('至少需要一个 Redirect URI');
   const redirectUri = redirectUris[0];
   const clientId = generateShortToken();
-  const clientSecret = generateToken();
-  const defaultScopes = ['openid', 'profile', 'email'];
+  const clientType = data.client_type || 'confidential';
+  const partyType = data.party_type || 'third_party';
+  if (!['public', 'confidential'].includes(clientType)) throw new Error('无效的客户端类型');
+  if (!['first_party', 'third_party'].includes(partyType)) throw new Error('无效的应用身份');
+  const clientSecret = clientType === 'confidential' ? generateToken() : null;
+  const pkceRequired = clientType === 'public' || Boolean(require_pkce);
+  const defaultScopes = normalizeScopes(applicationScopes(data, 'scopes'));
   const clientNumericId = await transaction(async (conn) => {
     const [result] = await conn.execute(
       `INSERT INTO clients (name, client_id, client_secret, redirect_uri, require_pkce,
         client_type, party_type, ecosystem, status, requested_scopes, approved_scopes)
-       VALUES (?, ?, ?, ?, ?, 'confidential', 'first_party', ?, 'approved', ?, ?)`,
-      [name, clientId, hashClientSecret(clientSecret), redirectUri, require_pkce ? 1 : 0,
-        ecosystem, JSON.stringify(defaultScopes), JSON.stringify(defaultScopes)],
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)`,
+      [name, clientId, clientSecret ? hashClientSecret(clientSecret) : null, redirectUri, pkceRequired ? 1 : 0,
+        clientType, partyType, ecosystem, JSON.stringify(defaultScopes), JSON.stringify(defaultScopes)],
     );
     await syncRedirectUris(conn, result.insertId, redirectUris);
     return result.insertId;
   });
   await writeAdminAudit(actor.adminId, 'client.create', 'client', clientNumericId,
-    { name, client_id: clientId, client_type: 'confidential', redirect_uris: redirectUris, require_pkce: Boolean(require_pkce) }, actor.ipAddress);
-  return { client_id: clientId, client_secret: clientSecret };
+    { name, client_id: clientId, client_type: clientType, party_type: partyType, redirect_uris: redirectUris, require_pkce: pkceRequired }, actor.ipAddress);
+  return { client_id: clientId, client_secret: clientSecret, client_type: clientType };
 }
 
 async function updateClient(id, data, actor) {
   const { name, redirect_uri, redirect_uris, require_pkce } = data;
   const ecosystem = data.ecosystem === undefined ? undefined : data.ecosystem;
   if (ecosystem !== undefined && !isSupportedEcosystem(ecosystem)) throw new Error('无效的应用生态');
-  const requestedScopes = data.scopes;
-  if (requestedScopes !== undefined && (!Array.isArray(requestedScopes) || requestedScopes.length === 0
-    || requestedScopes.some(scope => typeof scope !== 'string' || !VALID_SCOPES.includes(scope))
-    || new Set(requestedScopes).size !== requestedScopes.length)) {
-    throw new Error('至少选择一个有效且不重复的 scope');
-  }
+  const requestedScopes = data.scopes !== undefined || data.forum_access !== undefined
+    ? normalizeScopes(applicationScopes(data, 'scopes')) : undefined;
   const uris = redirect_uris || (redirect_uri ? [redirect_uri] : null);
   let clientId;
   let revokeUsers = [];
@@ -270,7 +268,7 @@ async function updateClient(id, data, actor) {
     const params = [];
     if (name !== undefined) { updates.push('name = ?'); params.push(name); }
     if (ecosystem !== undefined) { updates.push('ecosystem = ?'); params.push(ecosystem); }
-    if (require_pkce !== undefined) { updates.push('require_pkce = ?'); params.push(require_pkce ? 1 : 0); }
+    if (require_pkce !== undefined) { updates.push('require_pkce = ?'); params.push(client.client_type === 'public' || require_pkce ? 1 : 0); }
     if (requestedScopes !== undefined) {
       updates.push('requested_scopes = ?'); params.push(JSON.stringify(requestedScopes));
       if (client.status === 'approved') { updates.push('approved_scopes = ?'); params.push(JSON.stringify(requestedScopes)); }
@@ -368,6 +366,7 @@ async function listOwnerApplications(ownerUserId) {
        WHERE client_id = ? AND error_count > 0 ORDER BY metric_date DESC LIMIT 10`, [row.client_id],
     );
     clients.push({ ...row, client_secret: undefined, require_pkce: true,
+      forum_access: hasForumAccess(row.requested_scopes),
       requested_scopes: parseScopes(row.requested_scopes), approved_scopes: parseScopes(row.approved_scopes),
       redirect_uris: redirects, usage: { ...(usage[0] || { authorization_count: 0, last_used_at: null }),
         requests_30d: Number(metrics[0]?.requests_30d || 0), recent_errors: recentErrors } });
@@ -390,7 +389,6 @@ function validateApplication(data) {
       throw new Error('应用主页必须是 HTTPS 地址；开发环境可使用 localhost 或 loopback');
     }
   }
-  if (!Array.isArray(data.requested_scopes)) throw new Error('requested_scopes 必须是 scope 数组');
   const redirectUris = Array.isArray(data.redirect_uris) ? data.redirect_uris.map(String) : [];
   if (redirectUris.length > 20) throw new Error('Redirect URI 最多 20 个');
   if (redirectUris.length < 1 || redirectUris.length > 20) throw new Error('请配置 1 至 20 个 Redirect URI');
@@ -403,11 +401,7 @@ function validateApplication(data) {
       throw new Error('第三方应用的 HTTP 回调仅允许内部网络或 localhost 地址');
     }
   }
-  const requestedScopes = parseScopes(data.requested_scopes);
-  if (!requestedScopes.length || requestedScopes.length !== new Set(data.requested_scopes || []).size) {
-    throw new Error('至少申请一个有效且不重复的 scope');
-  }
-  if (requestedScopes.some(scope => !VALID_SCOPES.includes(scope))) throw new Error('申请了无效的 scope');
+  const requestedScopes = normalizeScopes(applicationScopes(data));
   const applicationIconUrl = validateApplicationIconUrl(data.application_icon_url);
   const launchUriTemplate = validateLaunchUriTemplate(data.launch_uri_template);
   const capabilities = requestedCapabilities({ ...data, launch_uri_template: launchUriTemplate }, requestedScopes);
@@ -564,16 +558,21 @@ async function getPublicApplication(clientId) {
 
 function publicApplicationView(row) {
   const scopeNames = parseScopes(row.approved_scopes ?? row.requested_scopes);
+  const grouped = scopeNames.includes('forum');
+  const forumAccess = hasForumAccess(scopeNames);
+  const launchApproved = forumAccess && (grouped || row.launch_uri_approved);
+  const joinEnabled = launchApproved && (grouped || row.supports_join_intent) && Boolean(row.launch_uri_template);
   return {
     client_id: row.client_id,
     name: row.name,
     description: row.description || '',
     website_url: row.website_url || null,
     application_icon_url: row.application_icon_url || null,
-    launch_uri_template: row.launch_uri_approved && row.supports_join_intent ? row.launch_uri_template || null : null,
-    supports_presence: Boolean(row.supports_presence),
-    supports_multiplayer: Boolean(row.supports_multiplayer),
-    supports_join_intent: Boolean(row.supports_join_intent && row.launch_uri_approved && row.launch_uri_template),
+    launch_uri_template: joinEnabled ? row.launch_uri_template : null,
+    supports_presence: forumAccess && Boolean(grouped || row.supports_presence),
+    supports_multiplayer: forumAccess && Boolean(grouped || row.supports_multiplayer),
+    supports_join_intent: Boolean(joinEnabled),
+    forum_access: forumAccess,
     client_type: row.client_type,
     party_type: row.party_type,
     ecosystem: normalizeEcosystem(row.ecosystem),
@@ -585,62 +584,51 @@ function publicApplicationView(row) {
   };
 }
 
-async function reviewClient(id, { status, approvedScopes, reviewReason, approvedCapabilities = {} }, actor) {
+async function reviewClient(id, { status, reviewReason }, actor) {
   if (!['approved', 'rejected', 'suspended', 'pending'].includes(status)) throw new Error('无效的审核状态');
-  const client = await getClient(id);
-  if (!client) throw new Error('客户端不存在');
-  if (client.status === 'deleted') throw new Error('已删除的客户端不能恢复');
-  const requestedValues = Array.isArray(approvedScopes) ? approvedScopes : [];
-  if (requestedValues.some(scope => typeof scope !== 'string' || !VALID_SCOPES.includes(scope))
-    || new Set(requestedValues).size !== requestedValues.length) throw new Error('批准的 scopes 包含无效或重复值');
-  const scopes = parseScopes(requestedValues);
-  if (status === 'approved' && scopes.some(scope => !client.requested_scopes.includes(scope))) {
-    throw new Error('批准的 scopes 必须来自应用申请列表');
-  }
-  if (status === 'approved' && scopes.length === 0) throw new Error('至少批准一个 scope');
-  const requestedCapabilities = {
-    supports_presence: Boolean(client.supports_presence_requested),
-    supports_multiplayer: Boolean(client.supports_multiplayer_requested),
-    supports_join_intent: Boolean(client.supports_join_intent_requested),
-  };
-  const approved = {
-    supports_presence: status === 'approved' && approvedCapabilities.supports_presence === true,
-    supports_multiplayer: status === 'approved' && approvedCapabilities.supports_multiplayer === true,
-    supports_join_intent: status === 'approved' && approvedCapabilities.supports_join_intent === true,
-    launch_uri_approved: status === 'approved' && approvedCapabilities.launch_uri_approved === true,
-  };
-  for (const key of ['supports_presence', 'supports_multiplayer', 'supports_join_intent']) {
-    if (approved[key] && !requestedCapabilities[key]) throw new Error(`${key} 未由开发者申请，不能批准`);
-  }
-  if (approved.supports_presence && !scopes.includes('presence.write')) {
-    throw new Error('批准 Presence 能力需要同时批准 presence.write');
-  }
-  if ((approved.supports_multiplayer || approved.supports_join_intent) && !scopes.includes('multiplayer.write')) {
-    throw new Error('批准 Multiplayer 能力需要同时批准 multiplayer.write');
-  }
-  if (approved.supports_join_intent && (!approved.launch_uri_approved || !client.launch_uri_template)) {
-    throw new Error('Join Intent 需要批准启动 URI 模板');
-  }
+  let client;
+  let revokedUsers = [];
+  let scopes;
   const safeReviewReason = typeof reviewReason === 'string' ? reviewReason.trim().slice(0, 1000) || null : null;
   if (status === 'rejected' && !safeReviewReason) throw new Error('拒绝申请时请填写原因');
-  const previousScopes = [...client.approved_scopes].sort();
-  const nextScopes = [...scopes].sort();
-  const approvedScopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
-  const revokeCurrentGrants = status !== 'approved' || (client.status === 'approved' && approvedScopesChanged);
-  let revokedUsers = [];
-  if (revokeCurrentGrants && client.status === 'approved') {
-    revokedUsers = await revokeClientGrants(client.client_id, status === 'approved' ? 'suspended' : status);
-  }
-  await pool.execute(
-    `UPDATE clients SET status = ?, approved_scopes = IF(? = 'suspended', approved_scopes, ?),
-       launch_uri_approved = ?, supports_presence = ?, supports_multiplayer = ?, supports_join_intent = ?,
-       approved_at = IF(? = 'approved', CURRENT_TIMESTAMP, NULL),
-       approved_by = IF(? = 'approved', ?, NULL), admin_review_note = ? WHERE id = ?`,
-    [status, status, JSON.stringify(status === 'approved' ? scopes : []),
-      approved.launch_uri_approved ? 1 : 0, approved.supports_presence ? 1 : 0,
-      approved.supports_multiplayer ? 1 : 0, approved.supports_join_intent ? 1 : 0,
-      status, status, actor.adminId, safeReviewReason, id],
-  );
+  await transaction(async (conn) => {
+    const [clients] = await conn.execute('SELECT * FROM clients WHERE id = ? FOR UPDATE', [id]);
+    client = clients[0];
+    if (!client) throw new Error('客户端不存在');
+    if (client.status === 'deleted') throw new Error('已删除的客户端不能恢复');
+    // Approval accepts the application's access level as a whole, without a
+    // second scope/capability approval matrix.
+    scopes = status === 'approved'
+      ? normalizeScopes(applicationScopes({ requested_scopes: parseScopes(client.requested_scopes) })) : [];
+    const forumAccess = hasForumAccess(scopes);
+    const approved = {
+      supports_presence: forumAccess,
+      supports_multiplayer: forumAccess,
+      supports_join_intent: forumAccess && Boolean(client.launch_uri_template),
+      launch_uri_approved: forumAccess && Boolean(client.launch_uri_template),
+    };
+    const previousScopes = parseScopes(client.approved_scopes).sort();
+    const nextScopes = [...scopes].sort();
+    const approvedScopesChanged = previousScopes.length !== nextScopes.length || previousScopes.some((scope, index) => scope !== nextScopes[index]);
+    const revokeCurrentGrants = status !== 'approved' || (client.status === 'approved' && approvedScopesChanged);
+    if (revokeCurrentGrants && client.status === 'approved') {
+      const [users] = await conn.execute(`SELECT user_id FROM authorizations WHERE client_id = ?
+        UNION SELECT user_id FROM refresh_tokens WHERE client_id = ?`, [client.client_id, client.client_id]);
+      revokedUsers = users.map(row => Number(row.user_id));
+      await conn.execute('UPDATE refresh_tokens SET revoked = 1 WHERE client_id = ? AND revoked = 0', [client.client_id]);
+      await conn.execute('DELETE FROM authorizations WHERE client_id = ?', [client.client_id]);
+    }
+    await conn.execute(
+      `UPDATE clients SET status = ?, approved_scopes = IF(? = 'suspended', approved_scopes, ?),
+         launch_uri_approved = ?, supports_presence = ?, supports_multiplayer = ?, supports_join_intent = ?,
+         approved_at = IF(? = 'approved', CURRENT_TIMESTAMP, NULL),
+         approved_by = IF(? = 'approved', ?, NULL), admin_review_note = ? WHERE id = ?`,
+      [status, status, JSON.stringify(status === 'approved' ? scopes : []),
+        approved.launch_uri_approved ? 1 : 0, approved.supports_presence ? 1 : 0,
+        approved.supports_multiplayer ? 1 : 0, approved.supports_join_intent ? 1 : 0,
+        status, status, actor.adminId, safeReviewReason, id],
+    );
+  });
   if (revokedUsers.length) await Promise.all(revokedUsers.map(userId => tokenStore.revokeAccessTokensForUserClient(userId, client.client_id)));
   await writeAdminAudit(actor.adminId, `client.${status}`, 'client', Number(id), { approved_scopes: scopes, review_reason: safeReviewReason }, actor.ipAddress);
   return { updated: true };

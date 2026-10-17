@@ -10,18 +10,13 @@ import { Dialog } from '@/shared/Dialog';
 import { ResponsiveTable } from '@/shared/ResponsiveTable';
 import { SkeletonTable } from '@/shared/Skeleton';
 import type { AdminOAuthClient, AdminCreatedClient } from '@/api/types';
+import { ForumAccessOption, forumAccessEnabled } from '@/shared/ForumAccess';
+import { translate } from '@/i18n/catalogs';
 import { useAdminClientsI18n } from '../i18n/adminClients';
-
-const SUPPORTED_SCOPES = [
-  'openid', 'profile', 'email', 'forum.read', 'forum.write',
-  'resource.read', 'resource.download', 'resource.upload',
-  'notification.read', 'message.read', 'message.write',
-  'friends.read', 'presence.read', 'presence.write', 'multiplayer.read', 'multiplayer.write',
-  'game_content.saves.read', 'game_content.saves.write', 'game_content.saves.delete',
-] as const;
 
 export function AdminClientsPage() {
   const { locale, setLocale, t } = useAdminClientsI18n();
+  const accessText = (key: string) => translate(locale, key);
   const navigate = useNavigate();
   const { hasPermission } = useAdminAuth();
   const { toast } = useToast();
@@ -40,9 +35,11 @@ export function AdminClientsPage() {
   // Form state
   const [name, setName] = useState('');
   const [redirectUri, setRedirectUri] = useState('');
-  const [requirePkce, setRequirePkce] = useState(false);
+  const [requirePkce, setRequirePkce] = useState(true);
   const [ecosystem, setEcosystem] = useState<'mdtbbs' | 'mindustry-club' | 'global'>('mdtbbs');
-  const [scopes, setScopes] = useState<string[]>([]);
+  const [scopes, setScopes] = useState<string[]>(['openid', 'profile']);
+  const [clientType, setClientType] = useState<'public' | 'confidential'>('public');
+  const [partyType, setPartyType] = useState<'first_party' | 'third_party'>('third_party');
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
@@ -87,7 +84,10 @@ export function AdminClientsPage() {
   function resetForm() {
     setName('');
     setRedirectUri('');
-    setRequirePkce(false);
+    setRequirePkce(true);
+    setScopes(['openid', 'profile']);
+    setClientType('public');
+    setPartyType('third_party');
     setEcosystem('mdtbbs');
     setFormError('');
   }
@@ -110,10 +110,13 @@ export function AdminClientsPage() {
         name: name.trim(),
         redirect_uri: redirectUriValues()[0],
         redirect_uris: redirectUriValues(),
-        require_pkce: requirePkce,
+        require_pkce: clientType === 'public' || requirePkce,
+        client_type: clientType,
+        party_type: partyType,
+        forum_access: forumAccessEnabled(scopes),
         ecosystem,
       });
-      setSecretDialogTitle(t('secretCreated'));
+      setSecretDialogTitle(res.client_secret ? t('secretCreated') : t('createdToast'));
       setCreatedSecret(res);
       setCreateDialogOpen(false);
       resetForm();
@@ -132,7 +135,6 @@ export function AdminClientsPage() {
     if (!editClient) return;
 
     if (!name.trim()) { setFormError(t('nameRequired')); return; }
-    if (!scopes.length) { setFormError(t('scopeRequired')); return; }
     const uriError = validateRedirectUri(redirectUri);
     if (uriError) {
       setFormError(uriError);
@@ -146,7 +148,7 @@ export function AdminClientsPage() {
         name: name.trim(),
         redirect_uris: redirectUriValues(),
         require_pkce: requirePkce,
-        scopes,
+        forum_access: forumAccessEnabled(scopes),
         ecosystem,
       });
       setEditClient(null);
@@ -195,11 +197,10 @@ export function AdminClientsPage() {
     }
   }
 
-  async function handleReview(client: AdminOAuthClient, status: 'approved' | 'suspended', scopes = client.approved_scopes) {
+  async function handleReview(client: AdminOAuthClient, status: 'approved' | 'suspended') {
     try {
       await api.patch(`/api/admin/clients/${client.id}/review`, {
         status,
-        approved_scopes: status === 'approved' ? scopes : [],
       });
       await loadClients();
       toast('success', status === 'approved' ? t('reviewApproved') : t('reviewSuspended'));
@@ -224,6 +225,7 @@ export function AdminClientsPage() {
     setRedirectUri((client.redirect_uris || [{ redirect_uri: client.redirect_uri }]).map(item => item.redirect_uri).join('\n'));
     setRequirePkce(client.require_pkce ?? false);
     setEcosystem(client.ecosystem || 'mdtbbs');
+    setClientType(client.client_type);
     setScopes([...(client.status === 'approved' ? client.approved_scopes : client.requested_scopes)]);
     setFormError('');
   }
@@ -281,7 +283,7 @@ export function AdminClientsPage() {
               {
                 header: t('scopes'),
                 accessor: 'scopes',
-                render: (c) => <span title={t('approvedTitle', { value: c.approved_scopes.join(' ') })}>{c.status === 'pending' ? t('requested', { value: c.requested_scopes.join(' ') }) : t('approvedScopes', { value: c.approved_scopes.join(' ') })}</span>,
+                render: (c) => <span>{accessText(forumAccessEnabled(c.status === 'pending' ? c.requested_scopes : c.approved_scopes) ? 'access.forum' : 'access.basic')}</span>,
               },
               {
                 header: t('pkce'),
@@ -312,7 +314,7 @@ export function AdminClientsPage() {
                     {c.client_type === 'confidential' ? <Button size="sm" variant="ghost" onClick={() => setRotateClient(c)}>{t('rotateSecret')}</Button> : null}
                     {c.status === 'pending' && c.party_type === 'third_party' ? <Button size="sm" onClick={() => navigate('/applications')}>{t('review')}</Button> : null}
                     {c.status === 'approved' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'suspended')}>{t('disable')}</Button> : null}
-                    {c.status === 'suspended' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'approved', c.approved_scopes)}>{t('restore')}</Button> : null}
+                    {c.status === 'suspended' ? <Button size="sm" variant="ghost" onClick={() => void handleReview(c, 'approved')}>{t('restore')}</Button> : null}
                     {c.status === 'approved' && <Button size="sm" variant="secondary" onClick={() => setRevokeClient(c)}>{t('revokeAll')}</Button>}
                     <Button size="sm" variant="danger" onClick={() => setDeleteClient(c)}>{t('delete')}</Button>
                   </div>
@@ -343,6 +345,9 @@ export function AdminClientsPage() {
         }
       >
         <div className="stack">
+          <label className="field"><span className="field__label">{accessText('access.clientType')}</span><select className="field__input" value={clientType} onChange={event => setClientType(event.target.value as typeof clientType)}><option value="public">{accessText('access.publicClient')}</option><option value="confidential">{accessText('access.confidentialClient')}</option></select></label>
+          <label className="field"><span className="field__label">{accessText('access.partyType')}</span><select className="field__input" value={partyType} onChange={event => setPartyType(event.target.value as typeof partyType)}><option value="third_party">{accessText('access.thirdParty')}</option><option value="first_party">{accessText('access.firstParty')}</option></select></label>
+          <ForumAccessOption scopes={scopes} onChange={setScopes} locale={locale} />
           <label className="field"><span className="field__label">{t('ecosystem')}</span><select className="field__input" value={ecosystem} onChange={event => setEcosystem(event.target.value as typeof ecosystem)}><option value="mdtbbs">MDTBBS</option><option value="mindustry-club">Mindustry Club</option><option value="global">{t('globalEcosystem')}</option></select></label>
           <TextField
             label={t('clientName')}
@@ -363,7 +368,8 @@ export function AdminClientsPage() {
           <label className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
             <input
               type="checkbox"
-              checked={requirePkce}
+              checked={clientType === 'public' || requirePkce}
+              disabled={clientType === 'public'}
               onChange={(e) => setRequirePkce(e.target.checked)}
             />
             <span style={{ fontSize: 'var(--text-sm)' }}>{t('requirePkceRecommended')}</span>
@@ -406,29 +412,14 @@ export function AdminClientsPage() {
           <label className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
             <input
               type="checkbox"
-              checked={requirePkce}
+              checked={clientType === 'public' || requirePkce}
+              disabled={clientType === 'public'}
               onChange={(e) => setRequirePkce(e.target.checked)}
             />
             <span style={{ fontSize: 'var(--text-sm)' }}>{t('requirePkce')}</span>
           </label>
-          <fieldset className="field">
-            <legend className="field__label">{t('allowedScopes')}</legend>
-            <div className="admin-scope-options">
-              {SUPPORTED_SCOPES.map(scope => (
-                <label key={scope} className="cluster" style={{ gap: 'var(--space-2)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={scopes.includes(scope)}
-                    onChange={(event) => setScopes(current => event.target.checked
-                      ? [...current, scope]
-                      : current.filter(item => item !== scope))}
-                  />
-                  <code>{scope}</code>
-                </label>
-              ))}
-            </div>
-            <span className="field__hint">{t('scopeChangeWarning')}</span>
-          </fieldset>
+          <ForumAccessOption scopes={scopes} onChange={setScopes} locale={locale} />
+
         </div>
       </Dialog>
 
@@ -476,7 +467,7 @@ export function AdminClientsPage() {
         {createdSecret && (
           <div className="stack">
             <p style={{ color: 'var(--color-warning)', fontWeight: 'var(--weight-semibold)' }}>
-              {t('saveSecretNow')}
+              {createdSecret.client_secret ? t('saveSecretNow') : accessText('access.publicCreated')}
             </p>
             <div>
               <label className="field__label">{t('clientId')}</label>
@@ -491,7 +482,7 @@ export function AdminClientsPage() {
                 {createdSecret.client_id}
               </div>
             </div>
-            <div>
+            {createdSecret.client_secret ? <div>
               <label className="field__label">{t('clientSecret')}</label>
               <div style={{
                 padding: 'var(--space-2) var(--space-3)',
@@ -504,7 +495,7 @@ export function AdminClientsPage() {
               }}>
                 {createdSecret.client_secret}
               </div>
-            </div>
+            </div> : null}
           </div>
         )}
       </Dialog>

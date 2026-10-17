@@ -117,3 +117,74 @@ test('first-party forum authorization grants approved scopes without a consent d
     sessionManager.authenticateUserSession = originalAuthenticate;
   }
 });
+
+test('the forum option accepts old request names but grants the whole group with new consent', async () => {
+  const { normalizeScopes, applicationScopes } = require('../../src/modules/oauth/scopes');
+  const basic = { approved_scopes: applicationScopes({ forum_access: false }) };
+  const forum = { approved_scopes: applicationScopes({ forum_access: true }) };
+  assert.deepEqual(issuer._requestedScopes('', basic), ['openid', 'profile']);
+  assert.throws(() => issuer._requestedScopes('forum.read', basic), error => error.error === 'invalid_scope');
+  assert.throws(() => issuer._requestedScopes('forum', basic), error => error.error === 'invalid_scope');
+  const granted = issuer._requestedScopes('profile forum.write', forum);
+  assert.ok(granted.includes('forum'));
+  for (const scope of ['multiplayer.write', 'presence.write', 'message.read', 'game_content.saves.delete']) {
+    assert.ok(granted.includes(scope), scope);
+  }
+  assert.deepEqual(issuer._requestedScopes('openid profile', forum), ['openid', 'profile']);
+  // Normalizing a previously issued narrow grant must never add permissions.
+  assert.deepEqual(normalizeScopes('profile forum.read'), ['profile', 'forum.read']);
+  assert.throws(() => applicationScopes({ forum_access: 'false' }), /布尔值/);
+});
+
+test('a previous narrow forum grant requires consent before the complete forum group is issued', async () => {
+  const originalExecute = pool.execute;
+  const originalAuthenticate = sessionManager.authenticateUserSession;
+  const originalStoreCode = tokenStore.storeAuthCode;
+  const client = {
+    id: 4, client_id: 'forum-group-app', name: 'Forum app', client_type: 'public', party_type: 'third_party',
+    status: 'approved', redirect_uri: 'https://app.example/callback', approved_scopes: ['openid', 'profile', 'forum'],
+  };
+  let issued;
+  try {
+    pool.execute = async sql => {
+      if (sql.startsWith('SELECT * FROM clients')) return [[client]];
+      if (sql.startsWith('SELECT redirect_uri')) return [[]];
+      if (sql.startsWith('SELECT scope FROM authorizations')) return [[{ scope: 'openid profile forum.read' }]];
+      return [{ affectedRows: 1 }];
+    };
+    sessionManager.authenticateUserSession = async () => ({ user: { id: 42 } });
+    tokenStore.storeAuthCode = async (_code, payload) => { issued = payload; };
+    const request = {
+      clientId: client.client_id, redirectUri: client.redirect_uri, state: 'random-login-state',
+      scope: 'profile forum.read', codeChallenge: 'a'.repeat(43), codeChallengeMethod: 'S256', sessionToken: 'session',
+    };
+    const pending = await issuer.authorize(request);
+    assert.equal(pending.consentRequired, true);
+    assert.ok(pending.newScopes.includes('forum.write'));
+    assert.ok(pending.newScopes.includes('game_content.saves.delete'));
+    assert.equal(issued, undefined);
+    await issuer.authorize({ ...request, consentGranted: true });
+    assert.ok(issued.scope.split(' ').includes('forum'));
+  } finally {
+    pool.execute = originalExecute;
+    sessionManager.authenticateUserSession = originalAuthenticate;
+    tokenStore.storeAuthCode = originalStoreCode;
+  }
+});
+
+test('a downgraded app cannot use an old access token even when its Redis payload remains', async () => {
+  const originalExecute = pool.execute;
+  const originalGetToken = tokenStore.getAccessToken;
+  try {
+    pool.execute = async sql => {
+      if (sql.startsWith('SELECT * FROM clients')) return [[{
+        client_id: 'forum', client_secret: 'server-secret', client_type: 'confidential', party_type: 'first_party', status: 'approved',
+      }]];
+      if (sql.startsWith('SELECT status, approved_scopes')) return [[{ status: 'approved', approved_scopes: ['openid', 'profile'] }]];
+      throw new Error('scope downgrade must reject before further reads');
+    };
+    tokenStore.getAccessToken = async () => ({ user_id: 42, client_id: 'downgraded-app', scope: 'openid profile forum.write' });
+    assert.deepEqual(await issuer.introspect({ token: 'old-token', clientId: 'forum', clientSecret: 'server-secret' }), { active: false });
+    await assert.rejects(issuer.userinfo('old-token'), error => error.error === 'invalid_token');
+  } finally { pool.execute = originalExecute; tokenStore.getAccessToken = originalGetToken; }
+});

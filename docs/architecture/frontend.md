@@ -1,5 +1,8 @@
 # MindAuth 前端架构
 
+开发者申请和管理员创建/编辑统一使用 `shared/ForumAccess.tsx` 的单一论坛选项；审核页不再选择 scope 或客户端能力。授权、设备授权和完成页使用两档摘要，保留邮箱访问告知与撤销入口，不展示细分 scope 清单。四种语言文案位于 `forumAccessCatalogs.ts`。
+
+
 MindAuth 前端是基于 React 18 + Vite + TypeScript 的双入口 SPA：用户端负责登录/注册/账户中心/OAuth 授权，管理端负责后台运维，构建产物由 Express 直接托管。
 
 > **维护提示**：修改 frontend/src/**、vite.config.ts 时需同步更新本文档。

@@ -41,6 +41,12 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 
 ---
 
+## 两档接入范围
+
+授权预览、设备授权预览和完成页的 scope 摘要对象增加 `scope`（协议标识），保留原 `name`（显示名称）、`description` 等字段。界面按标识判断两档范围，避免依赖翻译后的名称。
+
+申请和后台使用单一 `forum_access` 选项。仅登录为 `openid profile`，论坛为 `openid profile forum`。`forum` 在签发令牌时附带兼容的论坛/资源/私信/云存档/联机细分 scope；旧细分请求仍受批准范围限制。新论坛应用收到旧论坛 scope 请求时会申请整个论坛组，用户一次确认。旧 token 刷新不扩权，范围关闭后撤销已有授权/令牌；内省和 UserInfo 也核对当前批准范围。官方 Native 设备会话继续使用独立的固定 scope。
+
 ## GET /api/authorize
 
 授权端点（RFC 6749 §4.1.1），发起授权码流程。**认证**：浏览器 `session` Cookie（未登录时重定向到登录页）。
@@ -73,7 +79,7 @@ MindAuth OAuth 2.0 / OIDC 域的端点参考，涵盖协议端点、授权管理
 | `invalid_scope` | scope 不在系统支持列表或不属于该客户端配置范围 |
 | `server_error` | 未捕获异常 |
 
-**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。MindAuth 将 `party_type=first_party` 的官方客户端视为账号自有登录流程，按客户端已批准的 scope 自动授权并记录授权范围，不显示同意页；第三方客户端在用户尚未授予请求 scope 时显示同意页，已授予的 scope 不重复确认，新增 scope 时只突出显示新增权限。授权 scope 写回现有 `authorizations` 记录。
+**特殊行为**：Public Client 必须提供不可预测的 `state`。授权码 Redis 存储，**5 分钟 TTL、单次消费**（GETDEL 原子取出）。MindAuth 将 `party_type=first_party` 的官方客户端视为账号自有登录流程，按客户端已批准的 scope 自动授权并记录授权范围，不显示同意页；第三方客户端在用户尚未授予请求 scope 时显示同意页，已授予的 scope 不重复确认，范围扩大时需重新同意；页面只显示一段访问范围说明。授权 scope 写回现有 `authorizations` 记录。
 
 用户界面语言解析顺序为 `ui_locales`、URL 显式语言、账户 `preferred_locale`、MindAuth locale cookie、`Accept-Language`、Client ecosystem 默认值，最后回退到 English。MDTBBS Client 默认 `zh-CN`；`mindustry-club` Client 默认 `en`。登录后的账户语言选择会保存到 `PUT /api/account/preferences` 的 `preferred_locale`。
 
@@ -286,7 +292,7 @@ OIDC Discovery 1.0 / RFC 8414 元数据端点（定义于 `src/app.js`）。无�
   "introspection_endpoint": "{baseUrl}/api/introspect",
   "response_types_supported": ["code"],
   "subject_types_supported": ["public"],
-  "scopes_supported": ["openid", "profile", "email", "forum.read", "forum.write", "resource.read", "resource.download", "resource.upload", "notification.read", "message.read", "message.write", "friends.read", "presence.read", "presence.write", "multiplayer.read", "multiplayer.write", "game_content.saves.read", "game_content.saves.write", "game_content.saves.delete"],
+  "scopes_supported": ["openid", "profile", "email", "forum", "forum.read", "forum.write", "resource.read", "resource.download", "resource.upload", "notification.read", "message.read", "message.write", "friends.read", "presence.read", "presence.write", "multiplayer.read", "multiplayer.write", "game_content.saves.read", "game_content.saves.write", "game_content.saves.delete"],
   "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
   "code_challenge_methods_supported": ["S256"],
   "grant_types_supported": ["authorization_code", "refresh_token"]

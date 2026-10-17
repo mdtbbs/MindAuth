@@ -23,7 +23,7 @@ router.get('/', requireAdmin, requireAdminPermission('clients.read'), async (req
 // POST /clients - Create client (rate limited)
 router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCreateLimiter, async (req, res) => {
   try {
-    const { name, redirect_uri, redirect_uris, require_pkce, ecosystem } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce, ecosystem, client_type, party_type, forum_access } = req.body;
     const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
     if (!name || !uris.length) {
@@ -36,21 +36,21 @@ router.post('/', requireAdmin, requireAdminPermission('clients.write'), clientCr
     }
 
     const result = await clientRegistry.createClient(
-      { name, redirect_uri: uris[0], redirect_uris: uris, require_pkce, ecosystem },
+      { name, redirect_uri: uris[0], redirect_uris: uris, require_pkce, ecosystem, client_type, party_type, forum_access },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 
-    res.status(201).json({ success: true, client_id: result.client_id, client_secret: result.client_secret });
+    res.status(201).json({ success: true, client_id: result.client_id, client_secret: result.client_secret, client_type: result.client_type });
   } catch (err) {
     console.error('Create client error:', err);
-    res.status(500).json({ success: false, message: '创建失败' });
+    res.status(400).json({ success: false, message: err.message || '创建失败' });
   }
 });
 
 router.patch('/:id/review', requireAdmin, requireAdminPermission('developers.review'), async (req, res) => {
   try {
     await clientRegistry.reviewClient(parseInt(req.params.id, 10),
-      { status: req.body?.status, approvedScopes: req.body?.approved_scopes },
+      { status: req.body?.status, reviewReason: req.body?.review_reason },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) });
     res.json({ success: true });
   } catch (err) {
@@ -111,7 +111,7 @@ router.delete('/:id', requireAdmin, requireAdminPermission('clients.write'), asy
 router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, redirect_uri, redirect_uris, require_pkce, scopes, ecosystem } = req.body;
+    const { name, redirect_uri, redirect_uris, require_pkce, scopes, ecosystem, forum_access } = req.body;
     const uris = redirect_uris || (redirect_uri ? [redirect_uri] : []);
 
     if (!name || !uris.length) {
@@ -127,7 +127,7 @@ router.put('/:id', requireAdmin, requireAdminPermission('clients.write'), async 
 
     await clientRegistry.updateClient(
       parseInt(id),
-      { name, redirect_uris: uris, require_pkce, scopes, ecosystem },
+      { name, redirect_uris: uris, require_pkce, scopes, ecosystem, forum_access },
       { adminId: req.adminUser.id, ipAddress: getClientIp(req) }
     );
 

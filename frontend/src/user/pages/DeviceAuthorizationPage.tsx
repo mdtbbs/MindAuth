@@ -4,17 +4,18 @@ import api from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { AuthShell } from '@/user/components/AuthShell';
 import { Button } from '@/shared/Button';
+import { AccessSummary } from '@/shared/ForumAccess';
 import { useI18n } from '@/i18n/I18nProvider';
 
 type DeviceInfo = {
   success: boolean;
   user_code: string;
   client: { name: string; client_id: string; client_type: string; party_type: string };
-  scopes: { name: string; description: string; sensitive?: boolean }[];
+  scopes: { scope?: string; name: string; description: string; sensitive?: boolean }[];
 };
 
 export function DeviceAuthorizationPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -69,7 +70,7 @@ export function DeviceAuthorizationPage() {
             <span className="public-app-label">{device.client.party_type === 'first_party' ? t('device.firstParty') : t('device.thirdParty')}</span>
             <h2>{device.client.name}</h2>
             <p>{t('device.requests')}</p>
-            <ul className="public-scope-list">{device.scopes.map(scope => <li key={scope.name}><div><strong>{scope.name}</strong>{scope.sensitive ? <span className="public-scope-sensitive">{t('device.sensitive')}</span> : null}<p>{scope.description}</p></div></li>)}</ul>
+            <AccessSummary scopes={device.scopes.map(scope => scope.scope || scope.name)} locale={locale} />
           </section>
           <div className="cluster cluster--end"><Button type="button" variant="secondary" disabled={busy} onClick={() => void decide('deny')}>{t('device.deny')}</Button><Button type="button" disabled={busy} onClick={() => void decide('approve')}>{busy ? t('device.submitting') : t('device.allow')}</Button></div>
         </>}

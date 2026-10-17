@@ -1,5 +1,8 @@
 # MindAuth 第三方 OAuth API 接入指南
 
+应用申请只有「接入论坛功能」一个可选项：关闭时仅登录/基本资料（`openid profile`），开启并审核通过后统一调用公开论坛功能（`openid profile forum`）。不需要逐项申请发帖、资源、私信、云存档和联机权限。Public Client 指南见 [public-client-pkce.md](public-client-pkce.md)。以下服务端接入保留既有 OAuth 协议；旧细分 token 不会在刷新时自动扩权。
+
+
 本文保留服务端 Confidential Client 的接入说明。Android、桌面、游戏 Mod、纯浏览器应用和第三方启动器应阅读 [Public Client PKCE 指南](public-client-pkce.md)：它们通过系统浏览器登录，不持有 `client_secret`。
 
 > **维护提示：** 修改 `src/routes/oauth.js`、`src/modules/oauth/*` 或 OIDC Discovery 元数据时，需同步更新本文和 [API 参考](api/oauth.md)。

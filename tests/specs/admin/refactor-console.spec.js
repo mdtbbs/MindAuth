@@ -90,7 +90,7 @@ test.describe('Admin management refactor API', () => {
       expect(updated.status()).toBe(200);
       const listed = await request.get('/api/admin/clients');
       const stored = (await listed.json()).clients.find(item => item.id === client.id);
-      expect(stored.approved_scopes).toEqual(['openid', 'profile', 'email', 'forum.read', 'resource.download']);
+      expect(stored.approved_scopes).toEqual(expect.arrayContaining(['openid', 'profile', 'email', 'forum', 'forum.write', 'multiplayer.write']));
     } finally {
       if (client?.id) await request.delete(`/api/admin/clients/${client.id}`, { headers: { 'X-CSRF-Token': await csrf(request) } });
     }

@@ -4,6 +4,7 @@ import { useAdminAuth } from '../AdminAuthProvider';
 import { useToast } from '@/shared/ToastProvider';
 import { Card } from '@/shared/Card';
 import { Button } from '@/shared/Button';
+import { forumAccessEnabled } from '@/shared/ForumAccess';
 import { Dialog } from '@/shared/Dialog';
 
 interface Application {
@@ -32,8 +33,6 @@ export function AdminApplicationsPage() {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Application | null>(null);
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('approved');
-  const [approvedScopes, setApprovedScopes] = useState<string[]>([]);
-  const [approvedCapabilities, setApprovedCapabilities] = useState({ supports_presence: false, supports_multiplayer: false, supports_join_intent: false, launch_uri_approved: false });
   const [reviewReason, setReviewReason] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -58,26 +57,16 @@ export function AdminApplicationsPage() {
 
   function openReview(application: Application, status: ReviewStatus) {
     setSelected(application); setReviewStatus(status);
-    setApprovedScopes(application.approved_scopes.length ? application.approved_scopes : application.requested_scopes);
-    setApprovedCapabilities({
-      supports_presence: Boolean(application.supports_presence),
-      supports_multiplayer: Boolean(application.supports_multiplayer),
-      supports_join_intent: Boolean(application.supports_join_intent),
-      launch_uri_approved: Boolean(application.launch_uri_approved),
-    });
     setReviewReason(status === 'rejected' ? '' : application.admin_review_note || '');
   }
 
   async function submitReview() {
     if (!selected) return;
-    if (reviewStatus === 'approved' && approvedScopes.length === 0) { toast('error', '批准时至少选择一个 scope'); return; }
     if (reviewStatus === 'rejected' && !reviewReason.trim()) { toast('error', '请填写拒绝原因'); return; }
     setSaving(true);
     try {
       await api.patch(`/api/admin/developer-applications/${selected.id}/review`, {
         status: reviewStatus,
-        approved_scopes: reviewStatus === 'approved' ? approvedScopes : [],
-        approved_capabilities: reviewStatus === 'approved' ? approvedCapabilities : {},
         review_reason: reviewReason.trim() || null,
       });
       setSelected(null); await load(); toast('success', reviewStatus === 'approved' ? '应用已批准' : '申请已拒绝');
@@ -86,19 +75,19 @@ export function AdminApplicationsPage() {
   }
 
   return <div className="admin-page">
-    <div className="admin-page-heading"><div><h1 className="admin-page-title">应用申请</h1><p className="admin-page-lead">审核开发者提交的 Public Client、回调地址和请求权限。</p></div></div>
+    <div className="admin-page-heading"><div><h1 className="admin-page-title">应用申请</h1><p className="admin-page-lead">审核开发者应用资料、回调地址及是否接入论坛功能。</p></div></div>
     <div className="admin-tabs" role="tablist" aria-label="申请状态">{(['pending', 'all', 'approved', 'rejected'] as const).map(value => <button key={value} role="tab" aria-selected={filter === value} onClick={() => setFilter(value)}>{value === 'pending' ? `待审核 (${applications.filter(item => item.status === 'pending').length})` : value === 'all' ? '全部申请' : statusText(value)}</button>)}</div>
     <Card>
       <div className="admin-filter-bar"><label className="admin-search"><span className="sr-only">搜索应用</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索应用、开发者或回调地址" /></label></div>
-      {loading ? <div className="admin-inline-state">正在加载申请…</div> : error ? <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{error}</p><Button size="sm" variant="secondary" onClick={() => load()}>重试</Button></div> : rows.length === 0 ? <div className="admin-inline-state">{filter === 'pending' ? '当前没有待审核申请' : '没有匹配的申请'}</div> : <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>应用</th><th>开发者</th><th>类型</th><th>Redirect URI</th><th>请求 scopes</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>{rows.map(app => <tr key={app.id}>
-        <td><strong>{app.name}</strong><small className="admin-cell-sub">{app.client_id}</small></td><td>{app.owner_username || '—'}<small className="admin-cell-sub">ID {app.owner_user_id || '—'}</small></td><td>{app.client_type === 'public' ? 'Public Client' : 'Confidential Client'}</td><td><div className="admin-uri-list">{app.redirect_uris.map(uri => <code key={uri.redirect_uri}>{uri.redirect_uri}</code>)}</div></td><td><div className="admin-scope-list">{app.requested_scopes.map(scope => <code key={scope}>{scope}</code>)}</div></td><td><span className={`admin-badge ${app.status === 'approved' ? 'is-success' : app.status === 'rejected' ? 'is-danger' : 'is-warning'}`}>{statusText(app.status)}</span></td><td>{new Date(app.created_at).toLocaleString('zh-CN')}</td>
+      {loading ? <div className="admin-inline-state">正在加载申请…</div> : error ? <div className="admin-inline-state admin-inline-state--error" role="alert"><p>{error}</p><Button size="sm" variant="secondary" onClick={() => load()}>重试</Button></div> : rows.length === 0 ? <div className="admin-inline-state">{filter === 'pending' ? '当前没有待审核申请' : '没有匹配的申请'}</div> : <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>应用</th><th>开发者</th><th>类型</th><th>Redirect URI</th><th>接入范围</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>{rows.map(app => <tr key={app.id}>
+        <td><strong>{app.name}</strong><small className="admin-cell-sub">{app.client_id}</small></td><td>{app.owner_username || '—'}<small className="admin-cell-sub">ID {app.owner_user_id || '—'}</small></td><td>{app.client_type === 'public' ? 'Public Client' : 'Confidential Client'}</td><td><div className="admin-uri-list">{app.redirect_uris.map(uri => <code key={uri.redirect_uri}>{uri.redirect_uri}</code>)}</div></td><td><span>{forumAccessEnabled(app.requested_scopes) ? '登录和论坛功能' : '仅登录和基本资料'}</span></td><td><span className={`admin-badge ${app.status === 'approved' ? 'is-success' : app.status === 'rejected' ? 'is-danger' : 'is-warning'}`}>{statusText(app.status)}</span></td><td>{new Date(app.created_at).toLocaleString('zh-CN')}</td>
         <td>{canReview && app.status !== 'suspended' ? <div className="admin-row-actions"><button type="button" onClick={() => openReview(app, 'approved')}>{app.status === 'approved' ? '修改批准' : '批准'}</button><button type="button" className="is-danger" onClick={() => openReview(app, 'rejected')}>拒绝</button></div> : <span>—</span>}</td>
       </tr>)}</tbody></table></div>}
     </Card>
     <Dialog open={!!selected} onClose={() => setSelected(null)} title={reviewStatus === 'approved' ? '审核并批准应用' : '拒绝应用申请'} footer={<div className="cluster cluster--end"><Button variant="secondary" onClick={() => setSelected(null)}>取消</Button><Button variant={reviewStatus === 'rejected' ? 'danger' : 'primary'} onClick={submitReview} loading={saving}>{reviewStatus === 'rejected' ? '确认拒绝' : '批准应用'}</Button></div>}>
       {selected && <div className="admin-form-stack"><p><strong>{selected.name}</strong> · {selected.owner_username || `用户 ${selected.owner_user_id}`}</p><p>{selected.description || '未填写应用说明'}</p><dl className="admin-detail-list"><div><dt>Client ID</dt><dd><code>{selected.client_id}</code></dd></div><div><dt>回调地址</dt><dd>{selected.redirect_uris.map(uri => <code key={uri.redirect_uri}>{uri.redirect_uri}</code>)}</dd></div><div><dt>图标 URL</dt><dd>{selected.application_icon_url || '未设置'}</dd></div><div><dt>Join Intent URI</dt><dd><code>{selected.launch_uri_template || '未设置'}</code></dd></div></dl>
-        {reviewStatus === 'approved' && <fieldset className="admin-scope-editor"><legend>批准的权限（可调整）</legend>{selected.requested_scopes.map(scope => <label key={scope}><input type="checkbox" checked={approvedScopes.includes(scope)} onChange={e => setApprovedScopes(scopes => e.target.checked ? [...scopes, scope] : scopes.filter(item => item !== scope))} /><code>{scope}</code></label>)}</fieldset>}
-        {reviewStatus === 'approved' && <fieldset className="admin-scope-editor"><legend>批准客户端能力（可调整）</legend>{([['supports_presence', 'Presence 客户端', selected.supports_presence_requested], ['supports_multiplayer', 'Multiplayer 客户端', selected.supports_multiplayer_requested], ['launch_uri_approved', '启动 URI 模板', Boolean(selected.launch_uri_template)], ['supports_join_intent', 'Join Intent 启动器', selected.supports_join_intent_requested]] as const).map(([key, label, requested]) => <label key={key}><input type="checkbox" disabled={!requested} checked={approvedCapabilities[key]} onChange={event => setApprovedCapabilities(current => ({ ...current, [key]: event.target.checked }))} />{label}{!requested ? '（未申请）' : ''}</label>)}</fieldset>}
+        <p><strong>接入范围：</strong>{forumAccessEnabled(selected.requested_scopes) ? '登录和论坛功能（发帖、回复、资源、私信、云存档和联机）' : '仅登录和基本资料'}</p>
+        <p className="admin-form-note">批准应用时一并启用其申请的接入范围，无需分别审批论坛功能。</p>
         <label className="field"><span className="field__label">{reviewStatus === 'rejected' ? '拒绝原因（必填）' : '审核备注（可选）'}</span><textarea rows={3} maxLength={1000} value={reviewReason} onChange={e => setReviewReason(e.target.value)} /></label>
         <p className="admin-form-note">Public Client 不生成或保存 client_secret，获批后必须使用 Authorization Code + PKCE S256。</p>
       </div>}

@@ -45,6 +45,7 @@ require.cache[redisPath] = {
 };
 
 // Mock MySQL pool
+let approvedScopes;
 const mockPool = {
   execute: async (sql, params) => {
     // Return mock user for SELECT queries
@@ -64,6 +65,7 @@ const mockPool = {
         client_id: params[0],
         client_secret: 'test_secret',
         name: 'Test Client',
+        approved_scopes: approvedScopes,
         redirect_uri: 'http://localhost:3000/callback',
         require_pkce: 0,
       }]];
@@ -96,6 +98,7 @@ const oauthIssuer = require('../../src/modules/oauth/oauthIssuer');
 
 beforeEach(() => {
   store.clear();
+  approvedScopes = undefined;
 });
 
 // ─── User Code Format Tests ───────────────────────────────────
@@ -424,4 +427,13 @@ test('getDeviceCodeByUserCode returns device data for valid user code', async ()
   assert.ok(result);
   assert.equal(result.deviceCode, issued.deviceCode);
   assert.equal(result.client_id, 'test_client');
+});
+
+test('a device authorization cannot redeem forum access after the app is downgraded', async () => {
+  approvedScopes = ['openid', 'profile', 'forum'];
+  const issued = await oauthIssuer.issueDeviceCode({ clientId: 'test_client', scope: 'openid profile forum' });
+  await oauthIssuer.approveDeviceCode({ userCode: issued.userCode, userId: 123 });
+  approvedScopes = ['openid', 'profile'];
+  await assert.rejects(oauthIssuer.exchangeDeviceToken({ clientId: 'test_client', deviceCode: issued.deviceCode }),
+    error => error.error === 'invalid_grant');
 });

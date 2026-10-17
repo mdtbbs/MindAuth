@@ -1,5 +1,8 @@
 # MindAuth 后端模块
 
+OAuth 接入使用 `applicationScopes`/`normalizeScopes` 管理两档范围：`openid profile` 或加 `forum`。forum 只在显式组标记存在时展开兼容 scope，旧窄范围令牌不扩权。申请审核在客户端行锁事务内整体批准范围，并联动撤销授权/令牌。内省和 UserInfo 校验现行批准范围；Native 会话保留既有固定范围。
+
+
 MindAuth 后端（Express + MySQL + Redis）按"深模块"组织：`src/modules/` 下每个模块是其业务域的唯一接缝，路由层只做 HTTP 适配，业务逻辑与数据访问收敛在模块内部。
 
 > **维护提示**：修改 src/modules/**、src/middleware/*、src/utils/* 时需同步更新本文档。
@@ -102,7 +105,7 @@ OAuth 客户端 CRUD 与密钥轮换，所有变更写管理员审计。
 | 导出 | 说明 |
 |------|------|
 | `createClient(data, actor)` | 创建（`data`: name/redirect_uri/require_pkce；`actor`: adminId/ipAddress），返回 `{ client_id, client_secret }` |
-| `updateClient(id, data, actor)` | 更新；`require_pkce` 仅显式传入时才更新；已启用客户端的 scope 变更会撤销全部授权与 refresh/access token |
+| `updateClient(id, data, actor)` | 更新；`require_pkce` 仅显式传入时才更新；已启用客户端的接入范围变更会撤销全部授权与 refresh/access token |
 | `rotateSecret(id, actor)` | 轮换密钥，返回新 `client_secret` |
 | `deleteClient(id, actor)` | 删除 |
 | `revokeClientAuthorizations(id, actor)` | 撤销该客户端全部授权、refresh token 与 access token，但不更改启用状态 |
@@ -111,7 +114,7 @@ OAuth 客户端 CRUD 与密钥轮换，所有变更写管理员审计。
 
 依赖：MySQL `clients`；`auditWriter.writeAdminAudit`；utils `token`。
 
-约束：第三方 Public Client 新申请保持 pending，管理员审核通过前不能授权；修改已批准应用会重新审核并撤销既有授权。管理员调整已启用客户端的 OAuth scope 时，会撤销全部相关用户授权、refresh token 和 access token。`validateRedirectUri` 含 SSRF 防护——拒绝 localhost 变体、`.local`/`.localhost`、RFC 1918 私网段、链路本地 169.254/16 与云元数据端点（`metadata.google.internal`、`169.254.169.254`）；Native Public Client 可使用显式 loopback 回调。
+约束：第三方 Public Client 新申请保持 pending，管理员审核通过前不能授权；修改已批准应用会重新审核并撤销既有授权。管理员调整已启用客户端的接入范围时，会撤销全部相关用户授权、refresh token 和 access token。`validateRedirectUri` 含 SSRF 防护——拒绝 localhost 变体、`.local`/`.localhost`、RFC 1918 私网段、链路本地 169.254/16 与云元数据端点（`metadata.google.internal`、`169.254.169.254`）；Native Public Client 可使用显式 loopback 回调。
 
 ### emailPolicyService（`src/modules/emailPolicy/emailPolicyService.js`）
 

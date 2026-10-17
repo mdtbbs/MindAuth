@@ -2,12 +2,14 @@
 
 本指南适用于 Android、桌面程序、游戏 Mod、浏览器原生应用和第三方启动器。所有应用使用同一套 MindAuth Authorization Code 流程；应用名不会获得额外权限。Web 服务端可以继续使用 Confidential Client，公开二进制和浏览器代码必须使用 Public Client。
 
+服务端上线前需应用 migration `024_forum_access_scope_capacity.sql`，以存储完整论坛组的兼容 scope；现有授权内容不变。
+
 ## 自助创建
 
 登录并完成手机号验证后，打开 `{issuer}/developer`：
 
-1. 创建 Public Client，填写名称、必填简介、可选主页、一个或多个 Redirect URI 和 scope。
-2. 创建成功后立即获得 `client_id`，应用状态为 `approved`，无需测试模式或管理员审核。应用数量不限；创建接口按 IP 限流。
+1. 创建 Public Client，填写名称、必填简介、可选主页、一个或多个 Redirect URI，以及一个「接入论坛功能」选项。
+2. 创建成功后立即获得 `client_id`，应用状态为 `pending`，管理员审核通过后启用。应用数量不限；创建接口按 IP 限流。
 3. Public Client 的 `client_secret` 为 `NULL`，必须使用 Authorization Code + PKCE S256。管理员仍可管理 confidential client、停用或删除恶意应用。
 
 注册页面：`{issuer}/register`。密码、验证码、邮件和风控始终在 MindAuth 网站处理。
@@ -34,7 +36,7 @@ code_challenge = BASE64URL(SHA256(UTF8(code_verifier)))
   ?response_type=code
   &client_id=PUBLIC_CLIENT_ID
   &redirect_uri=REGISTERED_CALLBACK
-  &scope=openid%20profile%20forum.read
+  &scope=openid%20profile%20forum
   &state=RANDOM_STATE
   &code_challenge=BASE64URL_SHA256
   &code_challenge_method=S256
@@ -53,10 +55,15 @@ Content-Type: application/json
 
 ## Scopes
 
-应用只能请求自己在开发者中心勾选并获批的 scopes；修改权限会撤销现有 token 以应用新权限。用户首次授权或新增 scope 时会看到确认页；已授予的相同权限不重复询问。`message.*`、社交/联机 scope 和 `game_content.saves.*` 会显示“敏感权限”。当前 scope：
+应用接入只有两档：默认 `openid profile`，仅登录和读取基本账户资料；选中「接入论坛功能」并获批后可请求 `openid profile forum`，统一使用论坛、资源、私信、云存档与联机功能。无需逐项申请或审批。`forum_access` 是申请/管理 API 的布尔选项，`forum` 是授权请求中的 scope。
+
+授权页只展示应用身份和一段范围说明，允许或取消即可；旧应用显式请求 `email` 时仍告知邮箱访问。`forum` 会在令牌中包含原有细分 scope，兼容既有资源服务器。旧的局部授权和 refresh token 不自动升级；应用采用完整论坛范围后，用户需重新同意。未申请论坛功能的应用请求任何论坛 scope 都会失败。更改接入范围会撤销已有授权和令牌。
+
+以下细分名称仅用于旧客户端和接口契约兼容，新应用直接使用 `forum`：
 
 | Scope | 用户可见含义 |
 |---|---|
+| `forum` | 全部公开论坛功能，仍受用户业务权限与站点策略约束 |
 | `openid` | 稳定账户标识 |
 | `profile` | 基本资料 |
 | `email` | 电子邮箱和验证状态 |
@@ -70,9 +77,9 @@ Content-Type: application/json
 | `game_content.saves.write` | 创建或更新游戏云存档 |
 | `game_content.saves.delete` | 删除游戏云存档 |
 
-Cloud Saves scope 需要在 Public OAuth client 的请求与批准权限中明确包含。`/api/native/*` 是独立的官方登录路径：它不接受用户选择 scope；新 Native 登录会带上固定的三个 Cloud Saves scope，已有会话刷新时继续使用 refresh token 中存储的旧 scope。
+Cloud Saves 已包含在论坛功能选项中，无需单独申请。`/api/native/*` 是独立的官方登录路径：它不接受用户选择 scope；新 Native 登录会带上固定的三个 Cloud Saves scope，已有会话刷新时继续使用 refresh token 中存储的旧 scope。
 
-邮箱 scope 是可选兼容项。用户首次通过 Public Client 使用 MDTBBS 时只需授权 `profile`，无需同时授权 `email`。
+邮箱 scope 是可选兼容项。仅登录应用默认不读取邮箱；调用 MDTBBS API 需要论坛范围及 `profile`，无需同时授权 `email`。
 
 论坛仍会检查用户状态、手机号、条款、版块权限、审核队列、封禁、站点开关和资源策略。OAuth scope 不是业务权限绕过。
 
@@ -135,7 +142,7 @@ sessionStorage.setItem('oauth.pending', JSON.stringify({ verifier, state }));
 const authorize = new URL('/api/authorize', issuer);
 authorize.search = new URLSearchParams({
   response_type: 'code', client_id: clientId, redirect_uri: redirectUri,
-  scope: 'openid profile forum.read', state,
+  scope: 'openid profile forum', state,
   code_challenge: challenge, code_challenge_method: 'S256',
 }).toString();
 window.location.assign(authorize);
@@ -190,7 +197,7 @@ val authorize = Uri.parse("$issuer/api/authorize").buildUpon()
   .appendQueryParameter("response_type", "code")
   .appendQueryParameter("client_id", clientId)
   .appendQueryParameter("redirect_uri", redirectUri)
-  .appendQueryParameter("scope", "openid profile forum.read")
+  .appendQueryParameter("scope", "openid profile forum")
   .appendQueryParameter("state", state)
   .appendQueryParameter("code_challenge", challenge)
   .appendQueryParameter("code_challenge_method", "S256")
