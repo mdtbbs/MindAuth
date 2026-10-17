@@ -1,45 +1,60 @@
+/* 设计令牌 —— 调色板与 MDTBBS.CN MindForum（论坛前端）保持一致。
+ *
+ * 论坛侧的取值（mdtbbs.cn 的 --primary/--bg/--bg-card 等）：
+ *   浅色  主色 #2f80ed / 底 #f5f9ff / 卡片 #fff / 边框 #d8e2f0 / 正文 #0f172a
+ *   深色  主色 #74a9ff / 底 #0b1220 / 卡片 #101a2d / 浮层 #13233c / 正文 #e5eefc
+ * 改这里即全站生效；页面里不要再写死颜色。
+ *
+ * 深色有两处入口，改深色值时必须同步：
+ *   1) @media (prefers-color-scheme: dark) —— 跟随系统（未手动指定 light 时）
+ *   2) :root[data-theme='dark']            —— 用户在页面上手动切换
+ * 页面加载时由 index.html/admin.html 的内联脚本写 data-theme，避免闪烁。
+ */
 :root {
-  --color-primary: #ff6b35;
-  --color-primary-hover: #e55a2b;
-  --color-primary-active: #cc4a1e;
-  --color-primary-soft: #fff1eb;
-  --color-primary-bg: #fff1eb;
-  --color-primary-border: rgba(255, 107, 53, 0.2);
-  --color-accent: #ffc107;
-  --color-accent-hover: #e6ad00;
-  --color-accent-soft: #fff8db;
+  color-scheme: light;
 
-  --color-bg: #f5f7fb;
+  --color-primary: #2f80ed;
+  --color-primary-hover: #2563eb;
+  --color-primary-active: #1d4ed8;
+  --color-primary-soft: #eaf2ff;
+  --color-primary-bg: #eaf2ff;
+  --color-primary-border: rgba(47, 128, 237, 0.24);
+
+  --color-bg: #f5f9ff;
   --color-bg-elevated: #ffffff;
-  --color-bg-sunken: #edf1f6;
-  --color-bg-subtle: #f9fbfd;
+  --color-bg-sunken: #eef4fb;
+  --color-bg-subtle: #f8fbff;
   --color-bg-overlay: rgba(15, 23, 42, 0.42);
-  --color-surface-panel: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  /* Frosted-glass surfaces (sticky headers, hero panels) — theme-aware so they
-     don't stay white in dark mode */
+  --color-surface-panel: #ffffff;
+  /* 毛玻璃表面（吸顶栏、浮层）——跟随主题，深色下不残留白底 */
   --color-glass-bg: rgba(255, 255, 255, 0.9);
   --color-glass-bg-strong: rgba(255, 255, 255, 0.76);
   --color-glass-border: rgba(255, 255, 255, 0.56);
 
-  --color-text: #111827;
-  --color-text-secondary: #4b5563;
-  /* Darkened from #8b95a7 to clear WCAG AA (4.5:1) on light surfaces */
-  --color-text-muted: #6b7688;
+  --color-text: #0f172a;
+  --color-text-secondary: #475569;
+  /* 论坛 --text-muted (#5b6a7f)：浅色面板上满足 WCAG AA 4.5:1 */
+  --color-text-muted: #5b6a7f;
   --color-text-inverse: #ffffff;
 
-  --color-border: #d8dee8;
-  --color-border-soft: #e9edf3;
-  --color-border-strong: #b8c2d1;
-  --color-focus: #4a90d9;
+  --color-border: #d8e2f0;
+  --color-border-soft: #e8eef6;
+  --color-border-strong: #b9c8dc;
+  --color-focus: #2f80ed;
 
-  --color-success: #16a34a;
-  --color-success-bg: #f0fdf4;
-  --color-warning: #d97706;
+  --color-success: #15803d;
+  --color-success-bg: #ecfdf3;
+  --color-success-border: rgba(21, 128, 61, 0.22);
+  --color-warning: #b45309;
   --color-warning-bg: #fff7ed;
+  --color-warning-border: rgba(180, 83, 9, 0.22);
   --color-error: #dc2626;
+  --color-error-hover: #b91c1c;
   --color-error-bg: #fef2f2;
-  --color-info: #2563eb;
-  --color-info-bg: #eff6ff;
+  --color-error-border: rgba(220, 38, 38, 0.2);
+  --color-info: #2f80ed;
+  --color-info-bg: #eaf2ff;
+  --color-info-border: rgba(47, 128, 237, 0.22);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -52,7 +67,7 @@
   --space-12: 3rem;
   --space-16: 4rem;
 
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
   --text-xs: 0.75rem;
@@ -73,24 +88,27 @@
   --weight-semibold: 600;
   --weight-bold: 700;
 
-  /* 方正风格：圆角整体收直（用户偏好 2026-07-27），仅保留细微倒角避免生硬 */
-  --radius-sm: 2px;
-  --radius-md: 3px;
-  --radius-lg: 4px;
-  --radius-xl: 4px;
-  --radius-2xl: 6px;
-  --radius-full: 9999px;
+  /* 圆角：论坛要求直角 0px —— 按钮/卡片/输入框/导航/浮层一律方角，
+     与论坛那条 `.btn,.card,.input,.toast,.theme-toggle{border-radius:0!important}` 对齐。
+     --radius-full 只留给头像、状态点、加载环这类「本来就是圆形」的元素，
+     不要用在按钮/标签/卡片上（那些已显式改为 0）。 */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-full: 9999px; /* 仅限「本来就是圆形」的元素：头像、状态点、加载环、logo 圆点 */
 
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0 10px 30px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 20px 45px rgba(15, 23, 42, 0.12);
-  --shadow-xl: 0 30px 60px rgba(15, 23, 42, 0.16);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.12);
+  --shadow-xl: 0 20px 45px rgba(15, 23, 42, 0.16);
 
-  --duration-fast: 100ms;
+  --duration-fast: 140ms;
   --duration-normal: 200ms;
   --duration-slow: 300ms;
-  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-default: cubic-bezier(0.16, 1, 0.3, 1);
 
   --z-dropdown: 100;
   --z-sticky: 200;
@@ -98,61 +116,169 @@
   --z-modal: 400;
   --z-toast: 500;
 
-  /* Auth 页整屏背景：浅蓝方格网格（未配置自定义背景图时的默认打底） */
-  --auth-bg: #f0f4f9;
-  --auth-grid-line: rgba(37, 99, 235, 0.07);
+  /* 外壳统一 gutter：页头 / 侧栏 / 内容共用同一条左基线（改这里即整站对齐）。
+     窄屏收窄，见文件末尾的 640px 断点。 */
+  --shell-gutter: 1.5rem;
+  /* 认证页整屏背景：浅蓝方格网格（未配置自定义背景图时的默认打底）。
+     这套「技术网格」同时用于账户中心与管理端内容区底色，保持同一视觉语言。 */
+  --auth-bg: #f5f9ff;
+  --grid-line: rgba(47, 128, 237, 0.06);
+  --grid-size: 24px;
   /* 自定义背景图上的可读性遮罩 */
   --auth-scrim: rgba(255, 255, 255, 0.18);
+  /* 认证页右侧社区插画配色（随主题变化，避免深色下过亮） */
+  --art-base: #d6e8ff;
+  --art-mid: #9fc7fb;
+  --art-deep: #5b9bea;
+  --art-face: #ffffff;
+  --art-side: #dcecff;
+  --art-left: #b6d5fc;
+  --art-line: #90baf0;
+  --art-rail: #ffffff;
 
   --max-width-content: 72rem;
   --max-width-auth: 76rem;
-  --max-width-account: 84rem;
-  --header-height: 4rem;
+  --max-width-account: 94rem;
+  --header-height: 3.5rem;
   --sidebar-width: 15rem;
-  --account-sidebar-width: 17rem;
+  --account-sidebar-width: 15rem;
   --settings-nav-width: 13rem;
 }
 
+/* ── 深色（跟随系统） ───────────────────────────────────────────── */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #0f172a;
-    --color-bg-elevated: #111827;
-    --color-bg-sunken: #162033;
-    --color-bg-subtle: #0b1220;
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --color-primary: #74a9ff;
+    --color-primary-hover: #9fc2ff;
+    --color-primary-active: #5f9cff;
+    --color-primary-soft: rgba(116, 169, 255, 0.14);
+    --color-primary-bg: rgba(116, 169, 255, 0.14);
+    --color-primary-border: rgba(116, 169, 255, 0.3);
+
+    --color-bg: #0b1220;
+    --color-bg-elevated: #101a2d;
+    --color-bg-sunken: #13233c;
+    --color-bg-subtle: #0e1626;
     --color-bg-overlay: rgba(2, 6, 23, 0.72);
-    --color-surface-panel: linear-gradient(180deg, #111827 0%, #0f172a 100%);
-    --color-glass-bg: rgba(17, 24, 39, 0.85);
-    --color-glass-bg-strong: rgba(17, 24, 39, 0.7);
+    --color-surface-panel: #101a2d;
+    --color-glass-bg: rgba(16, 26, 45, 0.86);
+    --color-glass-bg-strong: rgba(16, 26, 45, 0.72);
     --color-glass-border: rgba(148, 163, 184, 0.16);
-    --color-primary-bg: rgba(255, 107, 53, 0.12);
 
-    --color-text: #f3f4f6;
-    --color-text-secondary: #cbd5e1;
-    --color-text-muted: #94a3b8;
-    --color-text-inverse: #111827;
+    --color-text: #e5eefc;
+    --color-text-secondary: #9fb0ca;
+    --color-text-muted: #8e9eb7;
+    --color-text-inverse: #0b1220;
 
-    --color-border: #253046;
-    --color-border-soft: #1e293b;
-    --color-border-strong: #334155;
-    --color-focus: #60a5fa;
+    --color-border: rgba(148, 163, 184, 0.18);
+    --color-border-soft: rgba(148, 163, 184, 0.12);
+    --color-border-strong: rgba(148, 163, 184, 0.36);
+    --color-focus: #74a9ff;
 
-    --color-primary-soft: rgba(255, 107, 53, 0.12);
-    --color-accent-soft: rgba(255, 193, 7, 0.12);
-
-    --color-success-bg: rgba(22, 163, 74, 0.14);
-    --color-warning-bg: rgba(217, 119, 6, 0.14);
-    --color-error-bg: rgba(220, 38, 38, 0.14);
-    --color-info-bg: rgba(37, 99, 235, 0.14);
+    --color-success: #4ade80;
+    --color-success-bg: rgba(74, 222, 128, 0.12);
+    --color-success-border: rgba(74, 222, 128, 0.3);
+    --color-warning: #fbbf24;
+    --color-warning-bg: rgba(251, 191, 36, 0.12);
+    --color-warning-border: rgba(251, 191, 36, 0.3);
+    --color-error: #f87171;
+    --color-error-hover: #ef4444;
+    --color-error-bg: rgba(248, 113, 113, 0.12);
+    --color-error-border: rgba(248, 113, 113, 0.3);
+    --color-info: #74a9ff;
+    --color-info-bg: rgba(116, 169, 255, 0.12);
+    --color-info-border: rgba(116, 169, 255, 0.3);
 
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.24);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.28);
-    --shadow-md: 0 14px 34px rgba(0, 0, 0, 0.32);
-    --shadow-lg: 0 24px 50px rgba(0, 0, 0, 0.38);
-    --shadow-xl: 0 32px 64px rgba(0, 0, 0, 0.42);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.36);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.42);
+    --shadow-xl: 0 20px 45px rgba(0, 0, 0, 0.48);
 
-    --auth-bg: #0f172a;
-    --auth-grid-line: rgba(148, 163, 184, 0.07);
+    --auth-bg: #0b1220;
+    --grid-line: rgba(148, 163, 184, 0.06);
     --auth-scrim: rgba(2, 6, 23, 0.45);
+    --art-base: #1b2b47;
+    --art-mid: #27466f;
+    --art-deep: #3772b5;
+    --art-face: #21334f;
+    --art-side: #1a2941;
+    --art-left: #223554;
+    --art-line: #3c5c88;
+    --art-rail: #2a3f60;
+  }
+}
+
+/* ── 深色（用户手动切换；与上面一段保持同步） ───────────────────── */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-primary: #74a9ff;
+  --color-primary-hover: #9fc2ff;
+  --color-primary-active: #5f9cff;
+  --color-primary-soft: rgba(116, 169, 255, 0.14);
+  --color-primary-bg: rgba(116, 169, 255, 0.14);
+  --color-primary-border: rgba(116, 169, 255, 0.3);
+
+  --color-bg: #0b1220;
+  --color-bg-elevated: #101a2d;
+  --color-bg-sunken: #13233c;
+  --color-bg-subtle: #0e1626;
+  --color-bg-overlay: rgba(2, 6, 23, 0.72);
+  --color-surface-panel: #101a2d;
+  --color-glass-bg: rgba(16, 26, 45, 0.86);
+  --color-glass-bg-strong: rgba(16, 26, 45, 0.72);
+  --color-glass-border: rgba(148, 163, 184, 0.16);
+
+  --color-text: #e5eefc;
+  --color-text-secondary: #9fb0ca;
+  --color-text-muted: #8e9eb7;
+  --color-text-inverse: #0b1220;
+
+  --color-border: rgba(148, 163, 184, 0.18);
+  --color-border-soft: rgba(148, 163, 184, 0.12);
+  --color-border-strong: rgba(148, 163, 184, 0.36);
+  --color-focus: #74a9ff;
+
+  --color-success: #4ade80;
+  --color-success-bg: rgba(74, 222, 128, 0.12);
+  --color-success-border: rgba(74, 222, 128, 0.3);
+  --color-warning: #fbbf24;
+  --color-warning-bg: rgba(251, 191, 36, 0.12);
+  --color-warning-border: rgba(251, 191, 36, 0.3);
+  --color-error: #f87171;
+  --color-error-hover: #ef4444;
+  --color-error-bg: rgba(248, 113, 113, 0.12);
+  --color-error-border: rgba(248, 113, 113, 0.3);
+  --color-info: #74a9ff;
+  --color-info-bg: rgba(116, 169, 255, 0.12);
+  --color-info-border: rgba(116, 169, 255, 0.3);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.42);
+  --shadow-xl: 0 20px 45px rgba(0, 0, 0, 0.48);
+
+  --auth-bg: #0b1220;
+  --grid-line: rgba(148, 163, 184, 0.06);
+  --auth-scrim: rgba(2, 6, 23, 0.45);
+    --art-base: #1b2b47;
+    --art-mid: #27466f;
+    --art-deep: #3772b5;
+    --art-face: #21334f;
+    --art-side: #1a2941;
+    --art-left: #223554;
+    --art-line: #3c5c88;
+    --art-rail: #2a3f60;
+}
+
+/* 外壳 gutter 随屏收窄：移动端页头/内容同一条线，不留 24px 空档 */
+@media (max-width: 640px) {
+  :root {
+    --shell-gutter: 1rem;
   }
 }
 

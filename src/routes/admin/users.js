@@ -140,7 +140,8 @@ router.get('/', requireAdmin, requireAdminPermission('users.read'), async (req, 
     // MySQL prepared statements have issues with LIMIT/OFFSET parameters
     // Values are validated above to be positive integers within bounds
     const offset = (effectivePage - 1) * effectiveLimit;
-    query += ` LIMIT ${effectiveLimit} OFFSET ${offset}`;
+    query += ' LIMIT ? OFFSET ?';
+    params.push(effectiveLimit, offset);
 
     const [users] = await pool.query(query, params);
 

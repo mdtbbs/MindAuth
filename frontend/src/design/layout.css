@@ -123,9 +123,9 @@
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: 0.75rem;
-  background: linear-gradient(135deg, var(--color-primary) 0%, #ff8b61 100%);
-  color: var(--color-text-inverse);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-active) 100%);
+  color: #ffffff;
   box-shadow: var(--shadow-xs);
 }
 
@@ -140,33 +140,20 @@
   min-height: 100dvh;
   background-color: var(--auth-bg);
   background-image:
-    linear-gradient(var(--auth-grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--auth-grid-line) 1px, transparent 1px);
-  background-size: 24px 24px;
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
 }
 
 .auth-shell {
   min-height: 100dvh;
-  color-scheme: light;
-  --color-primary: #2f80ed;
-  --color-primary-hover: #2563eb;
-  --color-primary-active: #1d4ed8;
-  --color-primary-soft: #eaf2ff;
-  --color-primary-bg: #eaf2ff;
-  --color-text: #172033;
-  --color-text-secondary: #596579;
-  --color-text-muted: #758197;
-  --color-text-inverse: #ffffff;
-  --color-bg: #f2f4f7;
-  --color-bg-elevated: #ffffff;
-  --color-bg-subtle: #f8fafc;
-  --color-border: #d9e0e9;
-  --color-border-soft: #e7ebf0;
-  --color-border-strong: #b8c4d3;
-  --color-info: #2f80ed;
-  --color-info-bg: #eaf3ff;
-  background: #f2f4f7;
-  color: #172033;
+  background-color: var(--color-bg-subtle);
+  /* 与授权页右侧视觉面板同一套方格网格：整页打底，留白处才可见 */
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  color: var(--color-text);
   display: flex;
   flex-direction: column;
 }
@@ -176,15 +163,16 @@
   flex: 0 0 3.5rem;
   display: flex;
   align-items: center;
-  background: #ffffff;
-  border-bottom: 1px solid #e4e8ee;
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .auth-shell__header-inner {
   width: 100%;
-  max-width: 76rem;
+  /* 盒宽 = 内容宽 + 两侧 gutter，使品牌行与下方内容/页脚共用同一条左基线 */
+  max-width: calc(var(--max-width-auth) + 2 * var(--shell-gutter));
   margin-inline: auto;
-  padding-inline: 1.5rem;
+  padding-inline: var(--shell-gutter);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -195,7 +183,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.65rem;
-  color: #172033;
+  color: var(--color-text);
   font-size: 0.95rem;
   text-decoration: none;
 }
@@ -215,54 +203,54 @@
 .auth-brand__divider {
   width: 1px;
   height: 1.15rem;
-  background: #cbd3de;
+  background: var(--color-border-strong);
   margin-inline: 0.2rem;
 }
 
 .auth-brand__section {
-  color: #4b5668;
+  color: var(--color-text-secondary);
   font-weight: 450;
 }
 
 .auth-shell__back {
-  color: #566276;
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
 }
 
 .auth-shell__back:hover {
-  color: #2f80ed;
+  color: var(--color-primary);
 }
 
 .mindauth-locale-switcher {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  color: #596579;
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
 }
 
 .mindauth-locale-switcher select {
   min-height: 2rem;
   padding: 0.2rem 1.5rem 0.2rem 0.45rem;
-  border: 1px solid #d9e0e9;
-  border-radius: 3px;
-  background: #fff;
-  color: #172033;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
   font: inherit;
 }
 
 .auth-shell__notice {
-  width: min(calc(100% - 3rem), 76rem);
+  width: min(calc(100% - 2 * var(--shell-gutter)), var(--max-width-auth));
   min-height: 2.75rem;
   margin: 1.25rem auto 0;
   padding: 0.65rem 0.9rem;
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  color: #44566f;
-  background: #eaf3ff;
-  border: 1px solid #c9defa;
-  border-radius: 3px;
+  color: var(--color-text-secondary);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-sm);
   font-size: 0.78rem;
 }
 
@@ -272,9 +260,9 @@
   flex: 0 0 1rem;
   display: inline-grid;
   place-items: center;
-  border: 1px solid #5b91d7;
-  border-radius: 50%;
-  color: #2f80ed;
+  border: 1px solid var(--color-primary);
+  border-radius: 0;
+  color: var(--color-primary);
   font-size: 0.68rem;
   font-weight: 650;
 }
@@ -287,7 +275,7 @@
 }
 
 .auth-shell__content {
-  width: min(100%, 68rem);
+  width: min(100%, var(--max-width-auth));
   margin-inline: auto;
   display: grid;
   grid-template-columns: minmax(20rem, 27rem) minmax(24rem, 1fr);
@@ -302,10 +290,10 @@
 .auth-shell__panel .card {
   width: 100%;
   padding: 0 1.75rem 1.6rem;
-  background: #ffffff;
-  border: 1px solid #e0e5ec;
-  border-radius: 3px;
-  box-shadow: 0 2px 8px rgba(31, 45, 61, 0.05);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .auth-panel__footer {
@@ -317,14 +305,14 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0.75rem;
-  background: #f6f8fb;
-  border-bottom: 1px solid #e7ebf0;
+  background: var(--color-bg-subtle);
+  border-bottom: 1px solid var(--color-border-soft);
   font-size: 0.76rem;
-  color: #596579;
+  color: var(--color-text-secondary);
 }
 
 .auth-panel__footer a {
-  color: #2f80ed;
+  color: var(--color-primary);
 }
 
 .auth-panel__header {
@@ -337,13 +325,13 @@
   font-size: 1.25rem;
   font-weight: 620;
   line-height: 1.35;
-  color: #172033;
+  color: var(--color-text);
 }
 
 .auth-panel__description {
   font-size: 0.8rem;
   line-height: 1.55;
-  color: #68758a;
+  color: var(--color-text-secondary);
 }
 
 .auth-panel__form {
@@ -359,31 +347,53 @@
   flex-direction: column;
   justify-content: flex-start;
   padding: 2rem 2.1rem;
-  background: #eaf2fc;
-  border: 1px solid #e0e8f2;
+  background: linear-gradient(150deg, var(--color-primary-soft) 0%, var(--color-bg-elevated) 62%);
+  border: 1px solid var(--color-border);
+}
+
+/* 面板内部再叠一层更淡的网格，和整页打底呼应（授权页背景的由来） */
+.auth-shell__promo::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  content: '';
+  pointer-events: none;
+}
+
+/* 顶部一条主色细线：面板的「标题栏」暗示，与卡片 3px 左条同源 */
+.auth-shell__promo::after {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-primary) 0%, transparent 72%);
+  content: '';
+  pointer-events: none;
 }
 
 .auth-shell__promo--club {
   min-height: 19rem;
   justify-content: center;
-  background: #f5f7fa;
-  border-color: #e1e6ed;
+  background: var(--color-bg-sunken);
+  border-color: var(--color-border);
 }
 
 .auth-shell__promo--club .auth-promo__eyebrow {
-  color: #526071;
+  color: var(--color-text-secondary);
 }
 
 .auth-shell__promo--club h1 {
-  color: #172033;
+  color: var(--color-text);
 }
 
 .auth-shell__promo--club .auth-promo__description {
-  color: #596579;
+  color: var(--color-text-secondary);
 }
 
 .auth-shell__promo--custom-bg {
-  background: #eaf2fc;
+  background: var(--color-primary-soft);
 }
 
 .auth-shell__promo-background {
@@ -402,7 +412,7 @@
 
 .auth-promo__eyebrow {
   margin: 0 0 0.65rem;
-  color: #3978c5;
+  color: var(--color-primary);
   font-size: 0.74rem;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -410,7 +420,7 @@
 
 .auth-promo__copy h1 {
   margin: 0;
-  color: #172033;
+  color: var(--color-text);
   font-size: clamp(1.5rem, 2.4vw, 2rem);
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -420,7 +430,7 @@
 .auth-promo__description {
   max-width: 25rem;
   margin: 0.7rem 0 0;
-  color: #5b6880;
+  color: var(--color-text-secondary);
   font-size: 0.87rem;
   line-height: 1.65;
 }
@@ -430,7 +440,7 @@
   align-items: center;
   gap: 0.5rem;
   margin-top: 1.2rem;
-  color: #2f80ed;
+  color: var(--color-primary);
   font-size: 0.82rem;
   font-weight: 550;
 }
@@ -444,8 +454,17 @@
   height: auto;
 }
 
+.auth-promo__link {
+  text-decoration: none;
+}
+
+.auth-promo__link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .site-legal-footer {
-  width: min(calc(100% - 3rem), 76rem);
+  width: min(calc(100% - 2 * var(--shell-gutter)), var(--max-width-auth));
   margin: 0 auto;
   padding: 0.9rem 0 1.1rem;
   border-top: 1px solid var(--color-border-soft);
@@ -489,7 +508,7 @@
 .auth-method-tabs {
   display: flex;
   gap: 1.5rem;
-  border-bottom: 1px solid #e2e7ee;
+  border-bottom: 1px solid var(--color-border);
   margin-bottom: 1.25rem;
 }
 
@@ -500,18 +519,18 @@
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: #677488;
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
 }
 
 .auth-method-tab[aria-selected="true"] {
-  border-bottom-color: #2f80ed;
-  color: #2f80ed;
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
   font-weight: 550;
 }
 
 .auth-method-tab:focus-visible {
-  outline: 2px solid #2f80ed;
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
@@ -530,7 +549,7 @@
 
 .auth-method-panel--qq p {
   margin: 0;
-  color: #596579;
+  color: var(--color-text-secondary);
   font-size: 0.84rem;
 }
 
@@ -538,38 +557,13 @@
   margin-bottom: 1rem;
 }
 
+/* 账户中心外壳：调色板继承 design/tokens.css（含深色），此处不再自定义颜色。 */
 .account-shell {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  color-scheme: light;
-  --color-primary: #2f80ed;
-  --color-primary-hover: #2563eb;
-  --color-primary-active: #1d4ed8;
-  --color-primary-soft: #eaf2ff;
-  --color-primary-bg: #eaf2ff;
-  --color-text: #172033;
-  --color-text-secondary: #596579;
-  --color-text-muted: #758197;
-  --color-text-inverse: #ffffff;
-  --color-bg: #f2f4f7;
-  --color-bg-elevated: #ffffff;
-  --color-bg-subtle: #f8fafc;
-  --color-bg-sunken: #edf1f6;
-  --color-surface-panel: #ffffff;
-  --color-border: #d9e0e9;
-  --color-border-soft: #e7ebf0;
-  --color-border-strong: #b8c4d3;
-  --color-info: #2f80ed;
-  --color-info-bg: #eaf3ff;
-  --color-success-bg: #f0fdf4;
-  --color-warning-bg: #fff7ed;
-  --color-error-bg: #fef2f2;
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0 10px 30px rgba(15, 23, 42, 0.08);
-  background: #f2f4f7;
-  color: #172033;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 .account-shell__header {
@@ -583,9 +577,8 @@
 
 .account-shell__header-inner {
   width: 100%;
-  max-width: var(--max-width-account);
-  margin-inline: auto;
-  padding: 0 var(--space-4);
+  /* 不居中：品牌与左侧栏、内容区共用一个左基线（宽屏下才不会整体右移） */
+  padding: 0 var(--shell-gutter);
   min-height: var(--header-height);
   display: flex;
   align-items: center;
@@ -615,17 +608,17 @@
 }
 
 .account-shell .brand-mark__logo {
-  border-radius: 3px;
-  background: #2f80ed;
-  color: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #ffffff;
   box-shadow: none;
 }
 
 .account-shell__layout {
   display: grid;
-  grid-template-columns: minmax(13rem, var(--account-sidebar-width)) minmax(0, 1fr);
-  gap: var(--space-6);
-  align-items: start;
+  grid-template-columns: var(--account-sidebar-width) minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
 }
 
 .account-shell__sidebar {
@@ -1315,7 +1308,6 @@
 
   .auth-shell__panel .card {
     padding: 0 1.25rem 1.25rem;
-    border-radius: 3px;
     box-shadow: none;
   }
 

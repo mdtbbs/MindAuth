@@ -193,7 +193,7 @@ UserInfo 端点（OIDC Core §5.3）。**认证**：`Authorization: Bearer {acce
 | `profile` | `name` `id` `username` `avatar_url` `phone_verified` `phone_verified_at` `phone_masked` `ban_status` `is_muted` `updated_at`（Unix 秒），另有 `custom_fields`（仅公开自定义字段有值时出现） |
 | `email` | `email` `email_verified` |
 
-> 当前 `updated_at` 的实现值取自账号的 `created_at`，不是最近修改时间。第三方不要将其解释为资料更新时间；如需可靠更新时间，应忽略该 claim，等待契约修正。
+> `updated_at` 现在取自 `users.updated_at`，表示账号资料的最近修改时间（迁移 `023_user_profile_updated_at.sql` 之前建的老数据在迁移时回填为 `created_at`）。
 
 错误：缺失/格式错误的 Authorization 头、token 无效或过期、用户不存在 → 401 `invalid_token`。
 

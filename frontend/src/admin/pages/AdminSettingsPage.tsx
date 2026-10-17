@@ -133,7 +133,7 @@ function AppearanceSection() {
           backgroundColor: 'var(--auth-bg)',
           backgroundImage: backgroundUrl
             ? `url(${backgroundUrl})`
-            : 'linear-gradient(var(--auth-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--auth-grid-line) 1px, transparent 1px)',
+            : 'linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px)',
           backgroundSize: backgroundUrl ? 'cover' : '24px 24px',
           backgroundPosition: backgroundUrl ? 'center' : undefined,
         }}

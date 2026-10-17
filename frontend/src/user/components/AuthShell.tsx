@@ -5,6 +5,7 @@ import api from '@/api/client';
 import { LegalFooter } from '@/user/components/LegalFooter';
 import { useSearchParams } from 'react-router-dom';
 import { LocaleSwitcher, useI18n } from '@/i18n/I18nProvider';
+import { ThemeToggle } from '@/shared/ThemeToggle';
 
 interface AuthShellProps {
   title: string;
@@ -61,7 +62,7 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
             <span className="auth-brand__divider" aria-hidden="true" />
             <span className="auth-brand__section">{t('brand.account')}</span>
           </Link>
-          <div className="cluster"><LocaleSwitcher /><a className="auth-shell__back" href={backHref}>{t('brand.back')}</a></div>
+          <div className="cluster"><LocaleSwitcher /><ThemeToggle label={t('shell.themeToggle')} /><a className="auth-shell__back" href={backHref}>{t('brand.back')}</a></div>
         </div>
       </header>
 
@@ -92,19 +93,19 @@ export function AuthShell({ title, description, footer, children }: AuthShellPro
               <a className="auth-promo__link" href="https://mdtbbs.cn/">{t('brand.visit')} <span aria-hidden="true">→</span></a>
             </div>
             <svg className="auth-promo__art" viewBox="0 0 560 300" role="img" aria-label={t('brand.artAlt')}>
-              <path d="M30 236 225 126l301 174-196 0Z" fill="#d6e8ff" />
-              <path d="m87 236 138-80 190 110-140 0Z" fill="#9fc7fb" />
-              <path d="m144 236 81-47 109 63-82 0Z" fill="#5b9bea" />
-              <path d="m87 177 62-36 65 38-62 37Z" fill="#fff" stroke="#90baf0" strokeWidth="2" />
-              <path d="m149 141 62 37v58l-62-37Z" fill="#dcecff" stroke="#90baf0" strokeWidth="2" />
-              <path d="m87 177 62 37v58l-62-36Z" fill="#b6d5fc" stroke="#90baf0" strokeWidth="2" />
-              <path d="m250 119 57-33 60 35-58 34Z" fill="#fff" stroke="#90baf0" strokeWidth="2" />
-              <path d="m307 86 60 35v54l-60-35Z" fill="#dcecff" stroke="#90baf0" strokeWidth="2" />
-              <path d="m250 119 57 34v54l-57-34Z" fill="#b6d5fc" stroke="#90baf0" strokeWidth="2" />
-              <path d="m378 189 35-20 39 22-35 21Z" fill="#fff" stroke="#90baf0" strokeWidth="2" />
-              <path d="m413 169 39 22v38l-39-22Z" fill="#dcecff" stroke="#90baf0" strokeWidth="2" />
-              <path d="m378 189 35 21v38l-35-21Z" fill="#b6d5fc" stroke="#90baf0" strokeWidth="2" />
-              <path d="m40 250 185-106m-139 125 189-108m-142 127 189-109" fill="none" stroke="#fff" strokeWidth="3" opacity=".8" />
+              <path d="M30 236 225 126l301 174-196 0Z" fill="var(--art-base)" />
+              <path d="m87 236 138-80 190 110-140 0Z" fill="var(--art-mid)" />
+              <path d="m144 236 81-47 109 63-82 0Z" fill="var(--art-deep)" />
+              <path d="m87 177 62-36 65 38-62 37Z" fill="var(--art-face)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m149 141 62 37v58l-62-37Z" fill="var(--art-side)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m87 177 62 37v58l-62-36Z" fill="var(--art-left)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m250 119 57-33 60 35-58 34Z" fill="var(--art-face)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m307 86 60 35v54l-60-35Z" fill="var(--art-side)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m250 119 57 34v54l-57-34Z" fill="var(--art-left)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m378 189 35-20 39 22-35 21Z" fill="var(--art-face)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m413 169 39 22v38l-39-22Z" fill="var(--art-side)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m378 189 35 21v38l-35-21Z" fill="var(--art-left)" stroke="var(--art-line)" strokeWidth="2" />
+              <path d="m40 250 185-106m-139 125 189-108m-142 127 189-109" fill="none" stroke="var(--art-rail)" strokeWidth="3" opacity=".8" />
             </svg>
           </aside>}
         </div>

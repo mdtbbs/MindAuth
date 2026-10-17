@@ -373,7 +373,8 @@ test.describe('Dashboard日志和授权', () => {
 
     await page.emulateMedia({ colorScheme: 'dark' });
     const darkShellColor = await page.locator('.account-shell').evaluate((element) => getComputedStyle(element).backgroundColor);
-    expect(darkShellColor).toBe('rgb(17, 21, 27)');
+    // 深色页面底色取自 design/tokens.css 的 --color-bg（对齐 MDTBBS 论坛 #0b1220）
+    expect(darkShellColor).toBe('rgb(11, 18, 32)');
     await page.emulateMedia({ colorScheme: 'light' });
 
     await page.setViewportSize({ width: 390, height: 844 });

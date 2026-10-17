@@ -19,6 +19,8 @@
 - 面向公网的 Web callback 使用 HTTPS；内网服务或本机开发回调可使用 HTTP。URI 必须完全匹配注册值。
 - 原生应用可登记自定义 scheme，例如 `com.example.launcher:/oauth2redirect`；必须用应用专属 scheme，不要使用 `http`、`https`、`javascript`、`file`、`intent` 等保留协议。
 - 桌面 loopback 可登记 `http://127.0.0.1:0/oauth/callback`、`http://[::1]:0/oauth/callback` 或 `http://localhost:0/oauth/callback`。运行时绑定随机端口后，request URI 必须保持同一主机、path 和 query。其他 LAN/私网回调也可登记；它们必须与请求中的 URI 完全一致，只有 loopback 注册端口 `0` 支持运行时随机端口匹配。
+
+> ⚠️ **注册端口 `0` 的代价**：端口 `0` 意味着「该主机上任意运行时端口」都算匹配（RFC 8252 §7.3 允许的做法，也是桌面客户端绑定临时端口的唯一可行方案）。后果是同一台机器上以同一用户身份运行的其他进程可以抢占回调端口来截获授权码。PKCE（S256）保证截获的 code 无法被兑换 —— 除非该进程同时拿到了 `code_verifier`，而 verifier 只存在于发起登录的进程内存里。因此：**注册 port `0` 的客户端必须强制 PKCE，且绝不把 verifier 写入磁盘或日志。**
 - callback 不允许 userinfo 或 fragment。不得使用 wildcard。
 
 ## PKCE 登录

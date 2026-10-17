@@ -25,6 +25,7 @@ docs/
 ├── architecture/               架构设计（总览 / 后端模块 / 前端 / 数据模型 / 安全）
 ├── api/                        API 参考（通用约定 + 按业务域分组的端点文档）
 ├── operations/                 部署、配置参考、运维手册
+├── research/                   调研报告（结论性材料，非实现契约）
 ├── third-party-integration.md  对外：第三方系统接入文档
 ├── public-client-pkce.md       对外：Public Client PKCE 接入指南
 ├── DEVICE_AUTH.md              对外：RFC 8628 设备授权与轮询接口

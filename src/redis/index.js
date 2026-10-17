@@ -153,18 +153,47 @@ function createMemoryRedisClient() {
         },
       };
     },
+    // Lua is not available in-process, so `eval` dispatches on the script
+    // text to emulate the *exact* scripts this codebase runs. Emulating one
+    // fixed semantics for every script silently corrupted unrelated callers:
+    // the device-code script was executed as if it were the rate-limit
+    // counter script, INCR-ing a JSON payload into the string "NaN".
     async eval(script, options) {
+      const source = String(script || '');
       const key = options?.keys?.[0];
-      const max = Number(options?.arguments?.[0]);
-      const ttlSeconds = Number(options?.arguments?.[1]);
-      if (!key) return 0;
-      const count = await this.incr(key);
-      if (count === 1) await this.expire(key, ttlSeconds);
-      if (count > max) {
-        const ttl = await this.ttl(key);
-        return ttl < 1 ? ttlSeconds : ttl;
+      const args = options?.arguments || [];
+      if (!key) return null;
+
+      // Rate-limit counter: INCR + EXPIRE, returns wait seconds (0 = allowed).
+      if (/INCR/i.test(source)) {
+        const max = Number(args[0]);
+        const ttlSeconds = Number(args[1]);
+        const count = await this.incr(key);
+        if (count === 1) await this.expire(key, ttlSeconds);
+        if (count > max) {
+          const ttl = await this.ttl(key);
+          return ttl < 1 ? ttlSeconds : ttl;
+        }
+        return 0;
       }
-      return 0;
+
+      // Device-code consume: GET + validate + DEL, returns the payload.
+      if (/cjson\.decode/i.test(source)) {
+        const raw = await this.get(key);
+        if (raw === null) return null;
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          return null;
+        }
+        if (data.client_id !== args[0] || data.approved !== true) return null;
+        await this.del(key);
+        return raw;
+      }
+
+      // Unknown script: fail loudly instead of corrupting data.
+      throw new Error('memory Redis cannot emulate this Lua script; run against a real Redis');
     },
     on() {},
   };

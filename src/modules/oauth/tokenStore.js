@@ -66,8 +66,15 @@ async function consumeAuthCode(code) {
 async function storeAccessToken(token, data, ttlSeconds) {
   const tokenHash = hashToken(token);
   await client.setEx(`accesstoken:${tokenHash}`, ttlSeconds, JSON.stringify(data));
-  // Index for targeted invalidation (avoids SCAN)
-  await client.sAdd(`accesstokens_by_userclient:${data.user_id}:${data.client_id}`, tokenHash);
+  // Index for targeted invalidation (avoids SCAN). TTL outlives the token
+  // itself so revocation still works, but bounds the set when the account
+  // stops issuing tokens.
+  const indexKey = `accesstokens_by_userclient:${data.user_id}:${data.client_id}`;
+  await client.sAdd(indexKey, tokenHash);
+  try {
+    // Best effort: test doubles may not implement EXPIRE.
+    await client.expire(indexKey, ttlSeconds + 3600);
+  } catch { /* non-fatal */ }
   if (data.native_session_id) {
     const index = `accesstokens_by_native_session:${data.native_session_id}`;
     await client.sAdd(index, tokenHash);

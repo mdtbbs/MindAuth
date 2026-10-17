@@ -100,7 +100,11 @@ const config = {
       windowMs: 5 * 60 * 1000,
       clients: {
         default: { maxAttempts: 5 },
-        mod: { maxAttempts: 20 }  // Mod 客户端（BackupSave, LanLink）更宽松
+        // Looser budget for official first-party clients (Mod / launcher).
+        // Granted only to callers presenting CLIENT_AWARE_RATE_LIMIT_KEY in
+        // `X-Client-Key` — the headers alone must never widen the budget,
+        // otherwise a single extra header multiplies brute-force attempts.
+        mod: { maxAttempts: 20 }
       }
     },
     register: { maxAttempts: 5, windowMs: 60 * 60 * 1000, keyPrefix: 'ratelimit:register' },   // 5 per hour

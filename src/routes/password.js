@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 const { pool } = require('../db');
 const { client } = require('../redis');
 const { generateToken, hashToken } = require('../utils/token');
-const { isValidPassword, isValidEmail, getPasswordValidationError } = require('../utils/validation');
+const { isValidEmail } = require('../utils/validation');
 const { sendPasswordResetEmail } = require('../utils/email');
 const { resolveMailLocale } = require('../utils/emailTemplates');
 const { createRateLimiter } = require('../middleware/rateLimit');
@@ -12,6 +12,7 @@ const { logUserAudit } = require('../utils/userAudit');
 const { getClientIp } = require('../utils/request');
 const sessionManager = require('../modules/sessions/sessionManager');
 const tokenStore = require('../modules/oauth/tokenStore');
+const registrationPolicy = require('../modules/config/registrationPolicy');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const RESET_TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -63,8 +64,12 @@ router.post('/reset', resetExecLimiter, async (req, res) => {
     return res.status(400).json({ success: false, message: '缺少重置令牌' });
   }
 
-  if (!new_password || !isValidPassword(new_password)) {
-    return res.status(400).json({ success: false, message: getPasswordValidationError(new_password) || '密码不符合要求' });
+  if (!new_password) {
+    return res.status(400).json({ success: false, message: '密码不能为空' });
+  }
+  const passwordError = await registrationPolicy.validatePassword(new_password);
+  if (passwordError) {
+    return res.status(400).json({ success: false, message: passwordError });
   }
 
   try {

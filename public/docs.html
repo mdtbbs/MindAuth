@@ -5,37 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OAuth 2.0 接入文档 - MindAuth</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css">
-  <style>
-    .docs-container { max-width: 800px; margin: 0 auto; padding: 3rem 1.5rem; }
-    .docs-header { margin-bottom: 2rem; }
-    .docs-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
-    .docs-subtitle { color: var(--text-muted); font-size: 0.8125rem; }
-    .docs-section { margin-bottom: 2rem; }
-    .docs-section-title { font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); }
-    .docs-section-desc { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 1rem; }
-    .endpoint-card { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
-    .endpoint-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
-    .endpoint-method { font-size: 0.6875rem; font-weight: 600; padding: 0.25rem 0.5rem; background: var(--success); color: #fff; border-radius: 4px; }
-    .endpoint-method.post { background: var(--warning); color: #18181b; }
-    .endpoint-url { font-family: 'Geist Mono', monospace; font-size: 0.8125rem; color: var(--text); }
-    .params-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
-    .params-table th { text-align: left; padding: 0.5rem; color: var(--text-muted); border-bottom: 1px solid var(--border); font-weight: 500; }
-    .params-table td { padding: 0.5rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-    .params-table td:first-child { font-family: 'Geist Mono', monospace; color: var(--text); }
-    .code-block { background: var(--bg-muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; overflow-x: auto; }
-    .code-block pre { font-family: 'Geist Mono', monospace; font-size: 0.75rem; color: var(--text-secondary); white-space: pre-wrap; margin: 0; }
-    .code-lang { font-size: 0.625rem; color: var(--text-muted); margin-bottom: 0.5rem; }
-    .response-example { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; }
-    .highlight { color: var(--warning); }
-    .note { font-size: 0.75rem; color: var(--text-muted); padding: 0.75rem; background: var(--bg-muted); border-radius: var(--radius); }
-    .note p { margin: 0.25rem 0; }
-    .flow-step { padding: 0.5rem 0; font-size: 0.75rem; color: var(--text-secondary); }
-  </style>
+  <link rel="stylesheet" href="/standalone.css">
+  <script src="/standalone.js"></script>
+    <script>
+      // 与用户中心共用 localStorage 键 `theme`（同 MDTBBS 论坛），避免深色用户白屏闪烁
+      (function () {
+        try {
+          var theme = localStorage.getItem('theme');
+          if (theme === 'dark' || theme === 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+        } catch (e) {}
+      })();
+    </script>
 </head>
 <body>
   <div class="bg-pattern"></div>
-  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">
+  <button class="theme-toggle" id="theme-toggle" title="切换主题">
     <span id="theme-icon">☀</span>
   </button>
 
@@ -218,17 +204,6 @@ data = response.json()
   </div>
 
   <script>
-    function toggleTheme() {
-      const html = document.documentElement;
-      const current = html.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', next);
-      document.getElementById('theme-icon').textContent = next === 'dark' ? '☀' : '☾';
-      localStorage.setItem('theme', next);
-    }
-    const saved = localStorage.getItem('theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', saved);
-    document.getElementById('theme-icon').textContent = saved === 'dark' ? '☀' : '☾';
   </script>
 </body>
 </html>

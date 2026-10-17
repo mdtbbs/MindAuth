@@ -33,6 +33,7 @@ Detailed Chinese developer docs live in `docs/`. This file stays the compact aut
 | `docs/api/{auth,oauth,account,admin}.md` | Endpoint-level reference per domain (params, responses, errors) |
 | `docs/operations/{deployment,configuration,runbook}.md` | Deploying, changing env vars/config keys, or handling incidents |
 | `docs/third-party-integration.md` | Changing anything third-party clients depend on (public OAuth contract) |
+| `docs/research/*.md` | Reading research/decision material — conclusions only, not the implementation contract |
 
 ## Commands
 

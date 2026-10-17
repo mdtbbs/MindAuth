@@ -70,7 +70,7 @@ frontend/src/
 
 布局组件（`user/components/`）：
 
-- **AuthShell** — 登录、注册、密码重置等公开认证页共用的浅色双栏外壳：顶部品牌栏与账号服务提示条；左侧承载表单，右侧介绍 MDTBBS 社区，桌面端最大宽度约 `68rem`，窄屏隐藏介绍区并单列显示表单。认证页使用论坛蓝色及简洁边框样式。与账户中心共用 `LegalFooter`，提供 MDTBBS 用户协议、隐私政策、关于与声明页面，以及工信部和公安备案查询链接。管理端可上传的认证页背景图由 `GET /api/public/auth-page-config` 获取（**模块级 Promise 缓存**，SPA 生命周期内仅请求一次，失败静默回退），作为右侧介绍区的低透明度背景。
+- **AuthShell** — 登录、注册、密码重置等公开认证页共用的双栏外壳（**跟随主题**，深浅色均可）：顶部品牌栏（含语言与主题切换）与账号服务提示条；左侧承载表单，右侧介绍 MDTBBS 社区（插画配色走 `--art-*` 令牌，深色下自动压暗），桌面端最大宽度约 `68rem`，窄屏隐藏介绍区并单列显示表单。认证页使用论坛蓝色及简洁边框样式。与账户中心共用 `LegalFooter`，提供 MDTBBS 用户协议、隐私政策、关于与声明页面，以及工信部和公安备案查询链接。管理端可上传的认证页背景图由 `GET /api/public/auth-page-config` 获取（**模块级 Promise 缓存**，SPA 生命周期内仅请求一次，失败静默回退），作为右侧介绍区的低透明度背景。
 - **AccountShell** — 登录后身份中心外壳：顶部品牌栏和用户菜单；桌面端提供分组侧栏，平板收窄侧栏，手机使用带键盘焦点管理的导航抽屉。认证状态加载期间保留 shell。
 - **DashboardPage** — 身份摘要、账户安全状态、最近设备、已授权应用和最多三条通知。各数据模块单独加载、报错并可重试。
 - **ProfilePage** — 头像、横幅、用户名和账户自定义资料。
@@ -160,15 +160,48 @@ OAuth 完成页和 OAuth 错误页同样使用四语文案。完成页仅服务�
 
 `design/` 三个 CSS 文件（两个入口均全量引入，不依赖 monorepo 的 `shared-styles/`）：
 
-- `tokens.css` — 设计变量（`--color-primary: #ff6b35` 等后台品牌色、背景、间距、字体）。圆角令牌为 2/3/4/4/6px（`--radius-full` 保留给圆形头像/徽章）；认证页与用户身份中心在各自 shell 范围内覆盖品牌、表面和主题变量，不影响管理端。
-- `components.css` — 全局 reset + 组件类样式
+- `tokens.css` — **全站唯一调色板**，取值与 MDTBBS.CN MindForum（论坛前端）保持一致：
+  浅色主色 `#2f80ed` / 页面底 `#f5f9ff` / 卡片 `#fff` / 边框 `#d8e2f0`；深色主色 `#74a9ff` /
+  页面底 `#0b1220` / 卡片 `#101a2d` / 浮层 `#13233c`。深色有**两个入口且必须同步**：
+  `@media (prefers-color-scheme: dark)`（跟随系统，未显式选 light 时生效）与
+  `:root[data-theme='dark']`（页面上的手动切换）。
+  用户端、管理端、认证页**都不再各自覆盖品牌色**——要改颜色只改这里。
+
+  **圆角一律 0px（直角）**：论坛前端把核心组件锁成直角
+  （`border-radius:0!important` 覆盖 `.btn/.card/.input/.toast/.theme-toggle` 等），
+  MindAuth 作为同一账号体系也照此执行——`--radius-sm/md/lg/xl/2xl` 全部为 `0`，
+  页面里不要再写死非零圆角。`--radius-full`（9999px）**只留给本来就是圆形的元素**：
+  头像、状态点、加载环、主题按钮的圆形除外（论坛自身也保留圆形头像与圆点）。
+
+  **对齐基线**：`--shell-gutter`（默认 1.5rem，≤640px 收为 1rem）是页头、侧栏、
+  内容区、页脚共用的同一条左基线。侧栏的盒子内缩半格（`calc(var(--shell-gutter)/2)`），
+  使导航文字与页头品牌文字落在同一条竖线上（论坛实测：侧栏盒子 12px / 文字 24px）。
+  改这个令牌即整站对齐，不要在页面里另写 padding。
+
+  **授权页背景语言**：整页方格网格（`--grid-line` + `--grid-size`，浅色
+  `rgba(47,128,237,.06)` / 深色 `rgba(148,163,184,.06)`）是认证页、账户中心内容区、
+  管理端内容区共用的打底；视觉面板（`.auth-shell__promo`）在其上再叠一层网格，
+  并用 `::after` 加一条 3px 主色渐变细线，与卡片/面板的主色左条同源。
+- `components.css` — 全局 reset + 组件类样式（含共用 `.theme-toggle`）
 - `layout.css` — 布局工具类（`.container`、响应式断点等）
 
-## 旧版 vanilla SPA（勿动）
+主题切换（`shared/ThemeToggle.tsx`）与 MDTBBS 论坛共用 `localStorage` 键 `theme`：
+没有显式选择时跟随系统偏好，显式选择后不再被系统设置覆盖。`frontend/index.html`、
+`frontend/admin.html`、`public/*.html` 在 `<head>` 内先用内联脚本落 `data-theme`，避免深色用户白屏闪烁。
 
-`public/js/` 下保留着迁移前的 vanilla JS SPA（`main.js`、`admin.js`、`router.js`、`state.js`、`templates.js`、`handlers.js`、`auth.js`、`common.js`、`shared-loader.js`、`utils.js`、`dashboard.js`），**代码未删除但已不参与任何页面**：
+## 独立静态页（public/standalone.*）
 
-- **LEGACY_FILES 白名单隔离**（`src/app.js`）：不再对 `public/` 整体 `express.static`，仅允许 GET 白名单内 4 个文件：`/error.html`、`/oauth-error.html`、`/robots.txt`、`/docs.html`。这防止 `public/index.html` / `public/admin.html` 遮蔽 React 构建产物，也使 `public/js/*` 无法经 HTTP 访问。
+`/error.html`、`/oauth-error.html`、`/docs.html` 不经 Vite 构建，由 Express 直接吐出，
+因此**不能**引用 `frontend/src/design/*.css`，也不能引用已不存在的 `/shared-styles/*.css`
+或 `/style.css`（那些路径只会命中 SPA fallback，返回 HTML，页面等于无样式）。
+这三个页面的样式与主题脚本由 `public/standalone.css` + `public/standalone.js` 自持，
+并在 `src/app.js` 的 `LEGACY_ASSETS` 白名单里放行；改色时需与 `design/tokens.css` 同步。
+
+## 旧版 vanilla SPA（已删除）
+
+迁移前的 vanilla JS SPA（`public/js/*.js`）、`public/index.html`、`public/admin.html` 与 `public/style.css` **已删除** —— 它们不参与任何页面，旧页面引用的 `/style.css` 也已随 `public/style.css` 一起消失。当前 `public/` 只保留白名单静态页与 `standalone.*`：
+
+- **LEGACY_FILES 白名单隔离**（`src/app.js`）：不对 `public/` 整体 `express.static`，仅允许 GET 白名单内 4 个文件：`/error.html`、`/oauth-error.html`、`/robots.txt`、`/docs.html`，外加 `LEGACY_ASSETS` 放行的 `/standalone.css`、`/standalone.js`（见上文「独立静态页」，`public/*.html` 已改引 `standalone.css`）。这防止任何遗留文件遮蔽 React 构建产物。
 - **防回归测试**：`tests/specs/build/no-legacy-deps.spec.js`（Playwright）断言用户/管理页面加载期间不请求 `/js/*.js`、`/shared-styles/*`、`/templates/*` 等旧路径，生产 HTML 源码不含旧引用，同时验证白名单文件仍可访问、`/assets/*` 带 1 年 immutable 缓存头。
 - **开发约定**：不得给旧 SPA 新增功能或引用；新功能一律进 `frontend/src/`。
 

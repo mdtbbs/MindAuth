@@ -11,8 +11,8 @@ const verifyLimiter = createRateLimiter({ maxAttempts: 15, windowMs: 5 * 60 * 10
 // GET /challenge/random - Get a random challenge question
 router.get('/random', randomLimiter, async (req, res) => {
   try {
-    const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const result = await challengeManager.getRandomChallenge(csrfToken);
+    const sessionId = challengeManager.resolveSessionId(req, res);
+    const result = await challengeManager.getRandomChallenge(sessionId);
 
     if (!result.challenge_id) {
       return res.json({ success: true, challenge_id: null, question: null, message: '暂无问答题' });
@@ -33,8 +33,8 @@ router.post('/verify', verifyLimiter, async (req, res) => {
       return res.status(400).json({ success: false, code: 'MISSING_PARAMS', message: '缺少参数' });
     }
 
-    const csrfToken = req.cookies.csrf_token || 'anonymous';
-    const result = await challengeManager.verifyChallengeAnswer(csrfToken, challenge_id, challenge_answer);
+    const sessionId = challengeManager.resolveSessionId(req, res);
+    const result = await challengeManager.verifyChallengeAnswer(sessionId, challenge_id, challenge_answer);
 
     if (result.error) {
       const statusMap = {

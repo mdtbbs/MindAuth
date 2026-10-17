@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import api, { ApiError } from '@/api/client';
 import { AccessSummary } from '@/shared/ForumAccess';
 import { useI18n } from '@/i18n/I18nProvider';
+import { ThemeToggle } from '@/shared/ThemeToggle';
 import './OAuthCompletePage.css';
 
 type OAuthCompletion = {
@@ -136,6 +137,7 @@ export function OAuthCompletePage() {
           <span>{t('oauth.complete.brand')}</span>
         </Link>
         <nav className="oauth-complete__header-links" aria-label={t('legal.aria')}>
+          <ThemeToggle label={t('shell.themeToggle')} />
           <a href="https://mdtbbs.cn/about" target="_blank" rel="noopener noreferrer">{t('oauth.complete.help')}</a>
           <a href="https://mdtbbs.cn/privacy" target="_blank" rel="noopener noreferrer">{t('legal.privacy')}</a>
           <a href="https://mdtbbs.cn/terms" target="_blank" rel="noopener noreferrer">{t('legal.terms')}</a>

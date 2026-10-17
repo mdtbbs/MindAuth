@@ -31,6 +31,7 @@ const emailVerificationRoutes = require('./routes/email-verification');
 const accountRoutes = require('./routes/account');
 const smsRoutes = require('./routes/sms');
 const challengeRoutes = require('./routes/challenge');
+const ipBanMatcher = require('./modules/security/ipBanMatcher');
 const sessionsRoutes = require('./routes/sessions');
 const notificationsRoutes = require('./routes/notifications');
 const registerEmailCodeRoutes = require('./routes/registerEmailCode');
@@ -41,6 +42,7 @@ const nativeClientRoutes = require('./routes/nativeClient');
 
 // Middleware
 const { setCsrfCookie, validateCsrf, csrfTokenEndpoint } = require('./middleware/csrf');
+const { isOriginAllowed } = require('./utils/corsOrigin');
 const { ipBanMiddleware } = require('./middleware/ipBan');
 
 /**
@@ -65,24 +67,23 @@ function createApp(deps = {}) {
   const ALLOWED_ORIGINS = config.server.allowedOrigins;
 
   // CORS middleware - allow cross-origin API requests.
-  // Same-origin requests (Origin host === request Host) are always allowed —
-  // browsers attach an Origin header to fetch/crossorigin-asset requests even
-  // same-site, and rejecting those breaks the site itself (asset 500s, CSRF
-  // token fetch failures) whenever the exact origin isn't in ALLOWED_ORIGINS.
+  //
+  // The allow decision is made from server-side configuration ONLY. We must
+  // never compare the request Origin against `req.headers.host`: the Host
+  // header is attacker-controlled on raw requests, so `Host: evil.example`
+  // plus `Origin: https://evil.example` would otherwise earn both
+  // `Access-Control-Allow-Origin: https://evil.example` and
+  // `Access-Control-Allow-Credentials: true` — letting any site read
+  // authenticated API responses. The service's own origin (from BASE_URL) is
+  // always allowed so same-origin fetch() calls (which browsers tag with an
+  // Origin header) keep working regardless of ALLOWED_ORIGINS contents.
   // Unknown origins get a response WITHOUT CORS headers (the browser blocks
   // cross-origin reads) instead of a hard 500.
   app.use(cors((req, callback) => {
-    const origin = req.headers.origin;
-    let allow;
-    if (!origin) {
-      allow = true; // non-browser clients / same-origin navigations
-    } else {
-      let sameOrigin = false;
-      try {
-        sameOrigin = new URL(origin).host === req.headers.host;
-      } catch { /* malformed Origin -> not same-origin */ }
-      allow = sameOrigin || ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*');
-    }
+    const allow = isOriginAllowed(req.headers.origin, {
+      allowedOrigins: ALLOWED_ORIGINS,
+      selfOrigin: config.server.baseUrl,
+    });
     callback(null, {
       origin: allow,
       credentials: true,  // Allow cookies
@@ -129,6 +130,20 @@ function createApp(deps = {}) {
   app.use(express.json());
   app.use(cookieParser());
 
+  // OAuth protocol endpoints are specified over
+  // `application/x-www-form-urlencoded` (RFC 6749 §4, RFC 8628 §3.1). Mount
+  // that parser for exactly those paths so classic clients get a populated
+  // `req.body`; every other endpoint keeps the stricter JSON-only contract.
+  const OAUTH_FORM_PATHS = new Set([
+    '/api/token', '/api/refresh', '/api/revoke', '/api/introspect',
+    '/api/device/code', '/api/device/token',
+  ]);
+  const oauthFormParser = express.urlencoded({ extended: false });
+  app.use((req, res, next) => {
+    if (OAUTH_FORM_PATHS.has(req.path)) return oauthFormParser(req, res, next);
+    next();
+  });
+
   // ── Static assets (before CSRF — static files don't need CSRF) ──────
   //
   // Resolution order:
@@ -153,13 +168,17 @@ function createApp(deps = {}) {
     '/robots.txt',
     '/docs.html',
   ]);
+  // 独立静态页的自有样式/脚本（不经过 Vite 构建，见 public/standalone.css 注释）。
+  const LEGACY_ASSETS = new Set(['/standalone.css', '/standalone.js']);
   app.use((req, res, next) => {
-    if (req.method === 'GET' && LEGACY_FILES.has(req.path)) {
-      const filePath = path.join(PUBLIC_DIR, req.path);
-      res.sendFile(filePath);
-    } else {
-      next();
+    if (req.method !== 'GET') return next();
+    if (LEGACY_FILES.has(req.path)) {
+      return res.sendFile(path.join(PUBLIC_DIR, req.path));
     }
+    if (LEGACY_ASSETS.has(req.path)) {
+      return res.sendFile(path.join(PUBLIC_DIR, req.path), { maxAge: '1h' });
+    }
+    next();
   });
 
   // 2. User uploads — safe cache (1 day), no immutable flag.
@@ -240,6 +259,11 @@ function createApp(deps = {}) {
   app.get('/api/health', async (req, res) => {
     const isProduction = process.env.NODE_ENV === 'production';
 
+    // IP ban enforcement fails open on cache/DB errors by design, which also
+    // means bans silently stop applying. Surface that state here so it can be
+    // alerted on instead of living in a console line.
+    const banEnforcement = ipBanMatcher.getEnforcementStatus();
+
     // In production, return minimal health info
     if (isProduction) {
       let status = 'ok';
@@ -250,7 +274,11 @@ function createApp(deps = {}) {
         status = 'degraded';
         console.error('Health check error:', err.message);
       }
-      return res.status(status === 'ok' ? 200 : 503).json({ status });
+      if (banEnforcement.degraded) status = 'degraded';
+      return res.status(status === 'ok' ? 200 : 503).json({
+        status,
+        ...(banEnforcement.degraded ? { ip_ban_enforcement: 'degraded' } : {}),
+      });
     }
 
     // In development, return detailed health info but hide error details
@@ -261,6 +289,13 @@ function createApp(deps = {}) {
       version: config.server.version,
       services: {}
     };
+
+    if (banEnforcement.degraded) {
+      health.status = 'degraded';
+      health.services.ip_bans = `not enforced since ${banEnforcement.since}: ${banEnforcement.reason}`;
+    } else {
+      health.services.ip_bans = 'enforced';
+    }
 
     // Check MySQL database
     try {
@@ -343,6 +378,12 @@ function createApp(deps = {}) {
 
   // Error handler - handle multer errors specifically
   app.use((err, req, res, next) => {
+    // Malformed JSON body → 400, never 500. body-parser sets
+    // `type: 'entity.parse.failed'` (and status 400) on a syntax error.
+    if (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400 && 'body' in err)) {
+      return res.status(400).json({ success: false, code: 'INVALID_JSON', message: '请求体不是合法的 JSON' });
+    }
+
     // Handle multer file size errors
     if (err.code === 'LIMIT_FILE_SIZE') {
       // Determine which upload limit based on route

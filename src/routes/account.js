@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { pool, transaction } = require('../db');
 const { client } = require('../redis');
-const { isValidPassword, isValidEmail, getPasswordValidationError, getUsernameValidationError } = require('../utils/validation');
+const { isValidEmail, getUsernameValidationError } = require('../utils/validation');
 const { generateToken, hashToken } = require('../utils/token');
 const { sendVerificationEmail } = require('../utils/email');
 const { resolveMailLocale } = require('../utils/emailTemplates');
@@ -14,6 +14,7 @@ const { getClientIp } = require('../utils/request');
 const { getUserAuditLogs, logUserAudit } = require('../utils/userAudit');
 const sessionManager = require('../modules/sessions/sessionManager');
 const emailPolicy = require('../modules/emailPolicy/emailPolicyService');
+const registrationPolicy = require('../modules/config/registrationPolicy');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4001';
 const TOKEN_TTL = 3600; // 1 hour in seconds (Redis TTL)
@@ -48,8 +49,9 @@ router.post('/change-password', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: '旧密码和新密码必填' });
     }
 
-    if (!isValidPassword(new_password)) {
-      return res.status(400).json({ success: false, message: getPasswordValidationError(new_password) || '密码不符合要求' });
+    const passwordError = await registrationPolicy.validatePassword(new_password);
+    if (passwordError) {
+      return res.status(400).json({ success: false, message: passwordError });
     }
 
     // Fetch password_hash separately (not included in req.user for security)
